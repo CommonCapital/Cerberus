@@ -1,0 +1,8 @@
+# .NET build output
+bin/
+obj/
+# Local SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
