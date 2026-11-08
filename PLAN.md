@@ -310,7 +310,7 @@ Control {
 Core entities (EF Core; local SQLite/PG → Azure SQL/PG):
 
 - **User** — identity, credentials (hashed), encrypted model API keys.
-- **Session** (auth) — Better-Auth-style token/session, stored server-side; CLI keeps token in `~/.aegis/auth.json` (baseline already has this pattern).
+- **Session** (auth) — Better-Auth-style token/session, stored server-side; CLI keeps token in `~/.cerberus/auth.json` (baseline already has this pattern).
 - **Engagement** — owner, status, scope (targets, allowed tiers, caps, windows).
 - **Target** — type (repo/host/domain/infra), locator, ownership-verification status + proof.
 - **Job** — agent type, tier, engagement, state, sandbox profile, timing, cancel token.
@@ -324,19 +324,19 @@ Core entities (EF Core; local SQLite/PG → Azure SQL/PG):
 ## 13. Repository structure
 
 ```
-aegis/
+cerberus/
 ├─ backend/                       # .NET solution
-│  ├─ Aegis.Api/                  # ASP.NET Core: REST + SignalR hubs
-│  ├─ Aegis.Core/                 # domain: engagements, scope, findings, controls
-│  ├─ Aegis.Auth/                 # own auth (sessions, no Clerk)
-│  ├─ Aegis.Agents/               # orchestrator + agent definitions + prompts
-│  ├─ Aegis.Models/               # IModelProvider: Anthropic/OpenAI/Ollama/AzureOpenAI
-│  ├─ Aegis.Sandbox/              # ISandboxProvider: thin wrapper over OpenSandbox C# SDK (Docker local / K8s prod)
-│  ├─ Aegis.Messaging/            # IMessageBus: RabbitMQ / in-proc
-│  ├─ Aegis.Workers/              # job workers that run agents in sandboxes
-│  ├─ Aegis.Compliance/           # catalog engine + EQUANS/ISO/OWASP catalogs + xlsx import/export
-│  ├─ Aegis.Data/                 # EF Core contexts + providers (SQLite/PG/Azure)
-│  └─ Aegis.Infrastructure/       # cache, secrets, artifact store adapters
+│  ├─ Cerberus.Api/                  # ASP.NET Core: REST + SignalR hubs
+│  ├─ Cerberus.Core/                 # domain: engagements, scope, findings, controls
+│  ├─ Cerberus.Auth/                 # own auth (sessions, no Clerk)
+│  ├─ Cerberus.Agents/               # orchestrator + agent definitions + prompts
+│  ├─ Cerberus.Models/               # IModelProvider: Anthropic/OpenAI/Ollama/AzureOpenAI
+│  ├─ Cerberus.Sandbox/              # ISandboxProvider: thin wrapper over OpenSandbox C# SDK (Docker local / K8s prod)
+│  ├─ Cerberus.Messaging/            # IMessageBus: RabbitMQ / in-proc
+│  ├─ Cerberus.Workers/              # job workers that run agents in sandboxes
+│  ├─ Cerberus.Compliance/           # catalog engine + EQUANS/ISO/OWASP catalogs + xlsx import/export
+│  ├─ Cerberus.Data/                 # EF Core contexts + providers (SQLite/PG/Azure)
+│  └─ Cerberus.Infrastructure/       # cache, secrets, artifact store adapters
 ├─ frontends/
 │  ├─ cli/                        # TypeScript — evolved from current packages/cli
 │  └─ web/                        # TypeScript React/Next
@@ -432,14 +432,14 @@ All of the above are **implementations of the §5 seams** — the same build run
 **Decisions settled:**
 - ✅ **Sandbox provider:** Alibaba **OpenSandbox** (self-hosted; Docker local / K8s on AKS). Daytona dropped — its self-hostable OSS froze June 2026 and `daytona/skills` is Cloud-only.
 - ✅ **Skills library:** vendor the 818-skill Apache-2.0 set under `security-skills/`, select per agent by subdomain/framework.
+- ✅ **Product name:** **Cerberus** (repo `CommonCapital/Cerberus`; package/project prefix `Cerberus.*`).
 
 **Decisions needed (M0):**
-1. **Product name** (replace `Aegis` codename).
-2. **Catalog priority:** EQUANS + OWASP first, or broader ISO/SOC2/NIST set in M6?
-3. **DB default for local:** SQLite (zero-config) vs local Postgres (parity with prod).
-4. **Web framework:** plain React SPA vs Next.js.
-5. **OpenSandbox isolation class for Phase 3:** gVisor (lighter) vs Kata/Firecracker (stronger, heavier) as the default for destructive-tier sandboxes.
-6. **OpenSandbox pinning:** track upstream `main`, or pin a release and vendor under `third_party/` for reproducibility.
+1. **Catalog priority:** EQUANS + OWASP first, or broader ISO/SOC2/NIST set in M6?
+2. **DB default for local:** SQLite (zero-config) vs local Postgres (parity with prod).
+3. **Web framework:** plain React SPA vs Next.js.
+4. **OpenSandbox isolation class for Phase 3:** gVisor (lighter) vs Kata/Firecracker (stronger, heavier) as the default for destructive-tier sandboxes.
+5. **OpenSandbox pinning:** track upstream `main`, or pin a release and vendor under `third_party/` for reproducibility.
 
 **Risks / watch-items:**
 - **LLM is still an external call** unless Ollama is used — "fully independent" is only literally true in Ollama-only mode. Abstraction covers both; set user expectation.
