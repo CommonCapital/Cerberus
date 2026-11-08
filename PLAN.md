@@ -1,6 +1,6 @@
 # Project Plan — Autonomous Security Assurance Platform
 
-> **Working codename:** `Aegis` (placeholder — rename freely).
+> **Working codename:** `Cerberus`.
 > **What it is:** a multi-agent, AI-driven security platform that scans a target system for vulnerabilities, grades it against enterprise-grade security frameworks, and — under strict authorization — actively attempts to break it ("aggressive hacking: break & solve") and then proposes fixes.
 > **What it is NOT:** a general coding assistant, and not a tool for attacking systems the operator does not own or is not authorized to test. The current `nightcode` baseline (a Claude-Code-style coding agent) is the *chassis* we strip down and repurpose.
 
