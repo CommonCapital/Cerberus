@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Chat;
+using Cerberus.Api.Settings;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Microsoft.EntityFrameworkCore;
@@ -30,7 +31,46 @@ public static class Endpoints
         sessions.MapGet("/{id}", GetSession);
         sessions.MapPost("/", CreateSession);
 
+        var settings = app.MapGroup("/settings/keys").AddEndpointFilter<RequireAuthFilter>();
+        settings.MapGet("/", ListApiKeys);
+        settings.MapPut("/", SetApiKey);
+        settings.MapDelete("/{provider}", DeleteApiKey);
+
         app.MapPost("/chat", StreamChat).AddEndpointFilter<RequireAuthFilter>();
+    }
+
+    // --- settings: per-user model API keys ----------------------------------
+
+    private static async Task<IResult> ListApiKeys(HttpContext http, ApiKeyService keys, CancellationToken ct)
+    {
+        var providers = await keys.ListProvidersAsync(UserId(http), ct);
+        // Never return the key material — only which providers are configured.
+        var result = ApiKeyService.SupportedProviders
+            .Select(p => new { provider = p, hasKey = providers.Contains(p) });
+        return Results.Json(result);
+    }
+
+    private static async Task<IResult> SetApiKey(SetApiKeyRequest body, HttpContext http, ApiKeyService keys, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.Provider) || !ApiKeyService.IsSupportedProvider(body.Provider))
+        {
+            return Results.Json(new { error = $"Unsupported provider. Use one of: {string.Join(", ", ApiKeyService.SupportedProviders)}" }, statusCode: 400);
+        }
+        if (string.IsNullOrWhiteSpace(body.ApiKey))
+        {
+            return Results.Json(new { error = "apiKey is required" }, statusCode: 400);
+        }
+
+        await keys.SetAsync(UserId(http), body.Provider, body.ApiKey, ct);
+        return Results.Json(new { provider = body.Provider, hasKey = true });
+    }
+
+    private static async Task<IResult> DeleteApiKey(string provider, HttpContext http, ApiKeyService keys, CancellationToken ct)
+    {
+        var removed = await keys.DeleteAsync(UserId(http), provider, ct);
+        return removed
+            ? Results.Json(new { provider, hasKey = false })
+            : Results.Json(new { error = "No key set for that provider" }, statusCode: 404);
     }
 
     // --- auth ---------------------------------------------------------------
@@ -127,7 +167,8 @@ public static class Endpoints
     // --- chat (AI-SDK UI message stream) ------------------------------------
 
     private static async Task StreamChat(
-        UiChatRequest body, HttpContext http, CerberusDbContext db, IModelProviderResolver resolver, CancellationToken ct)
+        UiChatRequest body, HttpContext http, CerberusDbContext db, IModelProviderResolver resolver,
+        ApiKeyService keys, CancellationToken ct)
     {
         var userId = UserId(http);
 
@@ -164,7 +205,8 @@ public static class Endpoints
         try
         {
             var provider = resolver.Resolve(body.Model);
-            var completion = new ChatCompletionRequest(body.Model, promptMessages, system, new ModelCredentials());
+            var credentials = await keys.ResolveCredentialsAsync(userId, ct);
+            var completion = new ChatCompletionRequest(body.Model, promptMessages, system, credentials);
 
             await writer.TextStartAsync(textId, ct);
             await foreach (var delta in provider.StreamAsync(completion, ct))

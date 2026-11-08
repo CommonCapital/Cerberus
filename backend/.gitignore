@@ -6,3 +6,5 @@ obj/
 *.db-shm
 *.db-wal
 *.db-journal
+# Data Protection keyring (local encryption keys)
+dp-keys/

@@ -4,6 +4,8 @@ public sealed record CredentialsRequest(string Email, string Password);
 
 public sealed record CreateSessionRequest(string Title);
 
+public sealed record SetApiKeyRequest(string Provider, string ApiKey);
+
 public sealed record ChatRequestMessage(string Role, string Content);
 
 // Used by the SignalR hub skeleton.

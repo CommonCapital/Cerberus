@@ -36,8 +36,15 @@ Environment:
 | GET | `/sessions` | Bearer | List sessions |
 | GET | `/sessions/{id}` | Bearer | Session + parsed messages |
 | POST | `/sessions` | Bearer | `{ title }` → created session |
+| GET | `/settings/keys` | Bearer | Which providers have a key set (never returns the key) |
+| PUT | `/settings/keys` | Bearer | `{ provider, apiKey }` — store a key (encrypted at rest) |
+| DELETE | `/settings/keys/{provider}` | Bearer | Remove a stored key |
 | POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
+
+### Per-user API keys
+
+Each user stores their own Anthropic/OpenAI keys via `/settings/keys`. Keys are **encrypted at rest** with ASP.NET Core Data Protection (keyring under `dp-keys/`, or `CERBERUS_KEYRING`), never returned by the API, and decrypted in-memory only to authorize a `/chat` request — taking precedence over the `*_API_KEY` env vars. Ollama models need no key.
 
 ### `/chat` protocol
 
@@ -46,4 +53,5 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 ## Status & follow-ups
 
 - Auth, sessions, the streaming chat pipeline (provider resolver → Anthropic/OpenAI/Ollama → UI-message stream → persistence), and AI-SDK protocol compatibility are implemented and verified (raw SSE checked against the `ai` package format; UIMessage persistence round-trips).
-- **Follow-ups:** retarget the TS CLI at this server (swap the hono client base URL / calls); per-user encrypted API-key storage; SignalR hub auth; tool-calling (tool-input/tool-output UI chunks + client execution).
+- Per-user **encrypted** API-key storage is implemented (`/settings/keys`, Data Protection) and used by `/chat`.
+- **Follow-ups:** retarget the TS CLI at this server (swap the hono client base URL / calls); SignalR hub auth; tool-calling (tool-input/tool-output UI chunks + client execution).

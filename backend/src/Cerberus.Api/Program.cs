@@ -1,9 +1,11 @@
 using Cerberus.Api;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Hubs;
+using Cerberus.Api.Settings;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Cerberus.Models;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +18,14 @@ builder.Services.AddDbContext<CerberusDbContext>(options =>
 
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
+
+// --- Per-user API keys (encrypted at rest via Data Protection) -------------
+var keyRingPath = Environment.GetEnvironmentVariable("CERBERUS_KEYRING")
+    ?? Path.Combine(builder.Environment.ContentRootPath, "dp-keys");
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath))
+    .SetApplicationName("Cerberus");
+builder.Services.AddScoped<ApiKeyService>();
 
 // --- Model providers (user-supplied keys / local Ollama) -------------------
 builder.Services.AddSingleton<HttpClient>();

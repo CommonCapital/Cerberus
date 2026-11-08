@@ -9,6 +9,7 @@ public class User
 
     public List<AuthSession> AuthSessions { get; set; } = [];
     public List<Session> Sessions { get; set; } = [];
+    public List<UserApiKey> ApiKeys { get; set; } = [];
 }
 
 /// <summary>A local authentication session (replaces Clerk). The CLI stores the token.</summary>
@@ -19,6 +20,17 @@ public class AuthSession
     public string UserId { get; set; } = string.Empty;
     public User? User { get; set; }
     public DateTime ExpiresAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>A user's API key for a cloud model provider, encrypted at rest.</summary>
+public class UserApiKey
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public User? User { get; set; }
+    public string Provider { get; set; } = string.Empty; // "anthropic" | "openai"
+    public string EncryptedKey { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

@@ -7,6 +7,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<User> Users => Set<User>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,6 +32,14 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
         {
             e.HasKey(s => s.Id);
             e.HasIndex(s => s.UserId);
+        });
+
+        modelBuilder.Entity<UserApiKey>(e =>
+        {
+            e.HasKey(k => k.Id);
+            e.HasIndex(k => new { k.UserId, k.Provider }).IsUnique();
+            e.HasOne(k => k.User).WithMany(u => u.ApiKeys).HasForeignKey(k => k.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
