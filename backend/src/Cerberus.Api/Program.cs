@@ -22,6 +22,7 @@ builder.Services.AddSingleton<HttpClient>();
 builder.Services.AddSingleton<IModelProvider, AnthropicProvider>();
 builder.Services.AddSingleton<IModelProvider, OpenAiProvider>();
 builder.Services.AddSingleton<IModelProvider, OllamaProvider>();
+builder.Services.AddSingleton<IModelProvider, MockProvider>();
 builder.Services.AddSingleton<IModelProviderResolver, ModelProviderResolver>();
 
 builder.Services.AddSignalR();

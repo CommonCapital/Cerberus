@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using Cerberus.Api.Auth;
+using Cerberus.Api.Chat;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +13,7 @@ public static class Endpoints
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
     };
 
     public static void MapCerberusEndpoints(this WebApplication app)
@@ -99,7 +102,7 @@ public static class Endpoints
             session.Title,
             session.CreatedAt,
             session.UpdatedAt,
-            messages = ParseMessages(session.Messages),
+            messages = ParseStoredMessages(session.Messages),
         });
     }
 
@@ -121,14 +124,14 @@ public static class Endpoints
         }, statusCode: 201);
     }
 
-    // --- chat ---------------------------------------------------------------
+    // --- chat (AI-SDK UI message stream) ------------------------------------
 
     private static async Task StreamChat(
-        ChatRequest body, HttpContext http, CerberusDbContext db, IModelProviderResolver resolver, CancellationToken ct)
+        UiChatRequest body, HttpContext http, CerberusDbContext db, IModelProviderResolver resolver, CancellationToken ct)
     {
         var userId = UserId(http);
 
-        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == body.SessionId && s.UserId == userId, ct);
+        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == body.Id && s.UserId == userId, ct);
         if (session is null)
         {
             http.Response.StatusCode = 404;
@@ -143,61 +146,133 @@ public static class Endpoints
             return;
         }
 
-        http.Response.Headers.ContentType = "text/event-stream";
-        http.Response.Headers.CacheControl = "no-cache";
+        var history = ParseStoredMessages(session.Messages);
+        var promptMessages = BuildPromptMessages(history, body.Messages);
+        var system = SystemPrompt.Build(body.Mode);
 
-        var history = ParseMessages(session.Messages);
-        var incoming = body.Messages;
-        var promptMessages = history
-            .Concat(incoming)
-            .Select(m => new ChatMessage(m.Role, m.Content))
-            .ToList();
+        UiMessageStreamWriter.ApplyHeaders(http.Response);
+        var writer = new UiMessageStreamWriter(http.Response);
 
-        var completion = new ChatCompletionRequest(body.Model, promptMessages, body.System, new ModelCredentials());
-        var provider = resolver.Resolve(body.Model);
+        var assistantId = Guid.NewGuid().ToString("n");
+        const string textId = "0";
+        var startedAt = DateTime.UtcNow;
+        var assistant = new StringBuilder();
 
-        var assistant = new System.Text.StringBuilder();
+        await writer.StartAsync(assistantId, new { mode = body.Mode, model = body.Model }, ct);
+        await writer.StartStepAsync(ct);
+
         try
         {
+            var provider = resolver.Resolve(body.Model);
+            var completion = new ChatCompletionRequest(body.Model, promptMessages, system, new ModelCredentials());
+
+            await writer.TextStartAsync(textId, ct);
             await foreach (var delta in provider.StreamAsync(completion, ct))
             {
                 assistant.Append(delta);
-                await http.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { delta }, JsonOptions)}\n\n", ct);
-                await http.Response.Body.FlushAsync(ct);
+                await writer.TextDeltaAsync(textId, delta, ct);
             }
+            await writer.TextEndAsync(textId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await http.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions)}\n\n", ct);
-            await http.Response.Body.FlushAsync(ct);
+            await writer.ErrorAsync(ex.Message, ct);
+            await writer.DoneAsync(ct);
             return;
         }
 
-        var updated = history
-            .Concat(incoming)
-            .Append(new ChatRequestMessage("assistant", assistant.ToString()))
-            .ToList();
-        session.Messages = JsonSerializer.Serialize(updated, JsonOptions);
+        await writer.FinishStepAsync(ct);
+        var durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+        await writer.FinishAsync(new { mode = body.Mode, model = body.Model, durationMs }, ct);
+
+        await PersistAsync(db, session, history, body, assistantId, assistant.ToString(), durationMs, ct);
+
+        await writer.DoneAsync(ct);
+    }
+
+    private static async Task PersistAsync(
+        CerberusDbContext db, Session session, List<JsonElement> history, UiChatRequest body,
+        string assistantId, string assistantText, long durationMs, CancellationToken ct)
+    {
+        var merged = new List<object>();
+        foreach (var h in history) merged.Add(h);
+        foreach (var m in body.Messages)
+        {
+            merged.Add(new
+            {
+                id = m.Id,
+                role = m.Role,
+                parts = m.Parts.Select(p => new { type = p.Type, text = p.Text }),
+            });
+        }
+        merged.Add(new
+        {
+            id = assistantId,
+            role = "assistant",
+            parts = new[] { new { type = "text", text = assistantText } },
+            metadata = new { mode = body.Mode, model = body.Model, durationMs },
+        });
+
+        session.Messages = JsonSerializer.Serialize(merged, JsonOptions);
         session.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-
-        await http.Response.WriteAsync("data: [DONE]\n\n", ct);
-        await http.Response.Body.FlushAsync(ct);
     }
 
     // --- helpers ------------------------------------------------------------
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;
 
-    private static List<ChatRequestMessage> ParseMessages(string json)
+    private static List<JsonElement> ParseStoredMessages(string json)
     {
         try
         {
-            return JsonSerializer.Deserialize<List<ChatRequestMessage>>(json, JsonOptions) ?? [];
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return doc.RootElement.EnumerateArray().Select(e => e.Clone()).ToList();
+            }
         }
         catch (JsonException)
         {
-            return [];
+            // fall through
         }
+        return [];
     }
+
+    private static List<ChatMessage> BuildPromptMessages(List<JsonElement> history, List<UiMessage> incoming)
+    {
+        var result = new List<ChatMessage>();
+        foreach (var h in history)
+        {
+            var text = ExtractText(h);
+            if (!string.IsNullOrEmpty(text)) result.Add(new ChatMessage(RoleOf(h), text));
+        }
+        foreach (var m in incoming)
+        {
+            var text = string.Concat(m.Parts.Where(p => p.Type == "text").Select(p => p.Text));
+            if (!string.IsNullOrEmpty(text)) result.Add(new ChatMessage(m.Role, text));
+        }
+        return result;
+    }
+
+    private static string ExtractText(JsonElement message)
+    {
+        if (!message.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
+        {
+            return string.Empty;
+        }
+        var sb = new StringBuilder();
+        foreach (var part in parts.EnumerateArray())
+        {
+            if (part.TryGetProperty("type", out var type) && type.GetString() == "text" &&
+                part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+            {
+                sb.Append(text.GetString());
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string RoleOf(JsonElement message) =>
+        message.TryGetProperty("role", out var role) ? role.GetString() ?? "user" : "user";
 }

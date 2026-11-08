@@ -5,6 +5,7 @@ public enum ModelProvider
     Anthropic,
     OpenAI,
     Ollama,
+    Mock,
 }
 
 public sealed record ChatModelInfo(string Id, ModelProvider Provider);
@@ -26,6 +27,8 @@ public static class ModelRegistry
         new("llama3.1", ModelProvider.Ollama),
         new("qwen2.5-coder", ModelProvider.Ollama),
         new("deepseek-r1", ModelProvider.Ollama),
+        // Dev/test model: streams a canned reply with no network or API key.
+        new("echo", ModelProvider.Mock),
     ];
 
     public const string DefaultModelId = "claude-opus-4-6";
