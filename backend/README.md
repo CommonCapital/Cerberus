@@ -36,10 +36,14 @@ Environment:
 | GET | `/sessions` | Bearer | List sessions |
 | GET | `/sessions/{id}` | Bearer | Session + parsed messages |
 | POST | `/sessions` | Bearer | `{ title }` → created session |
-| POST | `/chat` | Bearer | SSE stream of `{ delta }` then `[DONE]`; persists messages |
+| POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
+
+### `/chat` protocol
+
+The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/react`'s `DefaultChatTransport` consumes it unchanged: `text/event-stream` with `x-vercel-ai-ui-message-stream: v1`, chunks framed as `data: {json}\n\n` in the sequence `start` → `start-step` → `text-start` → `text-delta*` → `text-end` → `finish-step` → `finish` → `[DONE]`, with `messageMetadata` carrying mode/model/durationMs. Sessions store and return UIMessages (`{ id, role, parts }`). A dev model id `echo` streams a canned reply with no API key for headless verification.
 
 ## Status & follow-ups
 
-- Auth, sessions, and the streaming chat pipeline (provider resolver → Anthropic/OpenAI/Ollama → SSE → persistence) are implemented and smoke-tested.
-- **Follow-ups:** emit the exact AI-SDK UI-message stream protocol (so the current TS CLI's transport works unchanged) and retarget the CLI; add per-user encrypted API-key storage; add SignalR hub auth; wrap tool-calling.
+- Auth, sessions, the streaming chat pipeline (provider resolver → Anthropic/OpenAI/Ollama → UI-message stream → persistence), and AI-SDK protocol compatibility are implemented and verified (raw SSE checked against the `ai` package format; UIMessage persistence round-trips).
+- **Follow-ups:** retarget the TS CLI at this server (swap the hono client base URL / calls); per-user encrypted API-key storage; SignalR hub auth; tool-calling (tool-input/tool-output UI chunks + client execution).
