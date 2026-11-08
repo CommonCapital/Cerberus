@@ -43,6 +43,9 @@ builder.Services.AddSignalR();
 var scanRoot = Environment.GetEnvironmentVariable("CERBERUS_SCAN_ROOT") ?? Directory.GetCurrentDirectory();
 builder.Services.AddSingleton(new ScanOptions(scanRoot));
 builder.Services.AddSingleton<ScanService>();
+// Phase 1 SCA (dependency/CVE analysis via OSV.dev — passive T0, read-only).
+builder.Services.AddSingleton<OsvClient>();
+builder.Services.AddSingleton<ScaService>();
 
 // Serialize enums (e.g. Severity) as strings in JSON responses.
 builder.Services.ConfigureHttpJsonOptions(o =>

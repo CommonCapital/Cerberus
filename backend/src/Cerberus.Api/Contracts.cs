@@ -6,7 +6,11 @@ public sealed record CreateSessionRequest(string Title);
 
 public sealed record SetApiKeyRequest(string Provider, string ApiKey);
 
-public sealed record ScanRequest(string? Path);
+/// <summary>
+/// A Phase-1 scan request. <paramref name="Sca"/> toggles dependency/CVE
+/// analysis via OSV.dev (defaults on); set false for fully-offline runs.
+/// </summary>
+public sealed record ScanRequest(string? Path, bool? Sca = true);
 
 public sealed record ChatRequestMessage(string Role, string Content);
 
