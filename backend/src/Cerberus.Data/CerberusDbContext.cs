@@ -8,6 +8,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
+    public DbSet<Scan> Scans => Set<Scan>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -39,6 +40,14 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
             e.HasKey(k => k.Id);
             e.HasIndex(k => new { k.UserId, k.Provider }).IsUnique();
             e.HasOne(k => k.User).WithMany(u => u.ApiKeys).HasForeignKey(k => k.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Scan>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.UserId);
+            e.HasOne(s => s.User).WithMany(u => u.Scans).HasForeignKey(s => s.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

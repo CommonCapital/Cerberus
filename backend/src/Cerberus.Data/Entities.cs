@@ -10,6 +10,7 @@ public class User
     public List<AuthSession> AuthSessions { get; set; } = [];
     public List<Session> Sessions { get; set; } = [];
     public List<UserApiKey> ApiKeys { get; set; } = [];
+    public List<Scan> Scans { get; set; } = [];
 }
 
 /// <summary>A local authentication session (replaces Clerk). The CLI stores the token.</summary>
@@ -31,6 +32,19 @@ public class UserApiKey
     public User? User { get; set; }
     public string Provider { get; set; } = string.Empty; // "anthropic" | "openai"
     public string EncryptedKey { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>A persisted scan run and its findings (stored as a JSON string).</summary>
+public class Scan
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public User? User { get; set; }
+    public string TargetPath { get; set; } = string.Empty;
+    public int FilesScanned { get; set; }
+    public int FindingCount { get; set; }
+    public string Findings { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

@@ -40,7 +40,9 @@ Environment:
 | PUT | `/settings/keys` | Bearer | `{ provider, apiKey }` — store a key (encrypted at rest) |
 | DELETE | `/settings/keys/{provider}` | Bearer | Remove a stored key |
 | POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
-| POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → normalized findings |
+| POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
+| GET | `/scans` | Bearer | List this user's past scans (id, target, counts, timestamp) |
+| GET | `/scans/{id}` | Bearer | A persisted scan with its findings |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
 
 ### `/scan` — Phase 1 (Scan & Detect), MVP

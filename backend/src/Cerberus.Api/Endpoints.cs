@@ -16,6 +16,7 @@ public static class Endpoints
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
     };
 
     public static void MapCerberusEndpoints(this WebApplication app)
@@ -39,27 +40,80 @@ public static class Endpoints
 
         app.MapPost("/chat", StreamChat).AddEndpointFilter<RequireAuthFilter>();
 
+        var scans = app.MapGroup("/scans").AddEndpointFilter<RequireAuthFilter>();
+        scans.MapGet("/", ListScans);
+        scans.MapGet("/{id}", GetScan);
+
         app.MapPost("/scan", RunScan).AddEndpointFilter<RequireAuthFilter>();
     }
 
     // --- scanning (Phase 1: Scan & Detect, MVP) -----------------------------
 
-    private static IResult RunScan(ScanRequest body, ScanService scanner)
+    private static async Task<IResult> RunScan(
+        ScanRequest body, HttpContext http, CerberusDbContext db, ScanService scanner, CancellationToken ct)
     {
+        var userId = UserId(http);
+        var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
+
+        ScanResult result;
         try
         {
-            var result = scanner.Scan(string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!);
-            return Results.Json(new
-            {
-                filesScanned = result.FilesScanned,
-                findingCount = result.Findings.Count,
-                findings = result.Findings,
-            });
+            result = scanner.Scan(targetPath);
         }
         catch (UnauthorizedAccessException ex)
         {
             return Results.Json(new { error = ex.Message }, statusCode: 400);
         }
+
+        var findingsJson = JsonSerializer.Serialize(result.Findings, JsonOptions);
+        var scan = new Scan
+        {
+            UserId = userId,
+            TargetPath = targetPath,
+            FilesScanned = result.FilesScanned,
+            FindingCount = result.Findings.Count,
+            Findings = findingsJson,
+        };
+        db.Scans.Add(scan);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new
+        {
+            id = scan.Id,
+            targetPath = scan.TargetPath,
+            createdAt = scan.CreatedAt,
+            filesScanned = result.FilesScanned,
+            findingCount = result.Findings.Count,
+            findings = result.Findings,
+        }, JsonOptions);
+    }
+
+    private static async Task<IResult> ListScans(HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var scans = await db.Scans
+            .Where(s => s.UserId == userId)
+            .OrderByDescending(s => s.CreatedAt)
+            .Select(s => new { s.Id, s.TargetPath, s.FilesScanned, s.FindingCount, s.CreatedAt })
+            .ToListAsync(ct);
+        return Results.Json(scans);
+    }
+
+    private static async Task<IResult> GetScan(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
+        if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
+
+        return Results.Json(new
+        {
+            scan.Id,
+            scan.TargetPath,
+            scan.FilesScanned,
+            scan.FindingCount,
+            scan.CreatedAt,
+            findings = ParseStoredMessages(scan.Findings),
+        });
     }
 
     // --- settings: per-user model API keys ----------------------------------
