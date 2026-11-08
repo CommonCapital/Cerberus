@@ -1,18 +1,24 @@
 import dotenv from "dotenv";
 import path from "path";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { PrismaClient } from "../generated/prisma/client.ts";
 
-dotenv.config({
-  path: path.resolve(import.meta.dirname, "../../../.env"),
-});
+const repoRoot = path.resolve(import.meta.dirname, "../../..");
 
-const databaseUrl = process.env.DATABASE_URL;
+dotenv.config({ path: path.join(repoRoot, ".env") });
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not set");
+// Resolve a relative SQLite file: URL against the repo root so the database
+// location is the same no matter which working directory the process runs in.
+export function resolveSqliteUrl(raw: string | undefined): string {
+  const value = raw ?? "file:./cerberus.db";
+  const match = /^file:(.*)$/.exec(value);
+  if (!match) return value;
+
+  const filePath = match[1]!;
+  if (filePath.startsWith("/") || filePath.startsWith(":")) return value; // absolute or :memory:
+  return `file:${path.resolve(repoRoot, filePath)}`;
 }
 
-const adapter = new PrismaPg({ connectionString: databaseUrl });
+const adapter = new PrismaLibSql({ url: resolveSqliteUrl(process.env.DATABASE_URL) });
 
 export const db = new PrismaClient({ adapter });
