@@ -367,19 +367,21 @@ cerberus/
 
 These are *engineering* phases (how we build), distinct from the three *product* phases (what it does). Recommendation: keep it runnable at every milestone, and build abstractions with **local implementations only** — defer all Azure bindings to M7.
 
-| Milestone | Goal | Key outcomes |
-|---|---|---|
-| **M0 — Decisions** | Lock open items (§18) | Sandbox provider, product name, catalog priority confirmed |
-| **M1 — De-cloud the baseline (still TS)** | Remove all SaaS | Delete Polar/billing; replace Clerk with local session auth; Prisma → local SQLite; add Ollama + user-key model support. Fully local baseline, still works. |
-| **M2 — .NET backend (local mode)** | Rebuild the chassis in .NET | Port `/sessions` + streaming `/chat` to ASP.NET Core + SignalR; EF Core + SQLite; own auth; `IModelProvider` (Anthropic/OpenAI/Ollama). CLI retargets to it. |
-| **M3 — Sandbox + job pipeline** | Execution isolation + jobs | Stand up **OpenSandbox server** (Docker runtime) + `ISandboxProvider` over its C# SDK; `IMessageBus` (RabbitMQ/in-proc); all tools run in sandbox; egress policy wired to scope; findings stream over SignalR. |
-| **M4 — Authorization & safety spine** | §3 before any offense | Engagement/scope/target model, ownership verification, capability tiers, kill switch, audit log. |
-| **M5 — Product Phase 1 (Scan & Detect)** | Passive agents | Recon, SAST, SCA, Secrets, Threat-Model; normalized findings; dogfood on RabbitMQ repo (§17). |
-| **M6 — Product Phase 2 (Compliance)** | Catalog engine | Compliance agent + ESAP/OWASP/ISO catalogs; xlsx import/export; compliance matrix. |
-| **M7 — Azure implementations** | Prod swap | Azure SQL/PG, Azure Cache, Azure SignalR, AKS sandbox pods, RabbitMQ@AKS, Key Vault, Blob. DI + manifests only. |
-| **M8 — Product Phase 3 (Aggressive mode)** | Gated offense | Exploit agent (T2), Resilience/Load (T3), Remediation/Report; dry-run → authorize → execute → solve loop. Built last, after the spine is proven. |
-| **M9 — Web frontend** | Second client | React/Next UI against the same API + SignalR. |
-| **M10 — Hardening & reporting polish** | Enterprise-ready | Audit exports, framework reports, RBAC, multi-tenant separation. |
+Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
+
+| Status | Milestone | Goal | Key outcomes |
+|:--:|---|---|---|
+| ✅ | **M0 — Decisions** | Lock open items (§18) | Sandbox provider (OpenSandbox), product name (Cerberus), skills library confirmed |
+| ✅ | **M1 — De-cloud the baseline (still TS)** | Remove all SaaS | Polar/billing removed; Clerk replaced with local session auth; Prisma → local SQLite; Ollama + user-key model support. Fully local baseline, still works. |
+| 🟡 | **M2 — .NET backend (local mode)** | Rebuild the chassis in .NET | ✅ ASP.NET Core + SignalR skeleton, EF Core + SQLite, own auth, `IModelProvider` (Anthropic/OpenAI/Ollama), streaming `/chat` in the AI-SDK UI-message protocol, per-user encrypted API keys. ⬜ Retarget the TS CLI at the .NET server; tool-calling. |
+| ⬜ | **M3 — Sandbox + job pipeline** | Execution isolation + jobs | Stand up **OpenSandbox server** (Docker runtime) + `ISandboxProvider` over its C# SDK; `IMessageBus` (RabbitMQ/in-proc); all tools run in sandbox; egress policy wired to scope; findings stream over SignalR. |
+| ⬜ | **M4 — Authorization & safety spine** | §3 before any offense | Engagement/scope/target model, ownership verification, capability tiers, kill switch, audit log. |
+| ⬜ | **M5 — Product Phase 1 (Scan & Detect)** | Passive agents | Recon, SAST, SCA, Secrets, Threat-Model; normalized findings; dogfood on RabbitMQ repo (§17). |
+| 🟡 | **M6 — Product Phase 2 (Compliance)** | Catalog engine | 🟡 ESAP catalog shipped as data (`catalogs/enterprise-sap.{md,json}`: full methodology + 39 controls). ⬜ Compliance agent, OWASP/ISO catalogs, xlsx import/export, compliance matrix. |
+| ⬜ | **M7 — Azure implementations** | Prod swap | Azure SQL/PG, Azure Cache, Azure SignalR, AKS sandbox pods, RabbitMQ@AKS, Key Vault, Blob. DI + manifests only. |
+| ⬜ | **M8 — Product Phase 3 (Aggressive mode)** | Gated offense | Exploit agent (T2), Resilience/Load (T3), Remediation/Report; dry-run → authorize → execute → solve loop. Built last, after the spine is proven. |
+| ⬜ | **M9 — Web frontend** | Second client | React/Next UI against the same API + SignalR. |
+| ⬜ | **M10 — Hardening & reporting polish** | Enterprise-ready | Audit exports, framework reports, RBAC, multi-tenant separation. |
 
 ---
 

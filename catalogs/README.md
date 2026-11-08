@@ -2,9 +2,14 @@
 
 Framework control catalogs, stored **as data**, that the Cerberus Compliance agent (Product Phase 2) grades a target against. Each catalog is vendor-neutral and ingestible by the catalog engine; findings from Phase 1 and operator questionnaire answers are mapped to each control to produce a verdict, justification, action plan, and deadline.
 
-## `enterprise-sap.json` — Enterprise Security Assurance Plan (ESAP)
+## Enterprise Security Assurance Plan (ESAP)
 
-A built-in, **representative third-party / vendor security-assurance catalog** modeled on how large enterprises (Fortune-500 procurement and CISO offices) actually evaluate a provider before and throughout a contract — the real structure and rigor used in enterprise vendor-risk assessments, reworded generically so it names no company.
+Two files, one catalog:
+
+- **[`enterprise-sap.md`](enterprise-sap.md)** — the **full, human-readable catalog**: the complete grading methodology (response schema, corrective-action timelines, review triggers, RACI, governance) and all 39 controls with their full requirement text. This is the canonical, verbatim version, reproduced vendor-neutrally with the originating company's name and contacts removed.
+- **[`enterprise-sap.json`](enterprise-sap.json)** — the **machine-readable form** the Compliance engine ingests: the same controls with concise summaries, evidence hints, `autoEvaluable` flags, framework alignment, and a `methodology` block. Its `fullTextDoc` points back to the Markdown.
+
+A built-in, **representative third-party / vendor security-assurance catalog** modeled on how large enterprises (Fortune-500 procurement and CISO offices) actually evaluate a provider before and throughout a contract — the real structure and rigor used in enterprise vendor-risk assessments, reproduced generically so it names no company.
 
 - **39 controls** in 3 sections: **General Security Governance** (13), **Application Security** (8), **SaaS Security** (18).
 - **Aligned to** ISO/IEC 27001/27002, NIST CSF 2.0, OWASP Top 10, SOC 2.

@@ -2,7 +2,8 @@
   "id": "enterprise-sap",
   "name": "Enterprise Security Assurance Plan (ESAP)",
   "version": "1.0",
-  "description": "A representative third-party / vendor security-assurance control catalog in the style large enterprises (Fortune-500 procurement and CISO offices) use to evaluate a provider before and during a contract. Controls are grouped into General, Application, and SaaS governance and are aligned to recognized standards (ISO/IEC 27001/27002, NIST CSF, OWASP). This is a generic, vendor-neutral reworking intended as a built-in compliance catalog for Cerberus; it names no specific company.",
+  "description": "A representative third-party / vendor security-assurance control catalog in the style large enterprises (Fortune-500 procurement and CISO offices) use to evaluate a provider before and during a contract. Controls are grouped into General, Application, and SaaS governance and are aligned to recognized standards (ISO/IEC 27001/27002, NIST CSF, OWASP). This is a generic, vendor-neutral reworking intended as a built-in compliance catalog for Cerberus; it names no specific company. Control 'requirement' fields below are concise machine summaries; the full verbatim methodology and requirement text live in enterprise-sap.md (the canonical human-readable catalog).",
+  "fullTextDoc": "catalogs/enterprise-sap.md",
   "frameworkAlignment": ["ISO/IEC 27001", "ISO/IEC 27002", "NIST CSF 2.0", "OWASP Top 10", "SOC 2"],
   "responseScale": ["Compliant", "Partially compliant", "Non-compliant", "Not applicable"],
   "responseSchema": {
@@ -10,6 +11,35 @@
     "justification": "provider's detailed response / evidence",
     "actionPlan": "required when Partially compliant or Non-compliant",
     "timeLimitDays": "deadline to reach compliance (catalog guidance: standard 30 days, max 180 days)"
+  },
+  "methodology": {
+    "overview": "The Provider answers every control with a compliance verdict plus a detailed justification; non-compliant or partially compliant controls require an action plan with a deadline. Based on the responses, the Customer performs a vendor evaluation at its sole discretion.",
+    "correctiveActions": {
+      "standardDays": 30,
+      "maxDays": 180,
+      "notes": "Extensions beyond 30 days require the Customer's approval; the maximum must not exceed 180 days. Disagreements are escalated for decision."
+    },
+    "reviewTriggers": [
+      "An evolution: configuration or environment change, service-scope change, regulatory change, or contract amendment",
+      "A security incident",
+      "Annual review of the document"
+    ],
+    "raci": {
+      "provisionOfRequirements": "Customer",
+      "descriptionOfResponses": "Provider",
+      "updatingDocument": "Customer",
+      "documentValidation": "Customer",
+      "publication": "Customer+Provider",
+      "application": "Provider"
+    },
+    "governance": {
+      "committees": "Strategic committee at least annually (either party may convene); operational committees during implementation if required. Minimum participants: both parties' SPOCs.",
+      "exampleIndicators": [
+        "Number of security incidents (detected and corrected)",
+        "Percentage of actions closed for each action plan",
+        "Residual risk level"
+      ]
+    }
   },
   "sections": [
     {
