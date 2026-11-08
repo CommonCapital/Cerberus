@@ -44,7 +44,7 @@ Find vulnerabilities in **code and system design**, in the spirit of CodeQL / se
 
 ### Phase 2 — Enterprise-grade compliance checks
 Evaluate the target against **rigid, structured enterprise security frameworks** to guarantee enterprise compatibility.
-- Ingest control catalogs as data. The reference sample is a generic **Enterprise Security Assurance Plan (ESAP)**: 40 controls across General / Application / SaaS governance.
+- Ingest control catalogs as data. The built-in reference is a generic **Enterprise Security Assurance Plan (ESAP)** — 39 controls across General / Application / SaaS governance, modeled on real Fortune-500 vendor-security assurance (shipped at `catalogs/enterprise-sap.json`).
 - For each control, gather evidence (from Phase 1 findings, repo artifacts, config, IaC, operator answers) and produce a verdict: **Compliant / Partially compliant / Non-compliant**, with a justification, an **action plan**, and a **time limit for compliance** — matching the ESAP response schema exactly.
 - Also map to ISO 27001/27002, SOC 2, NIST, OWASP ASVS/Top 10, CIS.
 - Output: an auditable compliance matrix + remediation roadmap (exportable to the reference spreadsheet shape).
@@ -274,10 +274,10 @@ Control {
 }
 ```
 
-- **Seed catalogs:** the ESAP catalog (40 controls: General Governance 1–13, Application 14–22, SaaS 23–40), OWASP ASVS + Top 10, ISO 27001/27002, SOC 2, NIST CSF/800-53, CIS. The reference spreadsheet becomes a built-in importable catalog.
-- **Evaluation:** the Compliance agent gathers evidence (Phase 1 findings, repo artifacts, config/IaC, operator-answered org questions that can't be auto-detected — e.g. ESAP controls about insurance, SPOCs, backup rotation) and produces the verdict + action plan + deadline per control.
+- **Seed catalogs:** the **ESAP catalog ships in-repo at [`catalogs/enterprise-sap.json`](catalogs/enterprise-sap.json)** — 39 vendor-neutral controls modeled on real Fortune-500 vendor-security assurance, in 3 sections (General Governance 13, Application 8, SaaS 18), each with `requirement`, `evidenceHints`, and an `autoEvaluable` flag. Planned companions (same schema): OWASP ASVS + Top 10, ISO 27001/27002, SOC 2, NIST CSF/800-53, CIS.
+- **Evaluation:** the Compliance agent gathers evidence (Phase 1 findings, repo artifacts, config/IaC, operator-answered org questions that can't be auto-detected — e.g. the catalog's controls on insurance, audit cooperation, backup rotation, exit/reversibility) and produces the verdict + action plan + deadline per control.
 - **Auto vs. operator-answered:** technical controls (encryption in transit/at rest, TLS version, MFA presence, secrets handling, OWASP Top 10, patch currency) can be largely auto-evaluated from scan evidence; organizational controls (liability insurance, committees, NDAs) are operator questionnaires — the platform tracks both.
-- **Output:** a compliance matrix + remediation roadmap, **exportable back into the reference spreadsheet format** (Compliant Response + Provider's Detailed Response + Action Plan + Time limit), plus mapped scores for the other frameworks.
+- **Output:** a compliance matrix + remediation roadmap, **exportable to a vendor-assurance spreadsheet** (Verdict + Detailed Response + Action Plan + Time limit — the schema enterprises expect back), plus mapped scores for the other frameworks.
 
 ---
 
