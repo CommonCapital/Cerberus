@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cerberus.Api/Cerberus.Api.csproj" />
+    <Project Path="src/Cerberus.Core/Cerberus.Core.csproj" />
+    <Project Path="src/Cerberus.Data/Cerberus.Data.csproj" />
+    <Project Path="src/Cerberus.Models/Cerberus.Models.csproj" />
+  </Folder>
+</Solution>
