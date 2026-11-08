@@ -17,7 +17,7 @@
 7. [LLM model abstraction (Ollama + user API keys)](#7-llm-model-abstraction-ollama--user-api-keys)
 8. [Sandbox design (local Docker → Azure AKS)](#8-sandbox-design-local-docker--azure-aks)
 9. [Phase 1 engine — Scan & Detect (CodeQL-class)](#9-phase-1-engine--scan--detect-codeql-class)
-10. [Phase 2 engine — Enterprise compliance checks (EQUANS/ISO/OWASP)](#10-phase-2-engine--enterprise-compliance-checks-equansisoowasp)
+10. [Phase 2 engine — Enterprise compliance checks (ESAP/ISO/OWASP)](#10-phase-2-engine--enterprise-compliance-checks-esapisoowasp)
 11. [Phase 3 engine — Aggressive hacking mode (break & solve)](#11-phase-3-engine--aggressive-hacking-mode-break--solve)
 12. [Data model](#12-data-model)
 13. [Repository structure](#13-repository-structure)
@@ -44,10 +44,10 @@ Find vulnerabilities in **code and system design**, in the spirit of CodeQL / se
 
 ### Phase 2 — Enterprise-grade compliance checks
 Evaluate the target against **rigid, structured enterprise security frameworks** to guarantee enterprise compatibility.
-- Ingest control catalogs as data (the attached **EQUANS Security Assurance Plan** is the reference sample: 40 controls across General / Application / SaaS governance).
-- For each control, gather evidence (from Phase 1 findings, repo artifacts, config, IaC, operator answers) and produce a verdict: **Compliant / Partially compliant / Non-compliant**, with a justification, an **action plan**, and a **time limit for compliance** — matching the EQUANS response schema exactly.
+- Ingest control catalogs as data. The reference sample is a generic **Enterprise Security Assurance Plan (ESAP)**: 40 controls across General / Application / SaaS governance.
+- For each control, gather evidence (from Phase 1 findings, repo artifacts, config, IaC, operator answers) and produce a verdict: **Compliant / Partially compliant / Non-compliant**, with a justification, an **action plan**, and a **time limit for compliance** — matching the ESAP response schema exactly.
 - Also map to ISO 27001/27002, SOC 2, NIST, OWASP ASVS/Top 10, CIS.
-- Output: an auditable compliance matrix + remediation roadmap (exportable to the EQUANS xlsx shape).
+- Output: an auditable compliance matrix + remediation roadmap (exportable to the reference spreadsheet shape).
 
 ### Phase 3 — Aggressive hacking mode ("break & solve")
 Actively attempt to **break and penetrate** the system, then solve what it found.
@@ -175,7 +175,7 @@ An **Orchestrator** reads the engagement, builds a plan, and dispatches speciali
 | **SCA / Dependency** | Known-CVE deps, supply-chain, license risk | 1 | T0 |
 | **Secrets** | Leaked keys/credentials in code, config, git history | 1 | T0 |
 | **Threat-Model / System-Design** | Reasons over architecture: trust boundaries, auth flows, IDOR/priv-esc paths, misconfig, exposed infra | 1 | T0 |
-| **Compliance** | Maps evidence to control catalogs (EQUANS/ISO/SOC2/NIST/OWASP), scores verdicts + action plans | 2 | T0 |
+| **Compliance** | Maps evidence to control catalogs (ESAP/ISO/SOC2/NIST/OWASP), scores verdicts + action plans | 2 | T0 |
 | **Exploit / Active** | Validates findings: generates payloads/files to evade & penetrate; auth bypass, injection, SSRF, deserialization | 3 | T2 |
 | **Resilience / Load** | Crash/fault injection, authorized stress/flood to measure withstand threshold | 3 | T3 |
 | **Remediation / Report** | Proposes fixes as diffs, re-tests ("solve"), writes the final report | 2/3 | T0 |
@@ -258,26 +258,26 @@ OpenSandbox's **Egress sidecar** shares the sandbox network namespace and enforc
 
 ---
 
-## 10. Phase 2 engine — Enterprise compliance checks (EQUANS/ISO/OWASP)
+## 10. Phase 2 engine — Enterprise compliance checks (ESAP/ISO/OWASP)
 
-**Goal:** guarantee enterprise compatibility by grading the target against rigid control catalogs — reference sample = the attached **EQUANS Security Assurance Plan**.
+**Goal:** guarantee enterprise compatibility by grading the target against rigid control catalogs — reference sample = a generic **Enterprise Security Assurance Plan (ESAP)**.
 
 ### Control-catalog model (frameworks are data, not code)
 ```
 Catalog { id, name, version, sections[] }
 Section { name, controls[] }
 Control {
-  reqNo, section, requirement,              // e.g. EQUANS Req 7 "Vulnerability and Patch Management"
+  reqNo, section, requirement,              // e.g. ESAP Req 7 "Vulnerability and Patch Management"
   evidenceHints[],                           // what satisfies it
   verdict: Compliant | Partially | NonCompliant | NA,
-  justification, actionPlan, timeLimitDays   // mirrors EQUANS response schema
+  justification, actionPlan, timeLimitDays   // mirrors ESAP response schema
 }
 ```
 
-- **Seed catalogs:** EQUANS SAP (40 controls: General Governance 1–13, Application 14–22, SaaS 23–40), OWASP ASVS + Top 10, ISO 27001/27002, SOC 2, NIST CSF/800-53, CIS. The EQUANS xlsx becomes a built-in importable catalog.
-- **Evaluation:** the Compliance agent gathers evidence (Phase 1 findings, repo artifacts, config/IaC, operator-answered org questions that can't be auto-detected — e.g. EQUANS controls about insurance, SPOCs, backup rotation) and produces the verdict + action plan + deadline per control.
+- **Seed catalogs:** the ESAP catalog (40 controls: General Governance 1–13, Application 14–22, SaaS 23–40), OWASP ASVS + Top 10, ISO 27001/27002, SOC 2, NIST CSF/800-53, CIS. The reference spreadsheet becomes a built-in importable catalog.
+- **Evaluation:** the Compliance agent gathers evidence (Phase 1 findings, repo artifacts, config/IaC, operator-answered org questions that can't be auto-detected — e.g. ESAP controls about insurance, SPOCs, backup rotation) and produces the verdict + action plan + deadline per control.
 - **Auto vs. operator-answered:** technical controls (encryption in transit/at rest, TLS version, MFA presence, secrets handling, OWASP Top 10, patch currency) can be largely auto-evaluated from scan evidence; organizational controls (liability insurance, committees, NDAs) are operator questionnaires — the platform tracks both.
-- **Output:** a compliance matrix + remediation roadmap, **exportable back into the EQUANS xlsx format** (Compliant Response + Provider's Detailed Response + Action Plan + Time limit), plus mapped scores for the other frameworks.
+- **Output:** a compliance matrix + remediation roadmap, **exportable back into the reference spreadsheet format** (Compliant Response + Provider's Detailed Response + Action Plan + Time limit), plus mapped scores for the other frameworks.
 
 ---
 
@@ -334,7 +334,7 @@ cerberus/
 │  ├─ Cerberus.Sandbox/              # ISandboxProvider: thin wrapper over OpenSandbox C# SDK (Docker local / K8s prod)
 │  ├─ Cerberus.Messaging/            # IMessageBus: RabbitMQ / in-proc
 │  ├─ Cerberus.Workers/              # job workers that run agents in sandboxes
-│  ├─ Cerberus.Compliance/           # catalog engine + EQUANS/ISO/OWASP catalogs + xlsx import/export
+│  ├─ Cerberus.Compliance/           # catalog engine + ESAP/ISO/OWASP catalogs + xlsx import/export
 │  ├─ Cerberus.Data/                 # EF Core contexts + providers (SQLite/PG/Azure)
 │  └─ Cerberus.Infrastructure/       # cache, secrets, artifact store adapters
 ├─ frontends/
@@ -342,7 +342,7 @@ cerberus/
 │  └─ web/                        # TypeScript React/Next
 ├─ shared/
 │  └─ contracts/                  # canonical schemas (findings, controls, tools, jobs) → TS types
-├─ catalogs/                      # framework catalogs as data (EQUANS, OWASP, ISO, SOC2, NIST, CIS)
+├─ catalogs/                      # framework catalogs as data (ESAP, OWASP, ISO, SOC2, NIST, CIS)
 ├─ prompts/                       # versioned agent system prompts (security ROE + output schemas)
 ├─ security-skills/               # VENDORED (Apache-2.0): 818 cyber skills + framework mappings
 │  ├─ skills/                     #   <skill-name>/SKILL.md (+ references) — loaded per agent
@@ -375,7 +375,7 @@ These are *engineering* phases (how we build), distinct from the three *product*
 | **M3 — Sandbox + job pipeline** | Execution isolation + jobs | Stand up **OpenSandbox server** (Docker runtime) + `ISandboxProvider` over its C# SDK; `IMessageBus` (RabbitMQ/in-proc); all tools run in sandbox; egress policy wired to scope; findings stream over SignalR. |
 | **M4 — Authorization & safety spine** | §3 before any offense | Engagement/scope/target model, ownership verification, capability tiers, kill switch, audit log. |
 | **M5 — Product Phase 1 (Scan & Detect)** | Passive agents | Recon, SAST, SCA, Secrets, Threat-Model; normalized findings; dogfood on RabbitMQ repo (§17). |
-| **M6 — Product Phase 2 (Compliance)** | Catalog engine | Compliance agent + EQUANS/OWASP/ISO catalogs; xlsx import/export; compliance matrix. |
+| **M6 — Product Phase 2 (Compliance)** | Catalog engine | Compliance agent + ESAP/OWASP/ISO catalogs; xlsx import/export; compliance matrix. |
 | **M7 — Azure implementations** | Prod swap | Azure SQL/PG, Azure Cache, Azure SignalR, AKS sandbox pods, RabbitMQ@AKS, Key Vault, Blob. DI + manifests only. |
 | **M8 — Product Phase 3 (Aggressive mode)** | Gated offense | Exploit agent (T2), Resilience/Load (T3), Remediation/Report; dry-run → authorize → execute → solve loop. Built last, after the spine is proven. |
 | **M9 — Web frontend** | Second client | React/Next UI against the same API + SignalR. |
@@ -435,7 +435,7 @@ All of the above are **implementations of the §5 seams** — the same build run
 - ✅ **Product name:** **Cerberus** (repo `CommonCapital/Cerberus`; package/project prefix `Cerberus.*`).
 
 **Decisions needed (M0):**
-1. **Catalog priority:** EQUANS + OWASP first, or broader ISO/SOC2/NIST set in M6?
+1. **Catalog priority:** ESAP + OWASP first, or broader ISO/SOC2/NIST set in M6?
 2. **DB default for local:** SQLite (zero-config) vs local Postgres (parity with prod).
 3. **Web framework:** plain React SPA vs Next.js.
 4. **OpenSandbox isolation class for Phase 3:** gVisor (lighter) vs Kata/Firecracker (stronger, heavier) as the default for destructive-tier sandboxes.
@@ -446,10 +446,10 @@ All of the above are **implementations of the §5 seams** — the same build run
 - **Phase 3 is the legal/ethical hotspot.** The authorization spine (§3) must be complete and proven (M4) before M8. No destructive capability ships without verified ownership + caps + kill switch + audit.
 - **.NET rewrite cost:** M2 re-implements the server from scratch. Mitigated by doing M1 first (clean, de-clouded, working baseline to port from) and keeping the TS CLI.
 - **Scanner integration:** wrapping heavyweight OSS scanners (CodeQL etc.) in sandboxes has real build/runtime weight — budget for it in M5.
-- **Compliance auto-evaluation limits:** many EQUANS controls are organizational (insurance, committees, NDAs) and can't be auto-detected — the questionnaire path must exist alongside auto-evaluation.
+- **Compliance auto-evaluation limits:** many ESAP controls are organizational (insurance, committees, NDAs) and can't be auto-detected — the questionnaire path must exist alongside auto-evaluation.
 - **OpenSandbox dependency:** it's Apache-2.0 and CNCF-listed (healthy), but it's a young project and a core runtime dependency. Pin a version, keep the `ISandboxProvider` seam thin so it's replaceable, and budget time to operate its server (control plane) in both local and AKS modes.
 - **Skills-library provenance:** the 818 skills are community-authored (Apache-2.0). Treat their contents as *capability references, not vetted doctrine* — review before wiring any skill into an active/destructive agent, and keep LICENSE/NOTICE attribution on redistribution.
 
 ---
 
-*End of plan. This document captures the full scope discussed: de-clouding (no Clerk/Polar/Neon), local DB + **Alibaba OpenSandbox** sandbox + own authorization, dual LLM support (user API keys + Ollama), .NET backend with TypeScript CLI + web frontends, Azure production (DB, cache, RabbitMQ, Kubernetes, SignalR, OpenSandbox-on-AKS), the multi-agent security fleet powered by a vendored **818-skill** framework-mapped library, and the three product phases — Scan & Detect, Enterprise Compliance (EQUANS-grade), and Aggressive Hacking "break & solve" — all bound by an enforced authorization & safety spine whose network-level enforcement is the OpenSandbox FQDN egress allowlist.*
+*End of plan. This document captures the full scope discussed: de-clouding (no Clerk/Polar/Neon), local DB + **Alibaba OpenSandbox** sandbox + own authorization, dual LLM support (user API keys + Ollama), .NET backend with TypeScript CLI + web frontends, Azure production (DB, cache, RabbitMQ, Kubernetes, SignalR, OpenSandbox-on-AKS), the multi-agent security fleet powered by a vendored **818-skill** framework-mapped library, and the three product phases — Scan & Detect, Enterprise Compliance (enterprise-grade), and Aggressive Hacking "break & solve" — all bound by an enforced authorization & safety spine whose network-level enforcement is the OpenSandbox FQDN egress allowlist.*
