@@ -5,8 +5,16 @@ import { z } from "zod";
 import { db } from "@nightcode/database/client";
 
 import type { AuthenticatedEnv } from "../middleware/require-auth";
-import { requireCreditsBalance } from "../middleware/require-credits-balance";
 
+function parseStoredMessages(raw: unknown): unknown[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const createSessionSchema = z.object({
   title: z.string(),
@@ -56,9 +64,9 @@ const app = new Hono<AuthenticatedEnv>()
       return c.json({ error: "Session not found" }, 404);
     }
 
-    return c.json(session);
+    return c.json({ ...session, messages: parseStoredMessages(session.messages) });
   })
-  .post("/", requireCreditsBalance, createSessionValidator, async (c) => {
+  .post("/", createSessionValidator, async (c) => {
     // MOCK: Uncomment to simulate slow session loading
     // await new Promise((r) => setTimeout(r, 5000))
 
@@ -78,7 +86,7 @@ const app = new Hono<AuthenticatedEnv>()
       },
     });
 
-    return c.json(session, 201);
+    return c.json({ ...session, messages: parseStoredMessages(session.messages) }, 201);
   });
 
 export default app;

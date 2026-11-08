@@ -1,5 +1,5 @@
 import { createMiddleware } from "hono/factory";
-import { authenticateOAuthRequest } from "../lib/auth";
+import { validateSessionToken } from "../lib/auth";
 
 export type AuthenticatedEnv = {
   Variables: {
@@ -7,9 +7,19 @@ export type AuthenticatedEnv = {
   };
 };
 
+function extractBearerToken(header: string | undefined): string | null {
+  if (!header) return null;
+  return header.startsWith("Bearer ") ? header.slice(7).trim() || null : null;
+}
+
 export const requireAuth = createMiddleware<AuthenticatedEnv>(async (c, next) => {
   try {
-    const auth = await authenticateOAuthRequest(c.req.raw);
+    const token = extractBearerToken(c.req.header("Authorization"));
+    if (!token) {
+      return c.json({ error: "Unauthorized. Run /login to continue." }, 401);
+    }
+
+    const auth = await validateSessionToken(token);
     if (!auth) {
       return c.json({ error: "Unauthorized. Run /login to continue." }, 401);
     }
@@ -20,4 +30,3 @@ export const requireAuth = createMiddleware<AuthenticatedEnv>(async (c, next) =>
     return c.json({ error: "Unauthorized. Run /login to continue." }, 401);
   }
 });
-

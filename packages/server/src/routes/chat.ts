@@ -10,19 +10,25 @@ import {
   type UIMessage,
 } from "ai";
 import { db } from "@nightcode/database/client";
-import type { Prisma } from "@nightcode/database";
-import { 
-  getToolContracts, 
-  modeSchema, 
-  type ModeType, 
+import {
+  getToolContracts,
+  modeSchema,
+  type ModeType,
   type ToolContracts
 } from "@nightcode/shared";
 import { buildSystemPrompt } from "../system-prompt";
 import type { AuthenticatedEnv } from "../middleware/require-auth";
-import { requireCreditsBalance } from "../middleware/require-credits-balance";
-import { calculateCreditsForUsage } from "../lib/credits";
-import { ingestAiUsage } from "../lib/polar";
 import { isSupportedChatModel, resolveChatModel } from "../lib/models";
+
+function parseStoredMessages(raw: unknown): NightcodeUIMessage[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as NightcodeUIMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 type ChatMessageMetadata = {
   mode?: ModeType;
@@ -66,7 +72,6 @@ function hasPendingToolCalls(message: NightcodeUIMessage) {
 const app = new Hono<AuthenticatedEnv>()
   .post(
     "/",
-    requireCreditsBalance,
     submitValidator,
     async (c) => {
       const userId = c.get("userId");
@@ -83,9 +88,7 @@ const app = new Hono<AuthenticatedEnv>()
       const startTime = Date.now();
       const tools = getToolContracts(mode);
       const resolvedModel = resolveChatModel(model);
-      const previousMessages = Array.isArray(session.messages)
-        ? (session.messages as unknown as NightcodeUIMessage[])
-        : [];
+      const previousMessages = parseStoredMessages(session.messages);
       const mergedMessages = [...previousMessages];
       
       for (const message of messages) {
@@ -145,32 +148,9 @@ const app = new Hono<AuthenticatedEnv>()
           await db.session.update({
             where: { id, userId },
             data: {
-              messages: event.messages as unknown as Prisma.InputJsonValue,
+              messages: JSON.stringify(event.messages),
             },
           });
-
-          if (!completedUsage) return;
-
-          try {
-            const billableUsage = calculateCreditsForUsage({
-              provider: resolvedModel.provider,
-              model: resolvedModel.modelId,
-              usage: completedUsage,
-            });
-
-            await ingestAiUsage({
-              externalCustomerId: userId,
-              eventId: `chat-message:${event.responseMessage.id}`,
-              credits: billableUsage.credits,
-            });
-          } catch (error) {
-            console.error("Failed to ingest Polar AI usage for chat message", {
-              error,
-              sessionId: id,
-              messageId: event.responseMessage.id,
-              userId,
-            });
-          }
         },
         onError(error) {
           return error instanceof Error ? error.message : String(error);

@@ -1,37 +1,46 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 
-const app = new Hono().get("/callback", (c) => {
-  const code = c.req.query("code");
-  const state = c.req.query("state");
-  const error = c.req.query("error");
+import { registerUser, loginUser, revokeSessionToken } from "../lib/auth";
 
-  const errorDescription = c.req.query("error_description");
+const credentialsSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
 
-  if (error) {
-    return c.text(errorDescription ?? error, 400);
-  }
-
-  if (!code || !state) {
-    return c.text("Missing authorization code or state", 400);
-  }
-
-  try {
-    const [encoded] = state.split(".");
-    if (!encoded) throw new Error("Invalid state");
-
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString());
-    const port = payload.port;
-
-    if (!port || typeof port !== "number") {
-      throw new Error("Invalid port in state");
-    }
-
-    const redirectUrl = `http://localhost:${port}/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-
-    return c.redirect(redirectUrl);
-  } catch {
-    return c.text("Invalid authentication state", 400);
+const credentialsValidator = zValidator("json", credentialsSchema, (result, c) => {
+  if (!result.success) {
+    return c.json({ error: "A valid email and a password (min 6 characters) are required" }, 400);
   }
 });
+
+const app = new Hono()
+  .post("/register", credentialsValidator, async (c) => {
+    const { email, password } = c.req.valid("json");
+    try {
+      const { token } = await registerUser(email, password);
+      return c.json({ token }, 201);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Registration failed";
+      return c.json({ error: message }, 409);
+    }
+  })
+  .post("/login", credentialsValidator, async (c) => {
+    const { email, password } = c.req.valid("json");
+    const result = await loginUser(email, password);
+    if (!result) {
+      return c.json({ error: "Invalid email or password" }, 401);
+    }
+    return c.json({ token: result.token });
+  })
+  .post("/logout", async (c) => {
+    const header = c.req.header("Authorization");
+    const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : null;
+    if (token) {
+      await revokeSessionToken(token);
+    }
+    return c.json({ success: true });
+  });
 
 export default app;

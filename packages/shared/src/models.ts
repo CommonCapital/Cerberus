@@ -3,7 +3,7 @@ export type ModelPricing = {
   outputUsdPerMillionTokens: number;
 };
 
-export type SupportedProvider = "anthropic" | "openai";
+export type SupportedProvider = "anthropic" | "openai" | "ollama";
 
 type SupportedChatModelDefinition = {
   id: string;
@@ -59,6 +59,23 @@ export const SUPPORTED_CHAT_MODELS = [
       inputUsdPerMillionTokens: 0.2,
       outputUsdPerMillionTokens: 1.25,
     },
+  },
+  // Local models served by Ollama (http://localhost:11434). Free — they run on
+  // the user's own machine. Pull them first, e.g. `ollama pull llama3.1`.
+  {
+    id: "llama3.1",
+    provider: "ollama",
+    pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 },
+  },
+  {
+    id: "qwen2.5-coder",
+    provider: "ollama",
+    pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 },
+  },
+  {
+    id: "deepseek-r1",
+    provider: "ollama",
+    pricing: { inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 },
   },
 ] as const satisfies readonly SupportedChatModelDefinition[];
 
