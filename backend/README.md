@@ -40,7 +40,12 @@ Environment:
 | PUT | `/settings/keys` | Bearer | `{ provider, apiKey }` — store a key (encrypted at rest) |
 | DELETE | `/settings/keys/{provider}` | Bearer | Remove a stored key |
 | POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
+| POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → normalized findings |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
+
+### `/scan` — Phase 1 (Scan & Detect), MVP
+
+Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: current directory) and applies a regex rule set for secret detection (AWS keys, private keys, GitHub/Slack tokens, hardcoded credentials — CWE-798) and common insecure patterns (weak hashes CWE-327, disabled TLS verification CWE-295, `eval` CWE-95, `shell=True` CWE-78). Returns normalized **findings** (`id, title, severity, category, cwe, file, line, evidence, confidence`), sorted by severity. Paths are confined to the scan root (traversal → 400). This is the deterministic layer and a **trusted-target MVP** — real engagements run it inside the sandbox with LLM reasoning on top (PLAN.md M3/M5).
 
 ### Per-user API keys
 

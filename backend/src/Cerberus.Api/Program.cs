@@ -5,8 +5,10 @@ using Cerberus.Api.Settings;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Cerberus.Models;
+using Cerberus.Scanning;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +38,15 @@ builder.Services.AddSingleton<IModelProvider, MockProvider>();
 builder.Services.AddSingleton<IModelProviderResolver, ModelProviderResolver>();
 
 builder.Services.AddSignalR();
+
+// --- Phase 1 scanning (passive, trusted-target MVP) ------------------------
+var scanRoot = Environment.GetEnvironmentVariable("CERBERUS_SCAN_ROOT") ?? Directory.GetCurrentDirectory();
+builder.Services.AddSingleton(new ScanOptions(scanRoot));
+builder.Services.AddSingleton<ScanService>();
+
+// Serialize enums (e.g. Severity) as strings in JSON responses.
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 

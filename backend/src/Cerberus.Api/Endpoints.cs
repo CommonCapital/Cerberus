@@ -5,6 +5,7 @@ using Cerberus.Api.Chat;
 using Cerberus.Api.Settings;
 using Cerberus.Core.Models;
 using Cerberus.Data;
+using Cerberus.Scanning;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Api;
@@ -37,6 +38,28 @@ public static class Endpoints
         settings.MapDelete("/{provider}", DeleteApiKey);
 
         app.MapPost("/chat", StreamChat).AddEndpointFilter<RequireAuthFilter>();
+
+        app.MapPost("/scan", RunScan).AddEndpointFilter<RequireAuthFilter>();
+    }
+
+    // --- scanning (Phase 1: Scan & Detect, MVP) -----------------------------
+
+    private static IResult RunScan(ScanRequest body, ScanService scanner)
+    {
+        try
+        {
+            var result = scanner.Scan(string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!);
+            return Results.Json(new
+            {
+                filesScanned = result.FilesScanned,
+                findingCount = result.Findings.Count,
+                findings = result.Findings,
+            });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 400);
+        }
     }
 
     // --- settings: per-user model API keys ----------------------------------
