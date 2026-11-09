@@ -50,28 +50,39 @@ public static class Endpoints
     // --- scanning (Phase 1: Scan & Detect, MVP) -----------------------------
 
     private static async Task<IResult> RunScan(
-        ScanRequest body, HttpContext http, CerberusDbContext db, ScanService scanner, CancellationToken ct)
+        ScanRequest body, HttpContext http, CerberusDbContext db,
+        ScanService scanner, ScaService sca, CancellationToken ct)
     {
         var userId = UserId(http);
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
 
         ScanResult result;
+        ScaResult scaResult;
         try
         {
+            // Static (regex) pass is synchronous; SCA is an async OSV lookup.
             result = scanner.Scan(targetPath);
+            scaResult = (body.Sca ?? true)
+                ? await sca.ScanAsync(targetPath, ct)
+                : new ScaResult(0, 0, []);
         }
         catch (UnauthorizedAccessException ex)
         {
             return Results.Json(new { error = ex.Message }, statusCode: 400);
         }
 
-        var findingsJson = JsonSerializer.Serialize(result.Findings, JsonOptions);
+        // Merge both passes; re-sort by severity so the combined set is ranked.
+        var findings = result.Findings.Concat(scaResult.Findings)
+            .OrderByDescending(f => f.Severity)
+            .ToList();
+
+        var findingsJson = JsonSerializer.Serialize(findings, JsonOptions);
         var scan = new Scan
         {
             UserId = userId,
             TargetPath = targetPath,
             FilesScanned = result.FilesScanned,
-            FindingCount = result.Findings.Count,
+            FindingCount = findings.Count,
             Findings = findingsJson,
         };
         db.Scans.Add(scan);
@@ -83,8 +94,10 @@ public static class Endpoints
             targetPath = scan.TargetPath,
             createdAt = scan.CreatedAt,
             filesScanned = result.FilesScanned,
-            findingCount = result.Findings.Count,
-            findings = result.Findings,
+            manifestsScanned = scaResult.ManifestsScanned,
+            dependenciesScanned = scaResult.DependenciesScanned,
+            findingCount = findings.Count,
+            findings,
         }, JsonOptions);
     }
 
