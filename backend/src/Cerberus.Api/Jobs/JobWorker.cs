@@ -9,6 +9,8 @@ namespace Cerberus.Api.Jobs;
 
 public sealed record ScanJobParameters(bool Sca = true);
 
+public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool Sca = true);
+
 /// <summary>
 /// Executes queued jobs. Runs <see cref="JobOptions.Concurrency"/> consumers
 /// over the message bus; each job gets its own DI scope, is re-authorized at
@@ -17,7 +19,7 @@ public sealed record ScanJobParameters(bool Sca = true);
 /// </summary>
 public sealed class JobWorker(
     IMessageBus bus, IServiceScopeFactory scopes, JobCancellationRegistry registry,
-    JobOptions options, ILogger<JobWorker> logger) : BackgroundService
+    JobOptions options, JobEvents events, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -116,6 +118,7 @@ public sealed class JobWorker(
                 .SetProperty(j => j.State, nameof(JobState.Running))
                 .SetProperty(j => j.StartedAt, startedAt), stoppingToken);
         if (claimed != 1) return;
+        await events.PublishAsync(jobId);
 
         var outcome = await JobExecutor.RunAsync(
             jobId, ct => RunWorkAsync(services, job, ct), registry, options.Timeout, options.Grace, stoppingToken);
@@ -133,6 +136,25 @@ public sealed class JobWorker(
                 var run = await services.GetRequiredService<ScanRunner>()
                     .RunAsync(job.UserId, job.EngagementId, job.TargetPath, parameters.Sca, ct);
                 return run.Scan.Id;
+
+            case JobTypes.Assess:
+                var assess = JsonSerializer.Deserialize<AssessJobParameters>(job.Parameters, JobTypes.Json)
+                    ?? throw new InvalidOperationException("The job has no parameters.");
+                var catalog = services.GetRequiredService<Compliance.CatalogLoader>().Get(assess.CatalogId)
+                    ?? throw new InvalidOperationException($"Catalog '{assess.CatalogId}' is no longer installed.");
+
+                Scan? scan = null;
+                if (assess.ScanId is not null)
+                {
+                    var db = services.GetRequiredService<CerberusDbContext>();
+                    scan = await db.Scans.AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.Id == assess.ScanId && s.UserId == job.UserId, ct)
+                        ?? throw new InvalidOperationException($"Scan {assess.ScanId} no longer exists.");
+                }
+                var assessment = await services.GetRequiredService<AssessmentRunner>()
+                    .RunAsync(job.UserId, job.EngagementId, catalog, scan, job.TargetPath, assess.Sca, ct);
+                return assessment.Assessment.Id;
+
             default:
                 throw new InvalidOperationException($"Unknown job type \"{job.Type}\".");
         }
@@ -161,6 +183,8 @@ public sealed class JobWorker(
             job.EngagementId, job.TargetPath,
             Enum.TryParse<CapabilityTier>(job.Tier, out var tier) ? tier : null);
 
+        await events.PublishAsync(job.Id);
+
         if (outcome.Abandoned)
         {
             logger.LogWarning("Job {JobId} ignored its stop signal and was abandoned.", job.Id);
@@ -171,6 +195,11 @@ public sealed class JobWorker(
 public static class JobTypes
 {
     public const string Scan = "scan";
+
+    /// <summary>A compliance assessment; the result id is the assessment.</summary>
+    public const string Assess = "assess";
+
+    public static readonly IReadOnlyList<string> All = [Scan, Assess];
 
     public static readonly JsonSerializerOptions Json = new()
     {

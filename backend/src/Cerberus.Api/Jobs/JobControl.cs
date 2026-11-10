@@ -13,7 +13,7 @@ public sealed record JobOptions(int Concurrency, TimeSpan Timeout, TimeSpan Grac
 /// The operator's controls over jobs: cancel one, or stop everything an
 /// engagement has queued or running (the kill switch).
 /// </summary>
-public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry registry, AuditLog audit)
+public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry registry, AuditLog audit, JobEvents events)
 {
     public enum CancelResult { Cancelled, StopRequested, AlreadyFinished }
 
@@ -32,6 +32,7 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
         {
             await audit.AppendAsync(job.UserId, "job.cancel", AuditOutcome.Ok,
                 $"Job {job.Id} cancelled before it started.", job.EngagementId, job.TargetPath, ct: ct);
+            await events.PublishAsync(job.Id);
             return CancelResult.Cancelled;
         }
 
@@ -48,8 +49,12 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
     public async Task<CancelSummary> CancelEngagementAsync(string userId, string engagementId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var queued = await db.Jobs
+        var queuedIds = await db.Jobs.AsNoTracking()
             .Where(j => j.UserId == userId && j.EngagementId == engagementId && j.State == nameof(JobState.Queued))
+            .Select(j => j.Id)
+            .ToListAsync(ct);
+        var queued = await db.Jobs
+            .Where(j => queuedIds.Contains(j.Id) && j.State == nameof(JobState.Queued))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, nameof(JobState.Cancelled))
                 .SetProperty(j => j.Error, "Cancelled: the engagement was aborted.")
@@ -67,6 +72,7 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
                 $"Kill switch: cancelled {queued} queued job(s) and requested stop of {running} running job(s).",
                 engagementId, ct: ct);
         }
+        foreach (var id in queuedIds) await events.PublishAsync(id);
         return new CancelSummary(queued, running);
     }
 }
