@@ -6,6 +6,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Cerberus.Tests;
 
@@ -33,7 +35,46 @@ public sealed class ApiHost : IDisposable
         Environment.SetEnvironmentVariable("CERBERUS_SCAN_ROOT", scanRoot);
         Environment.SetEnvironmentVariable("CERBERUS_CATALOG_ROOT", FindCatalogs());
 
-        _factory = new WebApplicationFactory<Program>();
+        _factory = NewFactory();
+    }
+
+    /// <summary>Stands in for DNS and HTTP so ownership verification is testable offline.</summary>
+    public FakeOwnershipProbe Probe { get; } = new();
+
+    private WebApplicationFactory<Program> NewFactory() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+                services.AddSingleton<Cerberus.Authorization.IOwnershipProbe>(Probe)));
+
+    /// <summary>
+    /// A second API instance over the same database, started with one extra
+    /// environment setting. The setting is only read at startup, so it is
+    /// restored as soon as the instance is up.
+    /// </summary>
+    public WebApplicationFactory<Program> StartVariant(string variable, string value)
+    {
+        Environment.SetEnvironmentVariable(variable, value);
+        try
+        {
+            var factory = NewFactory();
+            factory.CreateClient().Dispose();   // forces startup while the setting is in place
+            return factory;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, null);
+        }
+    }
+
+    public static async Task<HttpClient> AuthenticatedClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/auth/register",
+            new { email = $"{Guid.NewGuid():n}@test.dev", password = "secret123" });
+        response.EnsureSuccessStatusCode();
+        var token = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return client;
     }
 
     public HttpClient CreateClient() => _factory.CreateClient();
@@ -72,6 +113,18 @@ public sealed class ApiHost : IDisposable
         _factory.Dispose();
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
+}
+
+public sealed class FakeOwnershipProbe : Cerberus.Authorization.IOwnershipProbe
+{
+    public ConcurrentDictionary<string, string> Txt { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public ConcurrentDictionary<string, string> Pages { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<IReadOnlyList<string>> LookupTxtAsync(string name, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<string>>(Txt.TryGetValue(name, out var value) ? [value] : []);
+
+    public Task<string?> FetchAsync(Uri url, CancellationToken ct) =>
+        Task.FromResult(Pages.TryGetValue(url.ToString(), out var body) ? body : null);
 }
 
 [CollectionDefinition("api")]
@@ -258,5 +311,111 @@ public class ApiIntegrationTests(ApiHost host)
         Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/jobs/{jobId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await bob.PostAsync($"/jobs/{jobId}/cancel", null)).StatusCode);
         Assert.Equal(0, (await bob.GetFromJsonAsync<JsonElement>("/jobs")).GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Domain_target_is_verified_only_after_the_challenge_is_published()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var engagement = await Json(await client.PostAsJsonAsync("/engagements", new { name = "Live" }));
+        var id = engagement.GetProperty("id").GetString();
+        var domain = $"{Guid.NewGuid():n}.example";
+        var target = await Json(await client.PostAsJsonAsync($"/engagements/{id}/targets", new { type = "domain", locator = domain }));
+        var targetId = target.GetProperty("id").GetString();
+        Assert.Equal("Pending", target.GetProperty("verification").GetString());
+
+        var challenge = await client.GetFromJsonAsync<JsonElement>($"/engagements/{id}/targets/{targetId}/challenge");
+        var recordName = challenge.GetProperty("dns").GetProperty("name").GetString()!;
+        var value = challenge.GetProperty("value").GetString()!;
+        Assert.Equal($"_cerberus-challenge.{domain}", recordName);
+        Assert.StartsWith("cerberus-verify=", value);
+
+        // Nothing published yet, then the wrong value: both refused, target stays Pending.
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await client.PostAsync($"/engagements/{id}/targets/{targetId}/verify", null)).StatusCode);
+        host.Probe.Txt[recordName] = "cerberus-verify=someone-elses-token";
+        var wrong = await client.PostAsync($"/engagements/{id}/targets/{targetId}/verify", null);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, wrong.StatusCode);
+        Assert.False((await Json(wrong)).GetProperty("verified").GetBoolean());
+
+        host.Probe.Txt[recordName] = value;
+        var verified = await Json(await client.PostAsync($"/engagements/{id}/targets/{targetId}/verify", null));
+        Assert.True(verified.GetProperty("verified").GetBoolean());
+        Assert.Equal("Dns", verified.GetProperty("method").GetString());
+
+        var reloaded = await client.GetFromJsonAsync<JsonElement>($"/engagements/{id}");
+        var stored = reloaded.GetProperty("targets").EnumerateArray().Single();
+        Assert.Equal("Verified", stored.GetProperty("verification").GetString());
+        Assert.Equal("Dns", stored.GetProperty("verificationMethod").GetString());
+
+        // Attempts are audited: two refusals, then the success.
+        var audit = await client.GetFromJsonAsync<JsonElement>($"/audit?engagementId={id}");
+        var outcomes = audit.EnumerateArray().Where(e => e.GetProperty("action").GetString() == "target.verify")
+            .Select(e => e.GetProperty("outcome").GetString()).Reverse().ToList();
+        Assert.Equal(["denied", "denied", "ok"], outcomes);
+    }
+
+    [Fact]
+    public async Task Another_users_target_cannot_be_challenged_or_verified()
+    {
+        var (alice, _) = await host.NewUserAsync();
+        var (bob, _) = await host.NewUserAsync();
+        var id = (await Json(await alice.PostAsJsonAsync("/engagements", new { name = "Mine" }))).GetProperty("id").GetString();
+        var targetId = (await Json(await alice.PostAsJsonAsync($"/engagements/{id}/targets", new { type = "host", locator = "web-01.example" })))
+            .GetProperty("id").GetString();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/engagements/{id}/targets/{targetId}/challenge")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.PostAsync($"/engagements/{id}/targets/{targetId}/verify", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Path_targets_have_no_challenge()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var id = (await Json(await client.PostAsJsonAsync("/engagements", new { name = "Code" }))).GetProperty("id").GetString();
+        var targetId = (await Json(await client.PostAsJsonAsync($"/engagements/{id}/targets", new { locator = "app", ownershipAttested = true })))
+            .GetProperty("id").GetString();
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/engagements/{id}/targets/{targetId}/challenge")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync($"/engagements/{id}/targets/{targetId}/verify", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Audit_log_can_be_exported_and_reverified_offline()
+    {
+        var (client, _) = await host.NewUserAsync();
+        await client.PostAsJsonAsync("/engagements", new { name = "=HYPERLINK(\"x\"), with comma" });
+        await client.PostAsJsonAsync("/scan", new { path = "app", sca = false });
+
+        var response = await client.GetAsync("/audit/export");
+        Assert.Equal("application/x-ndjson", response.Content.Headers.ContentType?.MediaType);
+        var lines = (await response.Content.ReadAsStringAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => JsonDocument.Parse(l).RootElement).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.Equal([1L, 2L], lines.Select(l => l.GetProperty("sequence").GetInt64()).ToArray());
+        // Each line links to the one before it, so the file can be checked without the server.
+        Assert.Equal(lines[0].GetProperty("hash").GetString(), lines[1].GetProperty("previousHash").GetString());
+
+        var csv = await client.GetStringAsync("/audit/export?format=csv");
+        var rows = csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(3, rows.Length);
+        Assert.StartsWith("sequence,createdAt,action", rows[0]);
+        Assert.Contains("\"Created engagement \"\"=HYPERLINK(\"\"x\"\"), with comma\"\" (max tier T0).\"", rows[1]);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/audit/export?format=xml")).StatusCode);
+    }
+
+    [Fact]
+    public async Task When_an_engagement_is_mandatory_runs_without_one_are_refused()
+    {
+        using var strict = host.StartVariant("CERBERUS_REQUIRE_ENGAGEMENT", "true");
+        var client = await ApiHost.AuthenticatedClientAsync(strict);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/scan", new { path = "app", sca = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { path = "app", sca = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/compliance/assess", new { path = "app", sca = false })).StatusCode);
+
+        var id = (await Json(await client.PostAsJsonAsync("/engagements", new { name = "Required" }))).GetProperty("id").GetString();
+        await client.PostAsJsonAsync($"/engagements/{id}/targets", new { locator = "app", ownershipAttested = true });
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/scan", new { path = "app", sca = false, engagementId = id })).StatusCode);
     }
 }

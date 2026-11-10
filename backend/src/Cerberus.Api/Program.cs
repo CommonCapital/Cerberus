@@ -3,6 +3,7 @@ using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Hubs;
 using Cerberus.Api.Jobs;
+using Cerberus.Api.Ownership;
 using Cerberus.Api.Settings;
 using Cerberus.Compliance;
 using Cerberus.Core.Models;
@@ -60,6 +61,12 @@ builder.Services.AddSingleton<ComplianceEngine>();
 
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();
+builder.Services.AddSingleton(new RunPolicy(
+    RequireEngagement: Environment.GetEnvironmentVariable("CERBERUS_REQUIRE_ENGAGEMENT") == "true"));
+// Proof-of-control probe for host/domain targets (DNS TXT lookup, well-known file fetch).
+builder.Services.AddSingleton(new OwnershipProbeOptions(
+    AllowLocalAddresses: Environment.GetEnvironmentVariable("CERBERUS_ALLOW_LOCAL_TARGETS") == "true"));
+builder.Services.AddSingleton<Cerberus.Authorization.IOwnershipProbe, NetworkOwnershipProbe>();
 
 // --- Job pipeline (in-process bus locally; RabbitMQ in production) ----------
 builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();

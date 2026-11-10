@@ -44,9 +44,12 @@ Environment:
 | GET | `/engagements/{id}` | Bearer | An engagement with its in-scope targets |
 | POST | `/engagements/{id}/targets` | Bearer | Add a target `{ type?, locator, ownershipAttested }` to the scope |
 | DELETE | `/engagements/{id}/targets/{targetId}` | Bearer | Remove a target from the scope |
+| GET | `/engagements/{id}/targets/{targetId}/challenge` | Bearer | What to publish to prove control of a host/domain target |
+| POST | `/engagements/{id}/targets/{targetId}/verify` | Bearer | Check the proof (`?method=dns\|http` to limit it); 200 when verified, 422 when not |
 | POST | `/engagements/{id}/abort` · `/close` | Bearer | Abort (kill switch) or close: no further runs are authorized |
 | GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
 | GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
+| GET | `/audit/export` | Bearer | Download the whole audit log, oldest first (`?format=jsonl\|csv`) |
 | POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess", path?, sca?, engagementId?, catalogId?, scanId? }` → 202 with the job |
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
@@ -73,11 +76,17 @@ An **engagement** states what may be tested: a list of in-scope targets, a maxim
 - the engagement is closed or aborted, or the current time is outside its window,
 - the tier exceeds the engagement's maximum.
 
-Path targets are relative to the scan root and require `ownershipAttested: true` (the operator confirms they own the code or are authorized to test it). Host and domain targets can be recorded but stay `Pending`: proof-of-control verification is not implemented, and nothing active runs against them yet. `POST /engagements/{id}/abort` is the kill switch: no further runs are authorized, the engagement's queued jobs are cancelled and its running jobs are told to stop (the response reports how many). It does not interrupt a synchronous `POST /scan` or `/compliance/assess` request already in flight — use jobs for anything long-running.
+Path targets are relative to the scan root and require `ownershipAttested: true` (the operator confirms they own the code or are authorized to test it). Host and domain targets start `Pending` and must pass a **proof-of-control challenge** before anything above the passive tier may touch them (nothing active exists yet, but the scope gate already enforces it):
 
-`engagementId` is still **optional**: a passive scan without one runs as before and is audited, but is not scope-checked beyond the scan root.
+1. `GET …/targets/{targetId}/challenge` returns a value `cerberus-verify=<random token>` unique to that target.
+2. Publish it either as a DNS **TXT record at `_cerberus-challenge.<name>`** or as the body of **`/.well-known/cerberus-challenge.txt`** on the host (https is tried first, then http).
+3. `POST …/targets/{targetId}/verify` looks it up; on an exact match the target becomes `Verified` (with the method and time). Every attempt, passed or failed, is audited.
 
-**Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that.
+A domain target proven at its apex covers its subdomains. An IP address or `host:port` has no DNS name of its own, so only the file method applies. The file fetch is a single GET with no redirects, a 5-second timeout and a 4 KB cap, and it **refuses loopback and link-local addresses** (including the cloud metadata address 169.254.169.254) unless `CERBERUS_ALLOW_LOCAL_TARGETS=true`; private ranges such as 10.0.0.0/8 are allowed, since internal hosts are legitimate targets. A proof does not expire and is not re-checked later. `POST /engagements/{id}/abort` is the kill switch: no further runs are authorized, the engagement's queued jobs are cancelled and its running jobs are told to stop (the response reports how many). It does not interrupt a synchronous `POST /scan` or `/compliance/assess` request already in flight — use jobs for anything long-running.
+
+`engagementId` is **optional by default**: a passive scan without one runs as before and is audited, but is not scope-checked beyond the scan root. Set `CERBERUS_REQUIRE_ENGAGEMENT=true` to refuse (400) any scan, assessment or job submitted without one.
+
+**Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that. `GET /audit/export` downloads the full log with each event's `previousHash` and `hash`, as JSON Lines or CSV (CSV fields that a spreadsheet would treat as a formula are prefixed with an apostrophe).
 
 ### `/jobs` — background job pipeline (first slice)
 
@@ -128,4 +137,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, and the job executor (cancel, time limit, hard stop), message bus and state rules. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, the scanner's rule set, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, the scanner's rule set, and SCA (it needs OSV.dev).

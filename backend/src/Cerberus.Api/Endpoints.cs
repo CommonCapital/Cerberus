@@ -80,7 +80,7 @@ public static class Endpoints
 
     private static async Task<IResult> RunAssessment(
         ComplianceRequest body, HttpContext http, CerberusDbContext db,
-        CatalogLoader loader, AssessmentRunner runner, AuditLog audit, CancellationToken ct)
+        CatalogLoader loader, AssessmentRunner runner, AuditLog audit, RunPolicy policy, CancellationToken ct)
     {
         var userId = UserId(http);
         var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
@@ -114,6 +114,7 @@ public static class Endpoints
             targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
         }
 
+        if (EngagementEndpoints.RequireEngagement(policy, engagementId) is { } required) return required;
         if (engagementId is not null &&
             await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
                 "compliance.assess", CapabilityTier.T0, targetPath, ct) is { } denied)
@@ -353,13 +354,14 @@ public static class Endpoints
 
     private static async Task<IResult> RunScan(
         ScanRequest body, HttpContext http, CerberusDbContext db,
-        ScanRunner runner, AuditLog audit, CancellationToken ct)
+        ScanRunner runner, AuditLog audit, RunPolicy policy, CancellationToken ct)
     {
         var userId = UserId(http);
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
         var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
 
         // Scope gate: a run under an engagement must be inside its scope.
+        if (EngagementEndpoints.RequireEngagement(policy, engagementId) is { } required) return required;
         if (engagementId is not null &&
             await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
                 "scan.run", CapabilityTier.T0, targetPath, ct) is { } denied)
