@@ -95,6 +95,21 @@ public sealed class JobWorker(
         var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
         if (job is null || job.State != nameof(JobState.Queued)) return;   // cancelled while waiting
 
+        // A job that needed the operator's consent runs only if it was given.
+        if (job.ApprovalId is not null)
+        {
+            var status = await db.ApprovalRequests.AsNoTracking()
+                .Where(a => a.Id == job.ApprovalId && a.JobId == job.Id)
+                .Select(a => a.Status)
+                .FirstOrDefaultAsync(stoppingToken);
+            if (status != ApprovalStatus.Approved)
+            {
+                await FinishAsync(db, audit, job, nameof(JobState.Queued),
+                    new JobOutcome(JobState.Failed, null, "Not approved: the job's approval request is missing or was not approved."));
+                return;
+            }
+        }
+
         // Authorize again at execution time: the engagement may have been
         // aborted, closed or re-scoped since the job was accepted.
         if (job.EngagementId is not null)

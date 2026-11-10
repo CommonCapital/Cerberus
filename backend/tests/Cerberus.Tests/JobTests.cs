@@ -132,6 +132,11 @@ public class JobExecutorTests
 public class JobStateTests
 {
     [Theory]
+    [InlineData(JobState.AwaitingApproval, JobState.Queued, true)]      // approved
+    [InlineData(JobState.AwaitingApproval, JobState.Cancelled, true)]   // denied or withdrawn
+    [InlineData(JobState.AwaitingApproval, JobState.Running, false)]    // never straight to running
+    [InlineData(JobState.AwaitingApproval, JobState.Succeeded, false)]
+    [InlineData(JobState.Queued, JobState.AwaitingApproval, false)]
     [InlineData(JobState.Queued, JobState.Running, true)]
     [InlineData(JobState.Queued, JobState.Cancelled, true)]
     [InlineData(JobState.Queued, JobState.Succeeded, false)]

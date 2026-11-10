@@ -49,6 +49,10 @@ public sealed class ApiHost : IDisposable
             ? """{"verdict":"true_positive","reasoning":"pickle.loads runs on data from outside.","remediation":"Use JSON."}"""
             : """{"verdict":"false_positive","reasoning":"Not reachable.","remediation":""}""");
 
+    /// <summary>Stands in for the Anthropic API; records every request that would have left the machine.</summary>
+    public ScriptedProvider Cloud { get; } = new(Cerberus.Core.Models.ModelProvider.Anthropic,
+        _ => """{"verdict":"true_positive","reasoning":"Reviewed remotely.","remediation":"Fix it."}""");
+
     /// <summary>Stands in for DNS and HTTP so ownership verification is testable offline.</summary>
     public FakeOwnershipProbe Probe { get; } = new();
 
@@ -62,6 +66,20 @@ public sealed class ApiHost : IDisposable
                 var echo = services.Single(d => d.ImplementationType == typeof(Cerberus.Models.MockProvider));
                 services.Remove(echo);
                 services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Model);
+
+                // No test may ever reach a real model provider: the cloud providers are scripted too.
+                foreach (var real in services.Where(d =>
+                             d.ImplementationType == typeof(Cerberus.Models.AnthropicProvider) ||
+                             d.ImplementationType == typeof(Cerberus.Models.OpenAiProvider) ||
+                             d.ImplementationType == typeof(Cerberus.Models.OllamaProvider)).ToList())
+                {
+                    services.Remove(real);
+                }
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Cloud);
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(
+                    new ScriptedProvider(Cerberus.Core.Models.ModelProvider.OpenAI, _ => throw new InvalidOperationException("not used")));
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(
+                    new ScriptedProvider(Cerberus.Core.Models.ModelProvider.Ollama, _ => throw new InvalidOperationException("local models are never run in tests")));
             }));
 
     /// <summary>
@@ -513,5 +531,154 @@ public class ApiIntegrationTests(ApiHost host)
         var assessment = await Json(await client.PostAsJsonAsync("/compliance/assess", new { catalogId = "owasp-top10", scanId }));
         var a02 = assessment.GetProperty("controls").EnumerateArray().Single(c => c.GetProperty("controlId").GetString() == "A02");
         Assert.Equal("NonCompliant", a02.GetProperty("verdict").GetString());
+    }
+
+    private const string CloudModel = "claude-haiku-4-5";
+
+    private async Task<(JsonElement Job, JsonElement Approval, string ScanId)> SubmitCloudTriageAsync(
+        HttpClient client, string? engagementId = null)
+    {
+        var scan = await Json(await client.PostAsJsonAsync("/scan", new { path = "svc", sca = false, engagementId }));
+        var scanId = scan.GetProperty("id").GetString()!;
+        var submitted = await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId, model = CloudModel });
+        Assert.Equal(HttpStatusCode.Accepted, submitted.StatusCode);
+        var body = await Json(submitted);
+        return (body.GetProperty("job"), body.GetProperty("approval"), scanId);
+    }
+
+    [Fact]
+    public async Task Sending_code_to_a_cloud_model_waits_for_the_operator_and_runs_only_after_approval()
+    {
+        var (client, token) = await host.NewUserAsync();
+        var events = new ConcurrentQueue<(string Name, JsonElement Body)>();
+        await using var hub = host.JobsHub(token);
+        foreach (var name in new[] { "jobUpdated", "approvalRequested", "approvalResolved" })
+        {
+            hub.On<JsonElement>(name, body => events.Enqueue((name, body)));
+        }
+        await hub.StartAsync();
+        var sentBefore = host.Cloud.Requests.Count;
+
+        var (job, approval, scanId) = await SubmitCloudTriageAsync(client);
+        var jobId = job.GetProperty("id").GetString()!;
+        var approvalId = approval.GetProperty("id").GetString()!;
+
+        // The job is parked and the request says exactly what would leave the machine.
+        Assert.Equal("AwaitingApproval", job.GetProperty("state").GetString());
+        Assert.Equal(approvalId, job.GetProperty("approvalId").GetString());
+        Assert.Equal("Pending", approval.GetProperty("status").GetString());
+        Assert.Equal("send-code-to-cloud-model", approval.GetProperty("kind").GetString());
+        var detail = approval.GetProperty("detail").GetString()!;
+        Assert.Contains("1 finding(s) in 1 file(s)", detail);
+        Assert.Contains("Anthropic", detail);
+        Assert.Contains(CloudModel, detail);
+
+        // It stays parked: nothing runs and nothing is sent while the operator has not decided.
+        await Task.Delay(300);
+        Assert.Equal("AwaitingApproval", (await client.GetFromJsonAsync<JsonElement>($"/jobs/{jobId}")).GetProperty("state").GetString());
+        Assert.Equal(sentBefore, host.Cloud.Requests.Count);
+        var pending = await client.GetFromJsonAsync<JsonElement>("/approvals?status=pending");
+        Assert.Equal(approvalId, pending.EnumerateArray().Single().GetProperty("id").GetString());
+
+        var decided = await client.PostAsJsonAsync($"/approvals/{approvalId}/approve", new { note = "ok for this scan" });
+        Assert.Equal(HttpStatusCode.OK, decided.StatusCode);
+        Assert.Equal("Approved", (await Json(decided)).GetProperty("status").GetString());
+
+        var finished = await WaitForJobAsync(client, jobId);
+        Assert.Equal("Succeeded", finished.GetProperty("state").GetString());
+        Assert.Equal(sentBefore + 1, host.Cloud.Requests.Count);
+        var stored = await client.GetFromJsonAsync<JsonElement>($"/scans/{scanId}");
+        Assert.Equal(CloudModel, stored.GetProperty("triage").EnumerateArray().Single().GetProperty("model").GetString());
+
+        // A decision is final.
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/approvals/{approvalId}/deny", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/approvals/{approvalId}/approve", null)).StatusCode);
+
+        // The operator was told live, in order: asked, then answered, then the job ran.
+        var deadline = DateTime.UtcNow + Patience;
+        while (!events.Any(e => e.Name == "jobUpdated" && e.Body.GetProperty("state").GetString() == "Succeeded"))
+        {
+            Assert.True(DateTime.UtcNow < deadline, "final job update was not pushed");
+            await Task.Delay(25);
+        }
+        var names = events.Select(e => e.Name == "jobUpdated" ? $"job:{e.Body.GetProperty("state").GetString()}" : e.Name).ToList();
+        Assert.Equal(
+            ["job:AwaitingApproval", "approvalRequested", "approvalResolved", "job:Queued", "job:Running", "job:Succeeded"],
+            names);
+
+        var audit = await client.GetFromJsonAsync<JsonElement>("/audit");
+        var actions = audit.EnumerateArray().Select(e => e.GetProperty("action").GetString()).Reverse().ToList();
+        Assert.True(actions.IndexOf("approval.request") < actions.IndexOf("approval.approve"));
+        Assert.True(actions.IndexOf("approval.approve") < actions.IndexOf("triage.run"));
+    }
+
+    [Fact]
+    public async Task Denying_ends_the_job_without_sending_anything()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var sentBefore = host.Cloud.Requests.Count;
+        var (job, approval, scanId) = await SubmitCloudTriageAsync(client);
+        var jobId = job.GetProperty("id").GetString()!;
+
+        var denied = await Json(await client.PostAsJsonAsync(
+            $"/approvals/{approval.GetProperty("id").GetString()}/deny", new { note = "customer code must stay local" }));
+        Assert.Equal("Denied", denied.GetProperty("status").GetString());
+
+        var finished = await client.GetFromJsonAsync<JsonElement>($"/jobs/{jobId}");
+        Assert.Equal("Cancelled", finished.GetProperty("state").GetString());
+        Assert.Contains("customer code must stay local", finished.GetProperty("error").GetString());
+
+        await Task.Delay(300);
+        Assert.Equal(sentBefore, host.Cloud.Requests.Count);
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>($"/scans/{scanId}")).GetProperty("triage").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Cancelling_a_waiting_job_withdraws_its_request()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var (job, approval, _) = await SubmitCloudTriageAsync(client);
+        var approvalId = approval.GetProperty("id").GetString();
+
+        var cancelled = await client.PostAsync($"/jobs/{job.GetProperty("id").GetString()}/cancel", null);
+        Assert.Equal("Cancelled", (await Json(cancelled)).GetProperty("state").GetString());
+
+        var withdrawn = await client.GetFromJsonAsync<JsonElement>($"/approvals/{approvalId}");
+        Assert.Equal("Cancelled", withdrawn.GetProperty("status").GetString());
+        // Too late to approve work that is gone.
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/approvals/{approvalId}/approve", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Aborting_an_engagement_withdraws_its_waiting_jobs()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var id = (await Json(await client.PostAsJsonAsync("/engagements", new { name = "Abort me" }))).GetProperty("id").GetString();
+        await client.PostAsJsonAsync($"/engagements/{id}/targets", new { locator = "svc", ownershipAttested = true });
+        var (job, approval, _) = await SubmitCloudTriageAsync(client, id);
+        Assert.Equal(id, approval.GetProperty("engagementId").GetString());
+
+        var aborted = await Json(await client.PostAsync($"/engagements/{id}/abort", null));
+        Assert.Equal(1, aborted.GetProperty("jobsCancelled").GetProperty("queued").GetInt32());
+
+        Assert.Equal("Cancelled", (await client.GetFromJsonAsync<JsonElement>($"/jobs/{job.GetProperty("id").GetString()}")).GetProperty("state").GetString());
+        Assert.Equal("Cancelled", (await client.GetFromJsonAsync<JsonElement>($"/approvals/{approval.GetProperty("id").GetString()}")).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Only_the_owner_can_see_or_decide_an_approval()
+    {
+        var (alice, _) = await host.NewUserAsync();
+        var (bob, _) = await host.NewUserAsync();
+        var (_, approval, _) = await SubmitCloudTriageAsync(alice);
+        var approvalId = approval.GetProperty("id").GetString();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/approvals/{approvalId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.PostAsync($"/approvals/{approvalId}/approve", null)).StatusCode);
+        Assert.Equal(0, (await bob.GetFromJsonAsync<JsonElement>("/approvals")).GetArrayLength());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await host.CreateClient().GetAsync("/approvals")).StatusCode);
+
+        // Still pending for its owner.
+        Assert.Equal("Pending", (await alice.GetFromJsonAsync<JsonElement>($"/approvals/{approvalId}")).GetProperty("status").GetString());
     }
 }

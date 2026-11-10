@@ -100,6 +100,7 @@ using (var scope = app.Services.CreateScope())
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
+app.MapApprovalEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");
 

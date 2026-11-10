@@ -54,6 +54,8 @@ Environment:
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
+| GET | `/approvals` · `/approvals/{id}` | Bearer | Requests waiting for (or already given) the operator's decision (`?status=pending&engagementId=`) |
+| POST | `/approvals/{id}/approve` · `/deny` | Bearer | Decide a pending request, optionally with `{ "note": "…" }` |
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
 | GET | `/scans` | Bearer | List this user's past scans (id, target, counts, timestamp) |
 | GET | `/scans/{id}` | Bearer | A persisted scan with its findings |
@@ -99,6 +101,15 @@ A domain target proven at its apex covers its subdomains. An IP address or `host
 - **Concurrency:** `CERBERUS_JOB_CONCURRENCY` workers (default 2, max 16); at most 50 queued jobs per user.
 - **Restarts:** the bus is in-memory (`InProcMessageBus` behind `IMessageBus`). On startup, jobs that were `Running` are marked `Failed` and jobs still `Queued` are re-published.
 
+### `/approvals` — human in the loop
+
+Some jobs must not run on a submit alone. Such a job is stored in state `AwaitingApproval` together with an **approval request** that says what will happen, to what, and what leaves the machine; `POST /jobs` then returns `{ job, approval }`. Nothing runs until the operator calls `POST /approvals/{id}/approve`, which releases the job to the workers (where it is scope-checked again). `…/deny` ends the job as `Cancelled` with the operator's note as the reason. A decision is final (a second one gets 409), covers that one job only, and is audited (`approval.request`, `approval.approve`, `approval.deny`).
+
+- **Live:** the hub pushes `approvalRequested` when a job starts waiting and `approvalResolved` when it is approved, denied or withdrawn, alongside the usual `jobUpdated`.
+- **Durable:** the wait is in the database, so it survives a restart and can be answered later from any client. There is no expiry yet.
+- **Withdrawn automatically:** cancelling the job, or aborting its engagement, closes the request as `Cancelled`.
+- **What needs approval today:** a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party. Local-model triage, scans and assessments do not. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls (PLAN.md §6.5).
+
 ### `/compliance` — Phase 2 (Compliance), deterministic engine
 
 Catalogs are data: every `*.json` under `catalogs/` (`CERBERUS_CATALOG_ROOT`, default: the repo's `catalogs/`) is loaded at startup. `POST /compliance/assess` takes the findings of an existing scan (`scanId`) or runs a fresh scan of `path`, then judges every control that declares `scannerCategories` in the catalog JSON (the mapping is data, not code). A mapped control with triggering findings is **NonCompliant** (findings attached as evidence), a mapped control with none is **Compliant**, and everything else is **NotAssessed** (manual review). `score` is Compliant / (Compliant + NonCompliant) over the automatically assessed controls only — it is not an overall compliance grade. "Compliant" means only that the passive scanner found nothing in the mapped categories.
@@ -136,7 +147,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 `POST /jobs {"type":"triage","scanId":"…","model":"…","maxFindings"?: 15,"includeTestsAndDocs"?: false}` asks a model to review a stored scan's findings one by one. For each it gets the rule that fired and about 12 lines of code either side, and must answer with a JSON verdict — `TruePositive`, `FalsePositive` or `NeedsReview` — plus its reasoning and a fix. Opinions are saved on the scan as they arrive and returned by `GET /scans/{id}` under `triage` (keyed by `findingId`).
 
 - **Advisory only.** The code under review is untrusted input to the model and may try to talk it into "false positive", so an opinion never removes a finding and never changes a compliance verdict. The system prompt tells the model to treat the source as data, but that is a mitigation, not a guarantee.
-- **You choose the model; there is no default.** A local Ollama model keeps the code on the machine. With a cloud model, the code context is sent to that provider after credential-shaped values are replaced by `[REDACTED len=N]`. The audit log records which model reviewed how many findings and where the code went.
+- **You choose the model; there is no default.** A local Ollama model keeps the code on the machine. With a cloud model the job first waits for your approval (see `/approvals`), showing how many findings and files would be sent; only then is the code context sent to that provider, after credential-shaped values are replaced by `[REDACTED len=N]`. The audit log records which model reviewed how many findings and where the code went.
 - **What is reviewed:** unsuppressed static findings in production code, most severe first, up to `maxFindings` (max 100). Dependency findings are skipped. An unusable or failed model reply becomes `NeedsReview` with `modelAnswered: false`.
 - **Status:** tested with a scripted model only. It has **not** been run against a real model yet — see PLAN.md §17 "Pending verification" for the steps and the expected results.
 
@@ -160,4 +171,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, approvals, engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).

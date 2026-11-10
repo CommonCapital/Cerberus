@@ -190,9 +190,42 @@ public class Job
 
     /// <summary>Id of what the job produced (for a scan job, the Scan).</summary>
     public string? ResultId { get; set; }
+
+    /// <summary>The approval request this job had to wait for, if it needed one.</summary>
+    public string? ApprovalId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? StartedAt { get; set; }
     public DateTime? FinishedAt { get; set; }
+}
+
+/// <summary>
+/// A request for the operator's consent before a job may run (human in the
+/// loop, PLAN.md §6.5). It names one specific action; approving it approves
+/// that job and nothing else.
+/// </summary>
+public class ApprovalRequest
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string JobId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+
+    /// <summary>Machine-readable reason, e.g. "send-code-to-cloud-model".</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>One line: what the operator is being asked to allow.</summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>The specifics: what will happen, to what, and what leaves the machine.</summary>
+    public string Detail { get; set; } = string.Empty;
+
+    /// <summary>Pending | Approved | Denied | Cancelled.</summary>
+    public string Status { get; set; } = "Pending";
+
+    /// <summary>The operator's optional comment on their decision.</summary>
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? DecidedAt { get; set; }
 }
 
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
