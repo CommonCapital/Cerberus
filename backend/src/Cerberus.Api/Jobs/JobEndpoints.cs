@@ -29,6 +29,7 @@ public static class JobEndpoints
         jobs.MapGet("/", List);
         jobs.MapGet("/{id}", Get);
         jobs.MapPost("/{id}/cancel", Cancel);
+        jobs.MapGet("/{id}/events", Events);
     }
 
     private static async Task<IResult> Submit(
@@ -225,6 +226,35 @@ public static class JobEndpoints
             JobControl.CancelResult.StopRequested => Results.Json(Describe(current), JsonOptions, statusCode: 202),
             _ => Results.Json(new { error = $"Job has already finished ({current.State.ToLowerInvariant()})" }, statusCode: 409),
         };
+    }
+
+    /// <summary>
+    /// A run's event stream from the database, in order. <c>after</c> is the last
+    /// sequence the client already has; use it to catch up after a disconnect and
+    /// then continue with live <c>jobEvent</c> messages from the hub.
+    /// </summary>
+    private static async Task<IResult> Events(
+        string id, HttpContext http, CerberusDbContext db, long? after, int? limit, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        if (!await db.Jobs.AnyAsync(j => j.Id == id && j.UserId == userId, ct)) return NotFound();
+
+        var take = Math.Clamp(limit ?? 500, 1, 2000);
+        var events = await db.JobEvents.AsNoTracking()
+            .Where(e => e.JobId == id && e.Sequence > (after ?? 0))
+            .OrderBy(e => e.Sequence)
+            .Take(take)
+            .ToListAsync(ct);
+        var lastSequence = await db.JobEvents.Where(e => e.JobId == id).MaxAsync(e => (long?)e.Sequence, ct) ?? 0;
+
+        return Results.Json(new
+        {
+            jobId = id,
+            events = events.Select(RunStream.Describe),
+            lastSequence,
+            // True when this page did not reach the end: ask again with after = the last sequence returned.
+            more = events.Count > 0 && events[^1].Sequence < lastSequence,
+        }, JsonOptions);
     }
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;

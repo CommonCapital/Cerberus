@@ -4,6 +4,7 @@ using Cerberus.Api.Audit;
 using Cerberus.Authorization;
 using Cerberus.Compliance;
 using Cerberus.Data;
+using Cerberus.Jobs;
 using Cerberus.Scanning;
 
 namespace Cerberus.Api.Jobs;
@@ -30,11 +31,13 @@ public sealed class AssessmentRunner(
     /// <exception cref="UnauthorizedAccessException">The path is outside the scan root.</exception>
     public async Task<AssessmentRun> RunAsync(
         string userId, string? engagementId, Catalog catalog, Scan? scan, string targetPath, bool runSca,
-        CancellationToken ct)
+        CancellationToken ct, IRunReporter? reporter = null)
     {
+        reporter ??= NullRunReporter.Instance;
         IReadOnlyList<Finding> findings;
         bool dependencyCheckCompleted;
 
+        await reporter.StepAsync("findings", scan is not null ? "Load scan findings" : "Scan the target", StepStatus.Running);
         if (scan is not null)
         {
             findings = DeserializeFindings(scan.Findings);
@@ -49,8 +52,14 @@ public sealed class AssessmentRunner(
             dependencyCheckCompleted = scaResult.Completed;
         }
         ct.ThrowIfCancellationRequested();   // a stopped run stores nothing
+        await reporter.StepAsync("findings", scan is not null ? "Load scan findings" : "Scan the target", StepStatus.Completed);
 
+        await reporter.StepAsync("evaluate", $"Evaluate {catalog.ControlCount} controls of {catalog.Name}", StepStatus.Running);
         var report = engine.Evaluate(catalog, findings, dependencyCheckCompleted);
+        await reporter.ProgressAsync(report.TotalControls, report.TotalControls,
+            $"{report.Compliant} compliant, {report.NonCompliant} non-compliant, {report.NotAssessed} not assessed.");
+        await reporter.StepAsync("evaluate", $"Evaluate {catalog.ControlCount} controls of {catalog.Name}", StepStatus.Completed);
+        await reporter.StepAsync("store", "Store the assessment", StepStatus.Running);
 
         var assessment = new ComplianceAssessment
         {
@@ -72,6 +81,7 @@ public sealed class AssessmentRunner(
             $"Assessment {assessment.Id} against {report.CatalogId}: {report.Compliant} compliant, {report.NonCompliant} non-compliant, {report.NotAssessed} not assessed.",
             engagementId, targetPath, CapabilityTier.T0, CancellationToken.None);
 
+        await reporter.StepAsync("store", "Store the assessment", StepStatus.Completed);
         return new AssessmentRun(assessment, report, dependencyCheckCompleted);
     }
 

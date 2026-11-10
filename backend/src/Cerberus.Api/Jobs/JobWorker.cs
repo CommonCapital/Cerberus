@@ -19,7 +19,7 @@ public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool 
 /// </summary>
 public sealed class JobWorker(
     IMessageBus bus, IServiceScopeFactory scopes, JobCancellationRegistry registry,
-    JobOptions options, JobEvents events, ILogger<JobWorker> logger) : BackgroundService
+    JobOptions options, JobEvents events, RunStream stream, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -136,20 +136,21 @@ public sealed class JobWorker(
         await events.PublishAsync(jobId);
 
         var outcome = await JobExecutor.RunAsync(
-            jobId, ct => RunWorkAsync(services, job, ct), registry, options.Timeout, options.Grace, stoppingToken);
+            jobId, ct => RunWorkAsync(services, job, stream.For(job), ct), registry, options.Timeout, options.Grace, stoppingToken);
 
         await FinishAsync(db, audit, job, nameof(JobState.Running), outcome);
     }
 
     /// <summary>Dispatches on job type and returns the id of what was produced.</summary>
-    private static async Task<string?> RunWorkAsync(IServiceProvider services, Job job, CancellationToken ct)
+    private static async Task<string?> RunWorkAsync(
+        IServiceProvider services, Job job, IRunReporter reporter, CancellationToken ct)
     {
         switch (job.Type)
         {
             case JobTypes.Scan:
                 var parameters = JsonSerializer.Deserialize<ScanJobParameters>(job.Parameters, JobTypes.Json) ?? new();
                 var run = await services.GetRequiredService<ScanRunner>()
-                    .RunAsync(job.UserId, job.EngagementId, job.TargetPath, parameters.Sca, ct);
+                    .RunAsync(job.UserId, job.EngagementId, job.TargetPath, parameters.Sca, ct, reporter);
                 return run.Scan.Id;
 
             case JobTypes.Assess:
@@ -167,13 +168,13 @@ public sealed class JobWorker(
                         ?? throw new InvalidOperationException($"Scan {assess.ScanId} no longer exists.");
                 }
                 var assessment = await services.GetRequiredService<AssessmentRunner>()
-                    .RunAsync(job.UserId, job.EngagementId, catalog, scan, job.TargetPath, assess.Sca, ct);
+                    .RunAsync(job.UserId, job.EngagementId, catalog, scan, job.TargetPath, assess.Sca, ct, reporter);
                 return assessment.Assessment.Id;
 
             case JobTypes.Triage:
                 var triage = JsonSerializer.Deserialize<TriageJobParameters>(job.Parameters, JobTypes.Json)
                     ?? throw new InvalidOperationException("The job has no parameters.");
-                await services.GetRequiredService<TriageRunner>().RunAsync(job.UserId, triage, ct);
+                await services.GetRequiredService<TriageRunner>().RunAsync(job.UserId, triage, ct, reporter);
                 return triage.ScanId;
 
             default:

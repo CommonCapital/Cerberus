@@ -228,6 +228,26 @@ public class ApprovalRequest
     public DateTime? DecidedAt { get; set; }
 }
 
+/// <summary>
+/// One event on a run's stream (PLAN.md §6.5): a state change, a step, progress,
+/// a finding, model text. Ordered per job by <see cref="Sequence"/>, so a
+/// client can replay a run and continue live from where it left off.
+/// </summary>
+public class JobEvent
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string JobId { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+
+    /// <summary>1-based position in the job's stream.</summary>
+    public long Sequence { get; set; }
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>The event's payload, as JSON.</summary>
+    public string Data { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; }
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

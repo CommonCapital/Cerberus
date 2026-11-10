@@ -54,6 +54,7 @@ Environment:
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
+| GET | `/jobs/{id}/events` | Bearer | The run's event stream from storage, in order (`?after=<sequence>&limit=`) |
 | GET | `/approvals` · `/approvals/{id}` | Bearer | Requests waiting for (or already given) the operator's decision (`?status=pending&engagementId=`) |
 | POST | `/approvals/{id}/approve` · `/deny` | Bearer | Decide a pending request, optionally with `{ "note": "…" }` |
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
@@ -94,7 +95,20 @@ A domain target proven at its apex covers its subdomains. An IP address or `host
 
 `POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Two job types exist: `scan` (`resultId` is the scan id, `GET /scans/{id}`) and `assess` (a compliance assessment of `catalogId` over a stored `scanId` or a fresh `path`; `resultId` is the assessment id, `GET /compliance/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`.
 
-**Live updates:** connect a SignalR client to `/hub/jobs` with the bearer token (the `access_token` query parameter, which SignalR clients send for WebSockets, or an `Authorization` header). The hub is receive-only: on every state change of one of your jobs it sends `jobUpdated` with the same object `GET /jobs/{id}` returns. Connections without a valid session are dropped. Updates are best-effort — a client that was disconnected should re-read `GET /jobs`. Only state changes are pushed; findings are not streamed while a job runs.
+**Live updates — the run's event stream:** connect a SignalR client to `/hub/jobs` with the bearer token (the `access_token` query parameter, which SignalR clients send for WebSockets, or an `Authorization` header). The hub is receive-only and drops connections without a valid session. Everything a job does arrives as a `jobEvent` message `{ jobId, sequence, type, data, createdAt }`:
+
+| `type` | `data` | When |
+|---|---|---|
+| `state` | the job, as `GET /jobs/{id}` returns it | every state change, including `AwaitingApproval` |
+| `step` | `{ id, title, status }` with status `running` / `completed` / `skipped` | a step of the run's task list starts or ends |
+| `progress` | `{ done, total, message }` | progress within the current step |
+| `finding` | the finding | as soon as a pass has it (the first 300 per run; the full list is in the result) |
+| `text` | `{ channel, text }` | model output as it is written, in chunks; concatenate per channel (for triage, the channel is the finding id) |
+| `triage` | the triage result | a model's verdict on one finding |
+| `approval_requested`, `approval_resolved` | the approval request | the run waits for, or gets, the operator's decision |
+| `note`, `truncated` | `{ message }` | a remark; or the run exceeded 5,000 events and only state changes follow |
+
+Events are numbered per job from 1 without gaps, **stored before they are pushed**, and pushed in that order. A client that connects late or drops out reads `GET /jobs/{id}/events?after=<last sequence it has>` (pages of up to 2,000, with `more` and `lastSequence`) and then carries on with live events — so nothing has to be polled and nothing is lost. A failed push or write is logged and never affects the job. The older `jobUpdated`, `approvalRequested` and `approvalResolved` messages are still sent for existing clients. A step that was running when a job failed or was cancelled gets no closing event; the final `state` event says how the run ended.
 
 - **Authorization twice:** a job under an engagement is scope-checked when submitted and again when it starts, so a job that waited in the queue cannot outlive an abort or a scope change.
 - **Platform controls** (`Cerberus.Jobs/JobExecution.cs`), independent of what the work does: operator cancel, a time limit (`CERBERUS_JOB_TIMEOUT_SECONDS`, default 600), and a hard stop — if the work has not returned `CERBERUS_JOB_GRACE_SECONDS` (default 10) after being told to stop, the job is closed anyway and marked abandoned. Abandoned work is not killed (that needs the sandbox); it is only no longer waited for.
@@ -171,4 +185,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, approvals, engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
