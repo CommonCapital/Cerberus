@@ -1,0 +1,25 @@
+{
+  "id": "owasp-top10",
+  "name": "OWASP Top 10 (2021)",
+  "version": "2021",
+  "description": "The ten most critical web-application security risk categories from the OWASP Top 10 (2021 edition), expressed as controls in the Cerberus catalog schema. Requirement text is a concise summary written for this catalog, not the OWASP wording; see https://owasp.org/Top10/ for the authoritative descriptions.",
+  "frameworkAlignment": ["OWASP Top 10"],
+  "responseScale": ["Compliant", "Partially compliant", "Non-compliant", "Not applicable"],
+  "sections": [
+    {
+      "name": "Web Application Security Risks",
+      "controls": [
+        {"id": "A01", "title": "Broken Access Control", "requirement": "Enforce authorization server-side on every request, deny by default, and prevent users from acting outside their intended permissions (including direct object references and privilege escalation).", "evidenceHints": ["authorization model", "access-control tests", "deny-by-default configuration"], "autoEvaluable": false},
+        {"id": "A02", "title": "Cryptographic Failures", "requirement": "Protect sensitive data in transit and at rest with current, strong algorithms and protocols; do not use deprecated hashes or ciphers, and do not disable certificate validation.", "evidenceHints": ["TLS configuration", "algorithm inventory", "key-management procedure"], "autoEvaluable": true, "scannerCategories": ["crypto", "config"]},
+        {"id": "A03", "title": "Injection", "requirement": "Keep untrusted data separate from commands and queries: use parameterized interfaces, validate input, and avoid dynamic code or shell execution built from user-controlled data.", "evidenceHints": ["parameterized queries", "input-validation layer", "SAST results"], "autoEvaluable": true, "scannerCategories": ["injection"]},
+        {"id": "A04", "title": "Insecure Design", "requirement": "Apply secure design practices: threat modeling, secure design patterns, and reference architectures, so that security controls are designed in rather than added after implementation.", "evidenceHints": ["threat model", "design reviews", "abuse-case tests"], "autoEvaluable": false},
+        {"id": "A05", "title": "Security Misconfiguration", "requirement": "Harden every layer of the stack: remove unused features and default accounts, keep security settings enabled, and apply a repeatable, reviewed configuration process across environments.", "evidenceHints": ["hardening baseline", "configuration review", "IaC scan results"], "autoEvaluable": true, "scannerCategories": ["config"]},
+        {"id": "A06", "title": "Vulnerable and Outdated Components", "requirement": "Maintain an inventory of components and their versions, monitor them for known vulnerabilities, and upgrade or patch them in a timely manner.", "evidenceHints": ["SBOM", "dependency scan reports", "patch SLA"], "autoEvaluable": true},
+        {"id": "A07", "title": "Identification and Authentication Failures", "requirement": "Protect authentication: support multi-factor authentication, resist credential stuffing and brute force, manage sessions securely, and never ship default or hardcoded credentials.", "evidenceHints": ["MFA configuration", "password policy", "secrets-management setup"], "autoEvaluable": true, "scannerCategories": ["secret"]},
+        {"id": "A08", "title": "Software and Data Integrity Failures", "requirement": "Verify the integrity of code, dependencies, updates, and serialized data; secure the CI/CD pipeline against unauthorized changes.", "evidenceHints": ["signed artifacts", "pipeline access controls", "dependency pinning"], "autoEvaluable": false},
+        {"id": "A09", "title": "Security Logging and Monitoring Failures", "requirement": "Log security-relevant events such as logins, access-control failures, and high-value transactions with enough context to investigate, and monitor and alert on them.", "evidenceHints": ["logging standard", "alerting rules", "incident-detection tests"], "autoEvaluable": false},
+        {"id": "A10", "title": "Server-Side Request Forgery (SSRF)", "requirement": "Validate and restrict any server-side fetch of a user-supplied URL: enforce allowlists, block internal address ranges, and segment network access for fetching services.", "evidenceHints": ["URL allowlist", "egress filtering", "SSRF test results"], "autoEvaluable": false}
+      ]
+    }
+  ]
+}

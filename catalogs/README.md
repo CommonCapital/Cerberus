@@ -19,5 +19,13 @@ A built-in, **representative third-party / vendor security-assurance catalog** m
 ### Why it's here
 This catalog captures the *methodology* of enterprise security compliance — the control areas, the compliant/partial/non-compliant grading, and the action-plan-with-deadline remediation loop — so Cerberus can tell a user how their system would fare in a real enterprise onboarding review, not just against open frameworks. It is a generic reference template; adapt the thresholds (RTO/RPO, uptime, retention) to the engagement.
 
+## OWASP Top 10 (2021)
+
+**[`owasp-top10.json`](owasp-top10.json)** — the ten OWASP Top 10 (2021) risk categories as controls `A01`–`A10`, same schema. Requirement text is a short summary written for this catalog; the authoritative descriptions are at <https://owasp.org/Top10/>.
+
+## Scanner mapping (`scannerCategories`)
+
+A control may carry `"scannerCategories": ["secret" | "crypto" | "config" | "injection", ...]` — the Phase-1 scanner finding categories that signal non-compliance. The deterministic engine judges only controls that have this field: any matching finding → Non-compliant (findings attached as evidence), none → Compliant. Controls without it are Not-assessed, even when `autoEvaluable` is true (the flag says a control *can* be judged from technical evidence; the mapping says the current scanner *does* have a signal). Keep mappings narrow: a "Compliant" verdict only means the scanner found nothing in those categories.
+
 ### Planned companions
 `owasp-asvs.json`, `iso-27001.json`, `soc2.json`, `nist-csf.json`, `cis.json` — same schema, mapped so a single evidence set scores against multiple frameworks at once.

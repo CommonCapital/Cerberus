@@ -28,7 +28,9 @@ public sealed record Control(
     string Title,
     string Requirement,
     [property: JsonPropertyName("evidenceHints")] IReadOnlyList<string>? EvidenceHints,
-    [property: JsonPropertyName("autoEvaluable")] bool AutoEvaluable);
+    [property: JsonPropertyName("autoEvaluable")] bool AutoEvaluable,
+    /// <summary>Phase-1 scanner finding categories whose presence signals non-compliance. Null/empty = no automated signal.</summary>
+    [property: JsonPropertyName("scannerCategories")] IReadOnlyList<string>? ScannerCategories = null);
 
 /// <summary>A lightweight summary of a catalog for list endpoints.</summary>
 public sealed record CatalogSummary(
@@ -38,7 +40,9 @@ public sealed record CatalogSummary(
     IReadOnlyList<string> FrameworkAlignment,
     int SectionCount,
     int ControlCount,
-    int AutoEvaluableCount);
+    int AutoEvaluableCount,
+    /// <summary>Controls the current scanner can actually judge (have a scanner mapping).</summary>
+    int ScannerMappedCount);
 
 /// <summary>
 /// Loads built-in control catalogs from the <c>catalogs/</c> directory (shipped as data).
@@ -67,7 +71,8 @@ public sealed class CatalogLoader
     public static CatalogSummary Summarize(Catalog c) => new(
         c.Id, c.Name, c.Version, c.FrameworkAlignment,
         c.Sections.Count, c.ControlCount,
-        c.Controls.Count(x => x.AutoEvaluable));
+        c.Controls.Count(x => x.AutoEvaluable),
+        c.Controls.Count(x => x.ScannerCategories is { Count: > 0 }));
 
     private static Dictionary<string, Catalog> LoadAll(string root)
     {

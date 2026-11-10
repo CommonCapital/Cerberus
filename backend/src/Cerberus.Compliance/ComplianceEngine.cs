@@ -5,10 +5,10 @@ namespace Cerberus.Compliance;
 /// <summary>The automated verdict for a single control.</summary>
 public enum ControlVerdict
 {
-    /// <summary>Auto-evaluable control with a scanner mapping and no triggering findings.</summary>
+    /// <summary>Control with a scanner mapping and no triggering findings.</summary>
     Compliant,
 
-    /// <summary>Auto-evaluable control with triggering findings present.</summary>
+    /// <summary>Control with a scanner mapping and triggering findings present.</summary>
     NonCompliant,
 
     /// <summary>No automated signal available — requires manual review / evidence.</summary>
@@ -38,46 +38,16 @@ public sealed record ComplianceReport(
     IReadOnlyList<ControlResult> Controls);
 
 /// <summary>
-/// Deterministic Phase-2 compliance engine. It maps a catalog's auto-evaluable
-/// controls onto Phase-1 scanner finding categories and derives a verdict:
+/// Deterministic Phase-2 compliance engine. Each catalog control may declare
+/// <c>scannerCategories</c> (the mapping is catalog data, not code) — the
+/// Phase-1 scanner finding categories that signal non-compliance. Verdicts:
 /// a control with any mapped (triggering) finding is Non-compliant and the
-/// findings are attached as evidence; an auto-evaluable control with a mapping
-/// and no triggering findings is Compliant; everything else is Not-assessed and
+/// findings are attached as evidence; a mapped control
+/// with no triggering findings is Compliant; everything else is Not-assessed and
 /// flagged for manual review. No LLM, no network — fully explainable and local.
 /// </summary>
 public sealed class ComplianceEngine
 {
-    /// <summary>
-    /// Control → scanner finding categories that signal non-compliance.
-    /// Catalog marks some controls <c>autoEvaluable</c>, but the MVP scanner only
-    /// emits signals for a subset; controls without a mapping stay Not-assessed.
-    /// Scanner categories today: secret, crypto, config, injection.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, string[]> Mapping = new Dictionary<string, string[]>
-    {
-        // Vulnerability & patch management — any code-level weakness counts.
-        ["GSG-07"] = ["injection", "crypto", "config"],
-        ["SAAS-14"] = ["injection", "crypto", "config"],
-
-        // Secure log-on / identity / administration — hardcoded credentials.
-        ["APP-01"] = ["secret"],
-        ["APP-02"] = ["secret"],
-        ["APP-05"] = ["secret"],
-        ["SAAS-16"] = ["secret"],
-
-        // Encryption controls — weak hashing / crypto misuse.
-        ["APP-03"] = ["crypto"],
-        ["SAAS-10"] = ["crypto"],
-
-        // In-transit encryption & certificates — disabled TLS verification.
-        ["APP-04"] = ["config"],
-        ["SAAS-02"] = ["config"],
-        ["SAAS-03"] = ["config"],
-
-        // Development security — unsafe dynamic execution / injection sinks.
-        ["APP-07"] = ["injection"],
-    };
-
     public ComplianceReport Evaluate(Catalog catalog, IReadOnlyList<Finding> findings)
     {
         var byCategory = findings
@@ -115,7 +85,8 @@ public sealed class ComplianceEngine
     private static ControlResult Assess(
         string section, Control control, IReadOnlyDictionary<string, IReadOnlyList<Finding>> byCategory)
     {
-        if (!control.AutoEvaluable || !Mapping.TryGetValue(control.Id, out var categories))
+        var categories = control.ScannerCategories;
+        if (categories is not { Count: > 0 })
         {
             var reason = control.AutoEvaluable
                 ? "Marked auto-evaluable, but the current passive scanner emits no signal for this control — manual evidence required."
