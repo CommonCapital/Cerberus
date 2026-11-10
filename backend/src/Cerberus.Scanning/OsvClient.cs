@@ -23,6 +23,9 @@ public sealed record OsvVuln(
 /// Degrades gracefully: on any transport/parse error it yields nothing
 /// rather than failing the scan.
 /// </summary>
+/// <summary>Advisory ids per dependency, plus whether every lookup succeeded.</summary>
+public sealed record OsvBatchResult(IReadOnlyList<IReadOnlyList<string>> Ids, bool Complete);
+
 public sealed class OsvClient(HttpClient http)
 {
     private const string BatchUrl = "https://api.osv.dev/v1/querybatch";
@@ -34,24 +37,28 @@ public sealed class OsvClient(HttpClient http)
 
     /// <summary>
     /// For each input dependency (same order), returns the list of advisory IDs
-    /// affecting it (empty when clean). Network failures surface as all-empty.
+    /// affecting it (empty when clean). Network failures surface as all-empty
+    /// lists with <see cref="OsvBatchResult.Complete"/> set to false.
     /// </summary>
-    public async Task<IReadOnlyList<IReadOnlyList<string>>> QueryBatchAsync(
+    public async Task<OsvBatchResult> QueryBatchAsync(
         IReadOnlyList<Dependency> deps, CancellationToken ct)
     {
         var results = new List<IReadOnlyList<string>>(deps.Count);
         for (var i = 0; i < deps.Count; i++) results.Add([]);
+        var complete = true;
 
         for (var start = 0; start < deps.Count; start += BatchSize)
         {
             var chunk = deps.Skip(start).Take(BatchSize).ToList();
             var ids = await QueryChunkAsync(chunk, ct);
+            if (ids is null) { complete = false; continue; }
             for (var j = 0; j < ids.Count; j++) results[start + j] = ids[j];
         }
-        return results;
+        return new OsvBatchResult(results, complete);
     }
 
-    private async Task<IReadOnlyList<IReadOnlyList<string>>> QueryChunkAsync(
+    /// <summary>Returns null when the lookup failed (transport, HTTP status or parse error).</summary>
+    private async Task<IReadOnlyList<IReadOnlyList<string>>?> QueryChunkAsync(
         IReadOnlyList<Dependency> chunk, CancellationToken ct)
     {
         var payload = new
@@ -63,7 +70,6 @@ public sealed class OsvClient(HttpClient http)
             }).ToArray(),
         };
 
-        var empty = chunk.Select(_ => (IReadOnlyList<string>)Array.Empty<string>()).ToList();
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, BatchUrl)
@@ -71,14 +77,14 @@ public sealed class OsvClient(HttpClient http)
                 Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
             };
             using var resp = await http.SendAsync(req, ct);
-            if (!resp.IsSuccessStatusCode) return empty;
+            if (!resp.IsSuccessStatusCode) return null;
 
             var body = await resp.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("results", out var resultsEl) ||
                 resultsEl.ValueKind != JsonValueKind.Array)
             {
-                return empty;
+                return null;
             }
 
             var outList = new List<IReadOnlyList<string>>(chunk.Count);
@@ -102,7 +108,7 @@ public sealed class OsvClient(HttpClient http)
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return empty;
+            return null;
         }
     }
 

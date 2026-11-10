@@ -45,6 +45,9 @@ public class Scan
     public string TargetPath { get; set; } = string.Empty;
     public int FilesScanned { get; set; }
     public int FindingCount { get; set; }
+
+    /// <summary>True when the dependency (SCA) check ran and covered every discovered dependency.</summary>
+    public bool ScaCompleted { get; set; }
     public string Findings { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

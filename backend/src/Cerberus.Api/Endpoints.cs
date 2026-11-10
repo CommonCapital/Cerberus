@@ -73,7 +73,7 @@ public static class Endpoints
 
     private static async Task<IResult> RunAssessment(
         ComplianceRequest body, HttpContext http, CerberusDbContext db,
-        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, CancellationToken ct)
+        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, ScaService sca, CancellationToken ct)
     {
         var userId = UserId(http);
         var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
@@ -88,6 +88,7 @@ public static class Endpoints
         IReadOnlyList<Finding> findings;
         string targetPath;
         string? scanId = null;
+        bool dependencyCheckCompleted;
 
         if (!string.IsNullOrWhiteSpace(body.ScanId))
         {
@@ -96,13 +97,19 @@ public static class Endpoints
             findings = DeserializeFindings(scan.Findings);
             targetPath = scan.TargetPath;
             scanId = scan.Id;
+            dependencyCheckCompleted = scan.ScaCompleted;
         }
         else
         {
             targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
             try
             {
-                findings = scanner.Scan(targetPath).Findings;
+                var staticFindings = scanner.Scan(targetPath).Findings;
+                var scaResult = (body.Sca ?? true)
+                    ? await sca.ScanAsync(targetPath, ct)
+                    : new ScaResult(0, 0, []);
+                findings = staticFindings.Concat(scaResult.Findings).ToList();
+                dependencyCheckCompleted = scaResult.Completed;
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -110,7 +117,7 @@ public static class Endpoints
             }
         }
 
-        var report = engine.Evaluate(catalog, findings);
+        var report = engine.Evaluate(catalog, findings, dependencyCheckCompleted);
 
         var assessment = new ComplianceAssessment
         {
@@ -136,6 +143,7 @@ public static class Endpoints
             catalogVersion = report.CatalogVersion,
             targetPath,
             scanId,
+            dependencyCheckCompleted,
             createdAt = assessment.CreatedAt,
             summary = new
             {
@@ -215,6 +223,7 @@ public static class Endpoints
             TargetPath = targetPath,
             FilesScanned = result.FilesScanned,
             FindingCount = findings.Count,
+            ScaCompleted = scaResult.Completed,
             Findings = findingsJson,
         };
         db.Scans.Add(scan);
@@ -228,6 +237,7 @@ public static class Endpoints
             filesScanned = result.FilesScanned,
             manifestsScanned = scaResult.ManifestsScanned,
             dependenciesScanned = scaResult.DependenciesScanned,
+            scaCompleted = scaResult.Completed,
             findingCount = findings.Count,
             findings,
         }, JsonOptions);
@@ -239,7 +249,7 @@ public static class Endpoints
         var scans = await db.Scans
             .Where(s => s.UserId == userId)
             .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new { s.Id, s.TargetPath, s.FilesScanned, s.FindingCount, s.CreatedAt })
+            .Select(s => new { s.Id, s.TargetPath, s.FilesScanned, s.FindingCount, s.ScaCompleted, s.CreatedAt })
             .ToListAsync(ct);
         return Results.Json(scans);
     }
@@ -256,6 +266,7 @@ public static class Endpoints
             scan.TargetPath,
             scan.FilesScanned,
             scan.FindingCount,
+            scan.ScaCompleted,
             scan.CreatedAt,
             findings = ParseStoredMessages(scan.Findings),
         });

@@ -3,7 +3,13 @@ namespace Cerberus.Scanning;
 public sealed record ScaResult(
     int ManifestsScanned,
     int DependenciesScanned,
-    IReadOnlyList<Finding> Findings);
+    IReadOnlyList<Finding> Findings,
+    /// <summary>
+    /// True when every discovered dependency was actually checked against OSV.
+    /// False when the lookup was skipped, failed, or the dependency list was
+    /// truncated — "no dependency findings" then proves nothing.
+    /// </summary>
+    bool Completed = false);
 
 /// <summary>
 /// Phase-1 software-composition analysis (SCA): discovers dependency
@@ -29,10 +35,12 @@ public sealed class ScaService(ScanOptions options, OsvClient osv)
         }
 
         var (deps, manifests) = Dependencies.Discover(target, root);
-        if (deps.Count > MaxDependencies) deps = deps.Take(MaxDependencies).ToList();
-        if (deps.Count == 0) return new ScaResult(manifests.Count, 0, []);
+        var truncated = deps.Count > MaxDependencies;
+        if (truncated) deps = deps.Take(MaxDependencies).ToList();
+        if (deps.Count == 0) return new ScaResult(manifests.Count, 0, [], Completed: true);
 
-        var vulnIdsPerDep = await osv.QueryBatchAsync(deps, ct);
+        var batch = await osv.QueryBatchAsync(deps, ct);
+        var vulnIdsPerDep = batch.Ids;
 
         // Detail cache so an advisory affecting many packages is fetched once
         // per (id, ecosystem, package) — fixed-version is package-specific.
@@ -59,7 +67,7 @@ public sealed class ScaService(ScanOptions options, OsvClient osv)
         }
 
         findings.Sort((a, b) => b.Severity.CompareTo(a.Severity));
-        return new ScaResult(manifests.Count, deps.Count, findings);
+        return new ScaResult(manifests.Count, deps.Count, findings, Completed: batch.Complete && !truncated);
     }
 
     private static Finding ToFinding(Dependency dep, string id, OsvVuln? vuln)
