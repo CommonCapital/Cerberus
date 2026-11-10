@@ -16,7 +16,7 @@ public sealed class ScanService(ScanOptions options)
     private const int MaxFileBytes = 1_000_000;
     private const int MaxFindings = 1000;
 
-    public ScanResult Scan(string relativePath)
+    public ScanResult Scan(string relativePath, CancellationToken ct = default)
     {
         var root = Path.GetFullPath(options.ScanRoot);
         var target = Path.GetFullPath(Path.Combine(root, relativePath));
@@ -33,6 +33,7 @@ public sealed class ScanService(ScanOptions options)
 
         foreach (var file in EnumerateFiles(target))
         {
+            ct.ThrowIfCancellationRequested();   // cooperative stop between files
             if (findings.Count >= MaxFindings) break;
 
             string[] lines;

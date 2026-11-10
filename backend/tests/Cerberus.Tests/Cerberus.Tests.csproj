@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\Cerberus.Compliance\Cerberus.Compliance.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Scanning\Cerberus.Scanning.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Authorization\Cerberus.Authorization.csproj" />
+    <ProjectReference Include="..\..\src\Cerberus.Jobs\Cerberus.Jobs.csproj" />
   </ItemGroup>
 
 </Project>

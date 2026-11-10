@@ -47,6 +47,9 @@ Environment:
 | POST | `/engagements/{id}/abort` · `/close` | Bearer | Abort (kill switch) or close: no further runs are authorized |
 | GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
 | GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
+| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan", path, sca?, engagementId? }` → 202 with the job |
+| GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
+| POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
 | GET | `/scans` | Bearer | List this user's past scans (id, target, counts, timestamp) |
 | GET | `/scans/{id}` | Bearer | A persisted scan with its findings |
@@ -69,11 +72,20 @@ An **engagement** states what may be tested: a list of in-scope targets, a maxim
 - the engagement is closed or aborted, or the current time is outside its window,
 - the tier exceeds the engagement's maximum.
 
-Path targets are relative to the scan root and require `ownershipAttested: true` (the operator confirms they own the code or are authorized to test it). Host and domain targets can be recorded but stay `Pending`: proof-of-control verification is not implemented, and nothing active runs against them yet. `POST /engagements/{id}/abort` is the kill switch for *new* work — it does not interrupt a request already in flight (that needs the job pipeline, M3).
+Path targets are relative to the scan root and require `ownershipAttested: true` (the operator confirms they own the code or are authorized to test it). Host and domain targets can be recorded but stay `Pending`: proof-of-control verification is not implemented, and nothing active runs against them yet. `POST /engagements/{id}/abort` is the kill switch: no further runs are authorized, the engagement's queued jobs are cancelled and its running jobs are told to stop (the response reports how many). It does not interrupt a synchronous `POST /scan` or `/compliance/assess` request already in flight — use jobs for anything long-running.
 
 `engagementId` is still **optional**: a passive scan without one runs as before and is audited, but is not scope-checked beyond the scan root.
 
 **Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that.
+
+### `/jobs` — background job pipeline (first slice)
+
+`POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Only `scan` jobs exist today; a finished job's `resultId` is the scan id (`GET /scans/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`. Poll `GET /jobs/{id}` for progress (no push notifications yet).
+
+- **Authorization twice:** a job under an engagement is scope-checked when submitted and again when it starts, so a job that waited in the queue cannot outlive an abort or a scope change.
+- **Platform controls** (`Cerberus.Jobs/JobExecution.cs`), independent of what the work does: operator cancel, a time limit (`CERBERUS_JOB_TIMEOUT_SECONDS`, default 600), and a hard stop — if the work has not returned `CERBERUS_JOB_GRACE_SECONDS` (default 10) after being told to stop, the job is closed anyway and marked abandoned. Abandoned work is not killed (that needs the sandbox); it is only no longer waited for.
+- **Concurrency:** `CERBERUS_JOB_CONCURRENCY` workers (default 2, max 16); at most 50 queued jobs per user.
+- **Restarts:** the bus is in-memory (`InProcMessageBus` behind `IMessageBus`). On startup, jobs that were `Running` are marked `Failed` and jobs still `Queued` are re-published.
 
 ### `/compliance` — Phase 2 (Compliance), deterministic engine
 
@@ -113,4 +125,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy and the audit hash chain. The API endpoints, scanner and SCA have no automated tests yet.
+`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, and the job executor (cancel, time limit, hard stop), message bus and state rules. The API endpoints, scanner and SCA have no automated tests yet.
