@@ -11,6 +11,7 @@ public class User
     public List<Session> Sessions { get; set; } = [];
     public List<UserApiKey> ApiKeys { get; set; } = [];
     public List<Scan> Scans { get; set; } = [];
+    public List<ComplianceAssessment> ComplianceAssessments { get; set; } = [];
 }
 
 /// <summary>A local authentication session (replaces Clerk). The CLI stores the token.</summary>
@@ -45,6 +46,29 @@ public class Scan
     public int FilesScanned { get; set; }
     public int FindingCount { get; set; }
     public string Findings { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>A persisted Phase-2 compliance assessment (control matrix stored as JSON).</summary>
+public class ComplianceAssessment
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public User? User { get; set; }
+    public string CatalogId { get; set; } = string.Empty;
+    public string TargetPath { get; set; } = string.Empty;
+
+    /// <summary>The scan whose findings drove this assessment, when one was reused.</summary>
+    public string? ScanId { get; set; }
+
+    public int TotalControls { get; set; }
+    public int Compliant { get; set; }
+    public int NonCompliant { get; set; }
+    public int NotAssessed { get; set; }
+    public double? Score { get; set; }
+
+    /// <summary>The full control matrix (list of ControlResult), serialized as JSON.</summary>
+    public string Matrix { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

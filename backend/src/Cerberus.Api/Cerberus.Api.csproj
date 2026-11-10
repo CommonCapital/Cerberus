@@ -5,6 +5,7 @@
     <ProjectReference Include="..\Cerberus.Data\Cerberus.Data.csproj" />
     <ProjectReference Include="..\Cerberus.Models\Cerberus.Models.csproj" />
     <ProjectReference Include="..\Cerberus.Scanning\Cerberus.Scanning.csproj" />
+    <ProjectReference Include="..\Cerberus.Compliance\Cerberus.Compliance.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

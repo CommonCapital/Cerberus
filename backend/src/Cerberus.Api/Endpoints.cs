@@ -3,6 +3,7 @@ using System.Text.Json;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Chat;
 using Cerberus.Api.Settings;
+using Cerberus.Compliance;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Cerberus.Scanning;
@@ -45,6 +46,137 @@ public static class Endpoints
         scans.MapGet("/{id}", GetScan);
 
         app.MapPost("/scan", RunScan).AddEndpointFilter<RequireAuthFilter>();
+
+        // --- Phase 2: Compliance (ESAP/ISO/OWASP catalog engine) ------------
+        var catalogs = app.MapGroup("/compliance/catalogs").AddEndpointFilter<RequireAuthFilter>();
+        catalogs.MapGet("/", ListCatalogs);
+        catalogs.MapGet("/{id}", GetCatalog);
+
+        var compliance = app.MapGroup("/compliance").AddEndpointFilter<RequireAuthFilter>();
+        compliance.MapGet("/", ListAssessments);
+        compliance.MapGet("/{id}", GetAssessment);
+        compliance.MapPost("/assess", RunAssessment);
+    }
+
+    // --- compliance (Phase 2: catalog engine + matrix) ----------------------
+
+    private static IResult ListCatalogs(CatalogLoader loader) =>
+        Results.Json(loader.All.Select(CatalogLoader.Summarize), JsonOptions);
+
+    private static IResult GetCatalog(string id, CatalogLoader loader)
+    {
+        var catalog = loader.Get(id);
+        return catalog is null
+            ? Results.Json(new { error = "Catalog not found" }, statusCode: 404)
+            : Results.Json(catalog, JsonOptions);
+    }
+
+    private static async Task<IResult> RunAssessment(
+        ComplianceRequest body, HttpContext http, CerberusDbContext db,
+        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
+
+        var catalog = loader.Get(catalogId);
+        if (catalog is null)
+        {
+            return Results.Json(new { error = $"Unknown catalog '{catalogId}'" }, statusCode: 400);
+        }
+
+        // Findings come from a persisted scan (preferred) or a fresh scan of a path.
+        IReadOnlyList<Finding> findings;
+        string targetPath;
+        string? scanId = null;
+
+        if (!string.IsNullOrWhiteSpace(body.ScanId))
+        {
+            var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == body.ScanId && s.UserId == userId, ct);
+            if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
+            findings = DeserializeFindings(scan.Findings);
+            targetPath = scan.TargetPath;
+            scanId = scan.Id;
+        }
+        else
+        {
+            targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
+            try
+            {
+                findings = scanner.Scan(targetPath).Findings;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: 400);
+            }
+        }
+
+        var report = engine.Evaluate(catalog, findings);
+
+        var assessment = new ComplianceAssessment
+        {
+            UserId = userId,
+            CatalogId = report.CatalogId,
+            TargetPath = targetPath,
+            ScanId = scanId,
+            TotalControls = report.TotalControls,
+            Compliant = report.Compliant,
+            NonCompliant = report.NonCompliant,
+            NotAssessed = report.NotAssessed,
+            Score = report.Score,
+            Matrix = JsonSerializer.Serialize(report.Controls, JsonOptions),
+        };
+        db.ComplianceAssessments.Add(assessment);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new
+        {
+            id = assessment.Id,
+            catalogId = report.CatalogId,
+            catalogName = report.CatalogName,
+            catalogVersion = report.CatalogVersion,
+            targetPath,
+            scanId,
+            createdAt = assessment.CreatedAt,
+            summary = new
+            {
+                report.TotalControls,
+                report.Assessed,
+                report.Compliant,
+                report.NonCompliant,
+                report.NotAssessed,
+                report.Score,
+            },
+            controls = report.Controls,
+        }, JsonOptions);
+    }
+
+    private static async Task<IResult> ListAssessments(HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var items = await db.ComplianceAssessments
+            .Where(a => a.UserId == userId)
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => new
+            {
+                a.Id, a.CatalogId, a.TargetPath, a.ScanId,
+                a.TotalControls, a.Compliant, a.NonCompliant, a.NotAssessed, a.Score, a.CreatedAt,
+            })
+            .ToListAsync(ct);
+        return Results.Json(items);
+    }
+
+    private static async Task<IResult> GetAssessment(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var a = await db.ComplianceAssessments.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+        if (a is null) return Results.Json(new { error = "Assessment not found" }, statusCode: 404);
+
+        return Results.Json(new
+        {
+            a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.CreatedAt,
+            summary = new { a.TotalControls, a.Compliant, a.NonCompliant, a.NotAssessed, a.Score },
+            controls = ParseStoredMessages(a.Matrix),
+        });
     }
 
     // --- scanning (Phase 1: Scan & Detect, MVP) -----------------------------
@@ -340,6 +472,18 @@ public static class Endpoints
     // --- helpers ------------------------------------------------------------
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;
+
+    private static IReadOnlyList<Finding> DeserializeFindings(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<Finding>>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     private static List<JsonElement> ParseStoredMessages(string json)
     {

@@ -5,5 +5,6 @@
     <Project Path="src/Cerberus.Data/Cerberus.Data.csproj" />
     <Project Path="src/Cerberus.Models/Cerberus.Models.csproj" />
     <Project Path="src/Cerberus.Scanning/Cerberus.Scanning.csproj" />
+    <Project Path="src/Cerberus.Compliance/Cerberus.Compliance.csproj" />
   </Folder>
 </Solution>
