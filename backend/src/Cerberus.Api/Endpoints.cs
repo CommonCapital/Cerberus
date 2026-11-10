@@ -56,6 +56,9 @@ public static class Endpoints
         compliance.MapGet("/", ListAssessments);
         compliance.MapGet("/{id}", GetAssessment);
         compliance.MapGet("/{id}/export", ExportAssessment);
+        compliance.MapPost("/{id}/import", ImportAssessment);
+        compliance.MapPut("/{id}/responses/{controlId}", SetControlResponse);
+        compliance.MapDelete("/{id}/responses/{controlId}", DeleteControlResponse);
         compliance.MapPost("/assess", RunAssessment);
     }
 
@@ -178,37 +181,177 @@ public static class Endpoints
     private static async Task<IResult> ExportAssessment(
         string id, HttpContext http, CerberusDbContext db, CatalogLoader loader, CancellationToken ct)
     {
-        var userId = UserId(http);
-        var a = await db.ComplianceAssessments.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
-        if (a is null) return Results.Json(new { error = "Assessment not found" }, statusCode: 404);
-
-        List<ControlResult> controls;
-        try
-        {
-            controls = JsonSerializer.Deserialize<List<ControlResult>>(a.Matrix, JsonOptions) ?? [];
-        }
-        catch (JsonException)
-        {
-            return Results.Json(new { error = "Stored assessment could not be read" }, statusCode: 500);
-        }
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
 
         var info = new AssessmentInfo(a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.CreatedAt, a.Score);
-        var bytes = ComplianceWorkbook.Build(info, loader.Get(a.CatalogId), controls);
+        var bytes = ComplianceWorkbook.Build(info, loader.Get(a.CatalogId), controls, ReadResponses(a));
         return Results.File(bytes, ComplianceWorkbook.ContentType, ComplianceWorkbook.FileName(info));
+    }
+
+    /// <summary>
+    /// Import operator answers from a completed export. The request body is the
+    /// raw .xlsx file. Valid rows are saved; invalid rows are reported per row.
+    /// </summary>
+    private static async Task<IResult> ImportAssessment(
+        string id, HttpContext http, CerberusDbContext db, CatalogLoader loader, CancellationToken ct)
+    {
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
+
+        // Buffer the upload with a hard cap; ClosedXML needs a seekable stream.
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await http.Request.Body.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > MaxImportBytes)
+            {
+                return Results.Json(new { error = $"File is larger than {MaxImportBytes / (1024 * 1024)} MB" }, statusCode: 413);
+            }
+            buffer.Write(chunk, 0, read);
+        }
+        if (buffer.Length == 0)
+        {
+            return Results.Json(new { error = "Send the .xlsx file as the request body" }, statusCode: 400);
+        }
+        buffer.Position = 0;
+
+        var responses = ReadResponses(a);
+        WorkbookImport result;
+        try
+        {
+            result = ComplianceWorkbook.ReadResponses(buffer, loader.Get(a.CatalogId), controls, responses, DateTime.UtcNow);
+        }
+        catch (InvalidDataException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 400);
+        }
+
+        if (result.Accepted.Count > 0)
+        {
+            foreach (var response in result.Accepted) responses[response.ControlId] = response;
+            a.Responses = JsonSerializer.Serialize(responses.Values, JsonOptions);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return Results.Json(new
+        {
+            imported = result.Accepted.Count,
+            unchanged = result.Unchanged,
+            errors = result.Errors,
+            effective = OperatorResponses.Summarize(controls, responses),
+        }, JsonOptions);
+    }
+
+    private static async Task<IResult> SetControlResponse(
+        string id, string controlId, ControlResponseRequest body, HttpContext http,
+        CerberusDbContext db, CatalogLoader loader, CancellationToken ct)
+    {
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
+
+        var control = controls.FirstOrDefault(c => string.Equals(c.ControlId, controlId, StringComparison.OrdinalIgnoreCase));
+        if (control is null) return Results.Json(new { error = "Control is not part of this assessment" }, statusCode: 404);
+
+        var (response, error) = OperatorResponses.Validate(
+            control.ControlId,
+            new OperatorResponseInput(body.Verdict, body.Justification, body.ActionPlan, body.TimeLimitDays),
+            loader.Get(a.CatalogId), DateTime.UtcNow);
+        if (response is null) return Results.Json(new { error }, statusCode: 400);
+
+        var responses = ReadResponses(a);
+        responses[control.ControlId] = response;
+        a.Responses = JsonSerializer.Serialize(responses.Values, JsonOptions);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new { response, effective = OperatorResponses.Summarize(controls, responses) }, JsonOptions);
+    }
+
+    private static async Task<IResult> DeleteControlResponse(
+        string id, string controlId, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
+
+        var responses = ReadResponses(a);
+        if (!responses.Remove(controlId))
+        {
+            return Results.Json(new { error = "No operator response for that control" }, statusCode: 404);
+        }
+        a.Responses = JsonSerializer.Serialize(responses.Values, JsonOptions);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new { effective = OperatorResponses.Summarize(controls, responses) }, JsonOptions);
     }
 
     private static async Task<IResult> GetAssessment(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
     {
-        var userId = UserId(http);
-        var a = await db.ComplianceAssessments.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
-        if (a is null) return Results.Json(new { error = "Assessment not found" }, statusCode: 404);
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
 
+        var responses = ReadResponses(a);
         return Results.Json(new
         {
             a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.CreatedAt,
+            // What the scanner established on its own.
             summary = new { a.TotalControls, a.Compliant, a.NonCompliant, a.NotAssessed, a.Score },
-            controls = ParseStoredMessages(a.Matrix),
-        });
+            // Operator answers applied on top of the automated verdicts.
+            effective = OperatorResponses.Summarize(controls, responses),
+            controls = controls.Select(c => new
+            {
+                c.ControlId, c.Section, c.Title, c.Verdict, c.AutoEvaluable, c.Rationale, c.Evidence,
+                response = responses.GetValueOrDefault(c.ControlId),
+            }),
+        }, JsonOptions);
+    }
+
+    private const int MaxImportBytes = 5 * 1024 * 1024;
+
+    private static Task<ComplianceAssessment?> FindAssessment(
+        CerberusDbContext db, string id, string userId, CancellationToken ct) =>
+        db.ComplianceAssessments.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+
+    private static IResult AssessmentNotFound() =>
+        Results.Json(new { error = "Assessment not found" }, statusCode: 404);
+
+    private static IResult MatrixUnreadable() =>
+        Results.Json(new { error = "Stored assessment could not be read" }, statusCode: 500);
+
+    private static List<ControlResult>? ReadMatrix(ComplianceAssessment a)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<ControlResult>>(a.Matrix, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Operator answers by control id. Empty for rows written before the column existed.</summary>
+    private static Dictionary<string, OperatorResponse> ReadResponses(ComplianceAssessment a)
+    {
+        var result = new Dictionary<string, OperatorResponse>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(a.Responses)) return result;
+        try
+        {
+            foreach (var r in JsonSerializer.Deserialize<List<OperatorResponse>>(a.Responses, JsonOptions) ?? [])
+            {
+                result[r.ControlId] = r;
+            }
+        }
+        catch (JsonException)
+        {
+            // Treat unreadable answers as none rather than failing the whole assessment.
+        }
+        return result;
     }
 
     // --- scanning (Phase 1: Scan & Detect, MVP) -----------------------------

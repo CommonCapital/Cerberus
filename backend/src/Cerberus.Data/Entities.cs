@@ -72,6 +72,9 @@ public class ComplianceAssessment
 
     /// <summary>The full control matrix (list of ControlResult), serialized as JSON.</summary>
     public string Matrix { get; set; } = "[]";
+
+    /// <summary>Operator answers (list of OperatorResponse), serialized as JSON. They overrule the automated matrix.</summary>
+    public string Responses { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

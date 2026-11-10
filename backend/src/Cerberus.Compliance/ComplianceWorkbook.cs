@@ -19,19 +19,33 @@ public sealed record AssessmentInfo(
 /// Only what the engine actually established is pre-filled; controls it could
 /// not judge are left blank for the operator to complete.
 /// </summary>
+/// <summary>A row of an imported workbook that was rejected, with the reason.</summary>
+public sealed record ImportError(int Row, string ControlId, string Error);
+
+/// <summary>The outcome of reading operator answers from a workbook.</summary>
+public sealed record WorkbookImport(
+    IReadOnlyList<OperatorResponse> Accepted,
+    int Unchanged,
+    IReadOnlyList<ImportError> Errors);
+
 public static class ComplianceWorkbook
 {
     public const string ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     private const int MaxCellLength = 32_000;      // Excel's hard limit is 32,767
     private const int MaxEvidenceInResponse = 5;
+    private const string ControlsSheet = "Controls";
 
     /// <param name="catalog">The catalog the assessment was made against; null if it is no longer installed.</param>
-    public static byte[] Build(AssessmentInfo info, Catalog? catalog, IReadOnlyList<ControlResult> controls)
+    /// <param name="responses">Operator answers by control id; they replace the pre-filled automated values.</param>
+    public static byte[] Build(
+        AssessmentInfo info, Catalog? catalog, IReadOnlyList<ControlResult> controls,
+        IReadOnlyDictionary<string, OperatorResponse>? responses = null)
     {
+        responses ??= new Dictionary<string, OperatorResponse>();
         using var workbook = new XLWorkbook();
-        AddSummary(workbook, info, catalog, controls);
-        AddControls(workbook, catalog, controls);
+        AddSummary(workbook, info, catalog, controls, responses);
+        AddControls(workbook, catalog, controls, responses);
         AddEvidence(workbook, controls);
 
         using var stream = new MemoryStream();
@@ -45,8 +59,10 @@ public static class ComplianceWorkbook
     // --- Summary -------------------------------------------------------------
 
     private static void AddSummary(
-        XLWorkbook workbook, AssessmentInfo info, Catalog? catalog, IReadOnlyList<ControlResult> controls)
+        XLWorkbook workbook, AssessmentInfo info, Catalog? catalog, IReadOnlyList<ControlResult> controls,
+        IReadOnlyDictionary<string, OperatorResponse> responses)
     {
+        var effective = OperatorResponses.Summarize(controls, responses);
         var sheet = workbook.Worksheets.Add("Summary");
         var compliant = controls.Count(c => c.Verdict == ControlVerdict.Compliant);
         var nonCompliant = controls.Count(c => c.Verdict == ControlVerdict.NonCompliant);
@@ -64,6 +80,8 @@ public static class ComplianceWorkbook
             ("Non-compliant (automated)", nonCompliant),
             ("Not assessed — to be completed", notAssessed),
             ("Score of automatically assessed controls (%)", info.Score is { } s ? s : "n/a"),
+            ("Answered by operator", effective.OperatorAnswered),
+            ("Still unanswered", effective.Unanswered),
         };
 
         sheet.Cell(1, 1).Value = "Cerberus compliance assessment";
@@ -87,6 +105,8 @@ public static class ComplianceWorkbook
             "• \"Compliant\" means only that the scanner found nothing in the categories mapped to that control.",
             "• The score covers automatically assessed controls only; it is not an overall compliance grade.",
             "• Controls with an empty Verdict could not be judged automatically — complete Verdict, Detailed Response, Action Plan and Time limit by hand.",
+            "• Edit the Controls sheet and import it back into Cerberus to record your answers; rows you leave untouched are ignored.",
+            "• An operator answer replaces the scanner's verdict for that control; the scanner's own verdict stays visible in \"Automated verdict\".",
         ];
         foreach (var note in notes)
         {
@@ -101,72 +121,89 @@ public static class ComplianceWorkbook
 
     // --- Controls (the vendor-assurance response sheet) ----------------------
 
-    private static void AddControls(XLWorkbook workbook, Catalog? catalog, IReadOnlyList<ControlResult> controls)
+    // Column headers of the Controls sheet; the importer locates columns by these names.
+    private static readonly string[] ControlHeaders =
+    [
+        "Req No", "Section", "Control", "Requirement",
+        "Verdict", "Detailed Response", "Action Plan", "Time limit (days)", "Findings",
+        "Automated verdict", "Answered by",
+    ];
+
+    private static void AddControls(
+        XLWorkbook workbook, Catalog? catalog, IReadOnlyList<ControlResult> controls,
+        IReadOnlyDictionary<string, OperatorResponse> responses)
     {
-        var sheet = workbook.Worksheets.Add("Controls");
-        string[] headers =
-        [
-            "Req No", "Section", "Control", "Requirement",
-            "Verdict", "Detailed Response", "Action Plan", "Time limit (days)", "Findings",
-        ];
-        WriteHeader(sheet, headers);
+        var sheet = workbook.Worksheets.Add(ControlsSheet);
+        WriteHeader(sheet, ControlHeaders);
 
         var requirements = catalog?.Controls.ToDictionary(c => c.Id, c => c.Requirement, StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, string>();
-        var standardDays = catalog?.Methodology?.CorrectiveActions?.StandardDays;
 
         var row = 2;
         foreach (var control in controls)
         {
+            var hasResponse = responses.TryGetValue(control.ControlId, out var response);
+            var cells = hasResponse
+                ? new RowValues(response!.Verdict, response.Justification, response.ActionPlan ?? string.Empty, response.TimeLimitDays)
+                : Prefill(control, catalog);
+
             sheet.Cell(row, 1).Value = control.ControlId;
             sheet.Cell(row, 2).Value = control.Section;
             sheet.Cell(row, 3).Value = control.Title;
             sheet.Cell(row, 4).Value = Clip(requirements.GetValueOrDefault(control.ControlId, string.Empty));
-            sheet.Cell(row, 5).Value = VerdictLabel(control.Verdict);
-            sheet.Cell(row, 6).Value = Clip(DetailedResponse(control));
+            sheet.Cell(row, 5).Value = cells.Verdict;
+            sheet.Cell(row, 6).Value = Clip(cells.Response);
+            if (cells.ActionPlan.Length > 0) sheet.Cell(row, 7).Value = Clip(cells.ActionPlan);
+            if (cells.TimeLimitDays is { } days) sheet.Cell(row, 8).Value = days;
             sheet.Cell(row, 9).Value = control.Evidence.Count;
+            sheet.Cell(row, 10).Value = OperatorResponses.AutomatedLabel(control.Verdict);
+            sheet.Cell(row, 11).Value = hasResponse ? "Operator"
+                : control.Verdict == ControlVerdict.NotAssessed ? string.Empty : "Scanner";
 
-            if (control.Verdict == ControlVerdict.NonCompliant)
+            var color = OperatorResponses.Normalize(cells.Verdict) switch
             {
-                sheet.Cell(row, 7).Value =
-                    $"Remediate the {control.Evidence.Count} finding(s) listed for {control.ControlId} on the Evidence sheet, then re-scan to confirm.";
-                // Catalog guidance for corrective actions, where the catalog defines one.
-                if (standardDays is { } days) sheet.Cell(row, 8).Value = days;
-                sheet.Cell(row, 5).Style.Fill.SetBackgroundColor(XLColor.FromHtml("#F8D7DA"));
-            }
-            else if (control.Verdict == ControlVerdict.Compliant)
-            {
-                sheet.Cell(row, 5).Style.Fill.SetBackgroundColor(XLColor.FromHtml("#D4EDDA"));
-            }
+                "compliant" => "#D4EDDA",
+                "noncompliant" => "#F8D7DA",
+                "partiallycompliant" => "#FFF3CD",
+                _ => null,
+            };
+            if (color is not null) sheet.Cell(row, 5).Style.Fill.SetBackgroundColor(XLColor.FromHtml(color));
             row++;
         }
 
         // Verdict is a pick-list from the catalog's own response scale.
-        var scale = catalog?.ResponseScale is { Count: > 0 } s
-            ? s
-            : ["Compliant", "Partially compliant", "Non-compliant", "Not applicable"];
         if (row > 2)
         {
             var validation = sheet.Range(2, 5, row - 1, 5).CreateDataValidation();
-            validation.List($"\"{string.Join(",", scale)}\"", true);
+            validation.List($"\"{string.Join(",", OperatorResponses.ScaleOf(catalog))}\"", true);
             validation.IgnoreBlanks = true;
         }
 
-        double[] widths = [10, 26, 34, 70, 18, 70, 50, 16, 10];
+        double[] widths = [10, 26, 34, 70, 18, 70, 50, 16, 10, 18, 12];
         for (var i = 0; i < widths.Length; i++) sheet.Column(i + 1).Width = widths[i];
         sheet.Columns(3, 7).Style.Alignment.SetWrapText(true);
         sheet.Rows().Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top);
         sheet.SheetView.FreezeRows(1);
-        if (row > 2) sheet.Range(1, 1, row - 1, headers.Length).SetAutoFilter();
+        if (row > 2) sheet.Range(1, 1, row - 1, ControlHeaders.Length).SetAutoFilter();
     }
 
-    /// <summary>The catalog's response-scale wording; blank when the engine could not judge the control.</summary>
-    private static string VerdictLabel(ControlVerdict verdict) => verdict switch
+    /// <summary>The four editable cells of a control row.</summary>
+    private sealed record RowValues(string Verdict, string Response, string ActionPlan, int? TimeLimitDays);
+
+    /// <summary>What the export writes for a control the operator has not answered.</summary>
+    private static RowValues Prefill(ControlResult control, Catalog? catalog)
     {
-        ControlVerdict.Compliant => "Compliant",
-        ControlVerdict.NonCompliant => "Non-compliant",
-        _ => string.Empty,
-    };
+        if (control.Verdict != ControlVerdict.NonCompliant)
+        {
+            return new RowValues(OperatorResponses.AutomatedLabel(control.Verdict), DetailedResponse(control), string.Empty, null);
+        }
+        return new RowValues(
+            OperatorResponses.AutomatedLabel(control.Verdict),
+            DetailedResponse(control),
+            $"Remediate the {control.Evidence.Count} finding(s) listed for {control.ControlId} on the Evidence sheet, then re-scan to confirm.",
+            // Catalog guidance for corrective actions, where the catalog defines one.
+            catalog?.Methodology?.CorrectiveActions?.StandardDays);
+    }
 
     private static string DetailedResponse(ControlResult control)
     {
@@ -228,6 +265,118 @@ public static class ComplianceWorkbook
         sheet.SheetView.FreezeRows(1);
         if (row > 2) sheet.Range(1, 1, row - 1, headers.Length).SetAutoFilter();
     }
+
+    // --- Import (operator answers back in) -----------------------------------
+
+    /// <summary>
+    /// Reads operator answers from a completed export. Rows with an empty
+    /// Verdict, rows still identical to what the export pre-filled, and rows
+    /// identical to the stored answer are skipped; every other row is validated
+    /// against the catalog's response schema.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The file is not a readable Cerberus export.</exception>
+    public static WorkbookImport ReadResponses(
+        Stream xlsx, Catalog? catalog, IReadOnlyList<ControlResult> controls,
+        IReadOnlyDictionary<string, OperatorResponse> existing, DateTime now)
+    {
+        XLWorkbook workbook;
+        try
+        {
+            workbook = new XLWorkbook(xlsx);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            throw new InvalidDataException("The file is not a readable .xlsx workbook.", ex);
+        }
+
+        using (workbook)
+        {
+            if (!workbook.TryGetWorksheet(ControlsSheet, out var sheet))
+            {
+                throw new InvalidDataException($"The workbook has no \"{ControlsSheet}\" sheet.");
+            }
+
+            int Column(string header)
+            {
+                var cell = sheet.Row(1).CellsUsed()
+                    .FirstOrDefault(c => string.Equals(c.GetString().Trim(), header, StringComparison.OrdinalIgnoreCase));
+                return cell?.Address.ColumnNumber
+                    ?? throw new InvalidDataException($"The \"{ControlsSheet}\" sheet has no \"{header}\" column.");
+            }
+
+            int idCol = Column(ControlHeaders[0]), verdictCol = Column(ControlHeaders[4]),
+                responseCol = Column(ControlHeaders[5]), planCol = Column(ControlHeaders[6]),
+                daysCol = Column(ControlHeaders[7]);
+
+            var byId = controls.ToDictionary(c => c.ControlId, StringComparer.OrdinalIgnoreCase);
+            var accepted = new List<OperatorResponse>();
+            var errors = new List<ImportError>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var unchanged = 0;
+
+            foreach (var row in sheet.RowsUsed().Skip(1))
+            {
+                var rowNumber = row.RowNumber();
+                var controlId = row.Cell(idCol).GetString().Trim();
+                var verdict = row.Cell(verdictCol).GetString().Trim();
+                if (controlId.Length == 0 || verdict.Length == 0) continue;   // nothing answered
+
+                if (!byId.TryGetValue(controlId, out var control))
+                {
+                    errors.Add(new ImportError(rowNumber, controlId, "This control is not part of the assessment."));
+                    continue;
+                }
+                if (!seen.Add(control.ControlId))
+                {
+                    errors.Add(new ImportError(rowNumber, control.ControlId, "Duplicate row for this control; only the first is used."));
+                    continue;
+                }
+
+                var response = Text(row.Cell(responseCol));
+                var plan = Text(row.Cell(planCol));
+                var daysCell = row.Cell(daysCol);
+                int? days = null;
+                if (!daysCell.IsEmpty())
+                {
+                    if (!daysCell.TryGetValue<int>(out var parsed))
+                    {
+                        errors.Add(new ImportError(rowNumber, control.ControlId, "Time limit must be a whole number of days."));
+                        continue;
+                    }
+                    days = parsed;
+                }
+
+                // Untouched since export: either the scanner's pre-fill or the stored answer.
+                var current = existing.TryGetValue(control.ControlId, out var stored)
+                    ? new RowValues(stored.Verdict, stored.Justification, stored.ActionPlan ?? string.Empty, stored.TimeLimitDays)
+                    : Prefill(control, catalog);
+                if (OperatorResponses.Normalize(verdict) == OperatorResponses.Normalize(current.Verdict) &&
+                    response == Canonical(Clip(current.Response)) &&
+                    plan == Canonical(Clip(current.ActionPlan)) &&
+                    days == current.TimeLimitDays)
+                {
+                    unchanged++;
+                    continue;
+                }
+
+                var (validated, error) = OperatorResponses.Validate(
+                    control.ControlId, new OperatorResponseInput(verdict, response, plan, days), catalog, now);
+                if (validated is null)
+                {
+                    errors.Add(new ImportError(rowNumber, control.ControlId, error!));
+                    continue;
+                }
+                accepted.Add(validated);
+            }
+
+            return new WorkbookImport(accepted, unchanged, errors);
+        }
+    }
+
+    private static string Text(IXLCell cell) => Canonical(cell.GetString());
+
+    // Spreadsheet apps rewrite line endings; compare on a canonical form.
+    private static string Canonical(string value) => value.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
 
     // --- helpers -------------------------------------------------------------
 
