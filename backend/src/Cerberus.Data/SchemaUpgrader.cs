@@ -17,11 +17,29 @@ public static class SchemaUpgrader
 {
     public static void EnsureUpToDate(CerberusDbContext db)
     {
-        // Fresh database: builds everything and we are done.
-        if (db.Database.EnsureCreated()) return;
+        // Fresh database: EnsureCreated builds everything; otherwise upgrade additively.
+        if (!db.Database.EnsureCreated())
+        {
+            CreateMissingTablesAndIndexes(db);
+            AddMissingColumns(db);
+        }
+        ProtectAuditLog(db);
+    }
 
-        CreateMissingTablesAndIndexes(db);
-        AddMissingColumns(db);
+    /// <summary>
+    /// Makes the audit log append-only at the database level: any UPDATE or
+    /// DELETE on it fails, whichever code path (or tool) attempts it.
+    /// </summary>
+    private static void ProtectAuditLog(CerberusDbContext db)
+    {
+        db.Database.ExecuteSqlRaw("""
+            CREATE TRIGGER IF NOT EXISTS AuditEvents_NoUpdate BEFORE UPDATE ON "AuditEvents"
+            BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END
+            """);
+        db.Database.ExecuteSqlRaw("""
+            CREATE TRIGGER IF NOT EXISTS AuditEvents_NoDelete BEFORE DELETE ON "AuditEvents"
+            BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END
+            """);
     }
 
     private static void CreateMissingTablesAndIndexes(CerberusDbContext db)

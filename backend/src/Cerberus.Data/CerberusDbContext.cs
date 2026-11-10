@@ -10,6 +10,9 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
     public DbSet<Scan> Scans => Set<Scan>();
     public DbSet<ComplianceAssessment> ComplianceAssessments => Set<ComplianceAssessment>();
+    public DbSet<Engagement> Engagements => Set<Engagement>();
+    public DbSet<EngagementTarget> EngagementTargets => Set<EngagementTarget>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,6 +53,30 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
             e.HasIndex(s => s.UserId);
             e.HasOne(s => s.User).WithMany(u => u.Scans).HasForeignKey(s => s.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Engagement>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.UserId);
+            e.HasOne(x => x.User).WithMany(u => u.Engagements).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Targets).WithOne(t => t.Engagement!).HasForeignKey(t => t.EngagementId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EngagementTarget>(e =>
+        {
+            e.HasKey(t => t.Id);
+            e.HasIndex(t => new { t.EngagementId, t.Type, t.Locator }).IsUnique();
+        });
+
+        modelBuilder.Entity<AuditEvent>(e =>
+        {
+            e.HasKey(a => a.Id);
+            // One chain per user; uniqueness also stops two writers claiming the same position.
+            e.HasIndex(a => new { a.UserId, a.Sequence }).IsUnique();
+            e.HasIndex(a => a.EngagementId);
         });
 
         modelBuilder.Entity<ComplianceAssessment>(e =>

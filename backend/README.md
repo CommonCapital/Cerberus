@@ -40,6 +40,13 @@ Environment:
 | PUT | `/settings/keys` | Bearer | `{ provider, apiKey }` — store a key (encrypted at rest) |
 | DELETE | `/settings/keys/{provider}` | Bearer | Remove a stored key |
 | POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
+| GET, POST | `/engagements` | Bearer | List / create an engagement `{ name, maxTier?, startsAt?, endsAt? }` |
+| GET | `/engagements/{id}` | Bearer | An engagement with its in-scope targets |
+| POST | `/engagements/{id}/targets` | Bearer | Add a target `{ type?, locator, ownershipAttested }` to the scope |
+| DELETE | `/engagements/{id}/targets/{targetId}` | Bearer | Remove a target from the scope |
+| POST | `/engagements/{id}/abort` · `/close` | Bearer | Abort (kill switch) or close: no further runs are authorized |
+| GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
+| GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
 | GET | `/scans` | Bearer | List this user's past scans (id, target, counts, timestamp) |
 | GET | `/scans/{id}` | Bearer | A persisted scan with its findings |
@@ -53,6 +60,20 @@ Environment:
 | PUT | `/compliance/{id}/responses/{controlId}` | Bearer | Set the operator's answer `{ verdict, justification, actionPlan?, timeLimitDays? }` for a control |
 | DELETE | `/compliance/{id}/responses/{controlId}` | Bearer | Remove the operator's answer (falls back to the scanner's verdict) |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
+
+### `/engagements` and `/audit` — authorization & safety spine (first slice)
+
+An **engagement** states what may be tested: a list of in-scope targets, a maximum capability tier (T0 passive, T1 active-safe; T2/T3 cannot be granted yet) and an optional time window. `POST /scan` and `POST /compliance/assess` accept an `engagementId`; the run is then checked by `ScopePolicy` (`Cerberus.Authorization`) **before any work starts** and refused with 403 when:
+
+- the path is not at or below one of the engagement's path targets (paths that are absolute or contain `..` are refused outright),
+- the engagement is closed or aborted, or the current time is outside its window,
+- the tier exceeds the engagement's maximum.
+
+Path targets are relative to the scan root and require `ownershipAttested: true` (the operator confirms they own the code or are authorized to test it). Host and domain targets can be recorded but stay `Pending`: proof-of-control verification is not implemented, and nothing active runs against them yet. `POST /engagements/{id}/abort` is the kill switch for *new* work — it does not interrupt a request already in flight (that needs the job pipeline, M3).
+
+`engagementId` is still **optional**: a passive scan without one runs as before and is audited, but is not scope-checked beyond the scan root.
+
+**Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that.
 
 ### `/compliance` — Phase 2 (Compliance), deterministic engine
 
@@ -92,4 +113,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, and the spreadsheet export/import round trip. The API endpoints, scanner and SCA have no automated tests yet.
+`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy and the audit hash chain. The API endpoints, scanner and SCA have no automated tests yet.
