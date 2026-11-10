@@ -2,10 +2,12 @@ using Cerberus.Api;
 using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Hubs;
+using Cerberus.Api.Jobs;
 using Cerberus.Api.Settings;
 using Cerberus.Compliance;
 using Cerberus.Core.Models;
 using Cerberus.Data;
+using Cerberus.Jobs;
 using Cerberus.Models;
 using Cerberus.Scanning;
 using Microsoft.AspNetCore.DataProtection;
@@ -59,6 +61,18 @@ builder.Services.AddSingleton<ComplianceEngine>();
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();
 
+// --- Job pipeline (in-process bus locally; RabbitMQ in production) ----------
+builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
+builder.Services.AddSingleton<JobCancellationRegistry>();
+builder.Services.AddSingleton(new JobOptions(
+    Concurrency: Math.Clamp(EnvInt("CERBERUS_JOB_CONCURRENCY", 2), 1, 16),
+    Timeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_TIMEOUT_SECONDS", 600)),
+    Grace: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_GRACE_SECONDS", 10)),
+    MaxQueuedPerUser: 50));
+builder.Services.AddScoped<ScanRunner>();
+builder.Services.AddScoped<JobControl>();
+builder.Services.AddHostedService<JobWorker>();
+
 // Serialize enums (e.g. Severity) as strings in JSON responses.
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -74,10 +88,18 @@ using (var scope = app.Services.CreateScope())
 
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
+app.MapJobEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
 app.Run($"http://localhost:{port}");
+
+static int EnvInt(string name, int fallback) =>
+    int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : fallback;
+
+static double EnvDouble(string name, double fallback) =>
+    double.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float,
+        System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0 ? value : fallback;
 
 // Walk up from the app's content root to find the repo's catalogs/ directory.
 static string ResolveCatalogRoot(string contentRoot)

@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.Sqlite;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -13,15 +13,17 @@ namespace Cerberus.Data;
 /// columns. It never drops, renames or retypes anything. Production (M7) is
 /// expected to use real migrations instead.
 /// </summary>
-public static class SchemaUpgrader
+public static partial class SchemaUpgrader
 {
     public static void EnsureUpToDate(CerberusDbContext db)
     {
         // Fresh database: EnsureCreated builds everything; otherwise upgrade additively.
         if (!db.Database.EnsureCreated())
         {
-            CreateMissingTablesAndIndexes(db);
+            // Order matters: an index may cover a column that is only added in step two.
+            CreateMissing(db, "TABLE");
             AddMissingColumns(db);
+            CreateMissing(db, "INDEX");
         }
         ProtectAuditLog(db);
     }
@@ -42,29 +44,49 @@ public static class SchemaUpgrader
             """);
     }
 
-    private static void CreateMissingTablesAndIndexes(CerberusDbContext db)
+    /// <summary>
+    /// Runs the model's CREATE statements of one kind ("TABLE" or "INDEX") for
+    /// objects the database does not have yet.
+    /// </summary>
+    private static void CreateMissing(CerberusDbContext db, string kind)
     {
+        var existing = ExistingObjects(db);
+
         // The create script holds one CREATE TABLE / CREATE INDEX per statement.
         var statements = db.Database.GenerateCreateScript()
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         foreach (var statement in statements)
         {
-            if (!statement.StartsWith("CREATE", StringComparison.OrdinalIgnoreCase)) continue;
-            try
-            {
-                db.Database.ExecuteSqlRaw(statement);
-            }
-            catch (SqliteException ex) when (ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
-            {
-                // Present already — nothing to do.
-            }
-            catch (SqliteException ex) when (ex.Message.Contains("no such column", StringComparison.OrdinalIgnoreCase))
-            {
-                // An index over a column that AddMissingColumns is about to add;
-                // not needed by any index today, and safe to skip.
-            }
+            var match = CreateStatement().Match(statement);
+            if (!match.Success || !match.Groups["kind"].Value.Equals(kind, StringComparison.OrdinalIgnoreCase)) continue;
+            if (existing.Contains(match.Groups["name"].Value)) continue;
+
+            db.Database.ExecuteSqlRaw(statement);
         }
+    }
+
+    [GeneratedRegex(@"^CREATE\s+(?:UNIQUE\s+)?(?<kind>TABLE|INDEX)\s+""(?<name>[^""]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex CreateStatement();
+
+    private static HashSet<string> ExistingObjects(CerberusDbContext db)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var connection = db.Database.GetDbConnection();
+        var wasClosed = connection.State != ConnectionState.Open;
+        if (wasClosed) connection.Open();
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) names.Add(reader.GetString(0));
+        }
+        finally
+        {
+            if (wasClosed) connection.Close();
+        }
+        return names;
     }
 
     private static void AddMissingColumns(CerberusDbContext db)

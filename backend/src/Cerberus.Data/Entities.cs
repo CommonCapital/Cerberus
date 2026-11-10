@@ -13,6 +13,7 @@ public class User
     public List<Scan> Scans { get; set; } = [];
     public List<ComplianceAssessment> ComplianceAssessments { get; set; } = [];
     public List<Engagement> Engagements { get; set; } = [];
+    public List<Job> Jobs { get; set; } = [];
 }
 
 /// <summary>A local authentication session (replaces Clerk). The CLI stores the token.</summary>
@@ -152,6 +153,36 @@ public class AuditEvent
     public DateTime CreatedAt { get; set; }
     public string PreviousHash { get; set; } = string.Empty;
     public string Hash { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A unit of background work (PLAN.md §12). State moves forward only:
+/// Queued → Running → Succeeded | Failed | Cancelled | TimedOut.
+/// </summary>
+public class Job
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public User? User { get; set; }
+    public string? EngagementId { get; set; }
+
+    /// <summary>What to run. Today: "scan".</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>Capability tier of the work (T0..T3).</summary>
+    public string Tier { get; set; } = "T0";
+    public string TargetPath { get; set; } = string.Empty;
+
+    /// <summary>Type-specific options, as JSON.</summary>
+    public string Parameters { get; set; } = "{}";
+    public string State { get; set; } = "Queued";
+    public string? Error { get; set; }
+
+    /// <summary>Id of what the job produced (for a scan job, the Scan).</summary>
+    public string? ResultId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
 }
 
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>

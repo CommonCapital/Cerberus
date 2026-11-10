@@ -34,10 +34,10 @@ public static class EngagementEndpoints
         engagements.MapGet("/{id}", Get);
         engagements.MapPost("/{id}/targets", AddTarget);
         engagements.MapDelete("/{id}/targets/{targetId}", RemoveTarget);
-        engagements.MapPost("/{id}/abort", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, CancellationToken ct) =>
-            End(id, EngagementStatus.Aborted, http, db, audit, ct));
-        engagements.MapPost("/{id}/close", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, CancellationToken ct) =>
-            End(id, EngagementStatus.Closed, http, db, audit, ct));
+        engagements.MapPost("/{id}/abort", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, Jobs.JobControl jobs, CancellationToken ct) =>
+            End(id, EngagementStatus.Aborted, http, db, audit, jobs, ct));
+        engagements.MapPost("/{id}/close", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, Jobs.JobControl jobs, CancellationToken ct) =>
+            End(id, EngagementStatus.Closed, http, db, audit, jobs, ct));
 
         var auditGroup = app.MapGroup("/audit").AddEndpointFilter<RequireAuthFilter>();
         auditGroup.MapGet("/", ListAudit);
@@ -55,21 +55,33 @@ public static class EngagementEndpoints
         CerberusDbContext db, AuditLog audit, string userId, string engagementId,
         string action, CapabilityTier tier, string path, CancellationToken ct)
     {
-        var engagement = await db.Engagements.AsNoTracking().Include(e => e.Targets)
-            .FirstOrDefaultAsync(e => e.Id == engagementId && e.UserId == userId, ct);
-        if (engagement is null)
+        var decision = await CheckScopeAsync(db, audit, userId, engagementId, action, tier, path, ct);
+        if (decision is null)
         {
             return Results.Json(new { error = "Engagement not found" }, statusCode: 404);
         }
+        return decision.Allowed
+            ? null
+            : Results.Json(new { error = decision.Reason, engagementId }, statusCode: 403);
+    }
+
+    /// <summary>
+    /// The scope decision for a run, recorded in the audit log. Null when the
+    /// engagement does not exist (or belongs to someone else).
+    /// </summary>
+    public static async Task<ScopeDecision?> CheckScopeAsync(
+        CerberusDbContext db, AuditLog audit, string userId, string engagementId,
+        string action, CapabilityTier tier, string path, CancellationToken ct)
+    {
+        var engagement = await db.Engagements.AsNoTracking().Include(e => e.Targets)
+            .FirstOrDefaultAsync(e => e.Id == engagementId && e.UserId == userId, ct);
+        if (engagement is null) return null;
 
         var decision = ScopePolicy.Check(ToScope(engagement), tier, TargetType.Path, path, DateTime.UtcNow);
         await audit.AppendAsync(userId, action,
             decision.Allowed ? AuditOutcome.Allowed : AuditOutcome.Denied,
             decision.Reason, engagement.Id, path, tier, ct);
-
-        return decision.Allowed
-            ? null
-            : Results.Json(new { error = decision.Reason, engagementId = engagement.Id }, statusCode: 403);
+        return decision;
     }
 
     // --- engagements ----------------------------------------------------------
@@ -139,7 +151,8 @@ public static class EngagementEndpoints
 
     /// <summary>Abort (kill switch) or close: either way no further runs are authorized.</summary>
     private static async Task<IResult> End(
-        string id, EngagementStatus status, HttpContext http, CerberusDbContext db, AuditLog audit, CancellationToken ct)
+        string id, EngagementStatus status, HttpContext http, CerberusDbContext db, AuditLog audit,
+        Jobs.JobControl jobs, CancellationToken ct)
     {
         var userId = UserId(http);
         var engagement = await Find(db, id, userId, ct);
@@ -157,7 +170,17 @@ public static class EngagementEndpoints
             AuditOutcome.Ok, $"Engagement {status.ToString().ToLowerInvariant()}; no further runs will be authorized.",
             engagement.Id, ct: ct);
 
-        return Results.Json(Describe(engagement), JsonOptions);
+        // Kill switch: stop the engagement's queued and running jobs. A normal
+        // close leaves work in flight to finish.
+        var stopped = status == EngagementStatus.Aborted
+            ? await jobs.CancelEngagementAsync(userId, engagement.Id, ct)
+            : new Jobs.CancelSummary(0, 0);
+
+        return Results.Json(new
+        {
+            engagement = Describe(engagement),
+            jobsCancelled = new { queued = stopped.Queued, running = stopped.Running },
+        }, JsonOptions);
     }
 
     // --- targets --------------------------------------------------------------

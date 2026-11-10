@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
+using Cerberus.Api.Jobs;
 using Cerberus.Authorization;
 using Cerberus.Api.Chat;
 using Cerberus.Api.Settings;
@@ -386,7 +387,7 @@ public static class Endpoints
 
     private static async Task<IResult> RunScan(
         ScanRequest body, HttpContext http, CerberusDbContext db,
-        ScanService scanner, ScaService sca, AuditLog audit, CancellationToken ct)
+        ScanRunner runner, AuditLog audit, CancellationToken ct)
     {
         var userId = UserId(http);
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
@@ -400,42 +401,16 @@ public static class Endpoints
             return denied;
         }
 
-        ScanResult result;
-        ScaResult scaResult;
+        ScanRun run;
         try
         {
-            // Static (regex) pass is synchronous; SCA is an async OSV lookup.
-            result = scanner.Scan(targetPath);
-            scaResult = (body.Sca ?? true)
-                ? await sca.ScanAsync(targetPath, ct)
-                : new ScaResult(0, 0, []);
+            run = await runner.RunAsync(userId, engagementId, targetPath, body.Sca ?? true, ct);
         }
         catch (UnauthorizedAccessException ex)
         {
             return Results.Json(new { error = ex.Message }, statusCode: 400);
         }
-
-        // Merge both passes; re-sort by severity so the combined set is ranked.
-        var findings = result.Findings.Concat(scaResult.Findings)
-            .OrderByDescending(f => f.Severity)
-            .ToList();
-
-        var findingsJson = JsonSerializer.Serialize(findings, JsonOptions);
-        var scan = new Scan
-        {
-            UserId = userId,
-            TargetPath = targetPath,
-            EngagementId = engagementId,
-            FilesScanned = result.FilesScanned,
-            FindingCount = findings.Count,
-            ScaCompleted = scaResult.Completed,
-            Findings = findingsJson,
-        };
-        db.Scans.Add(scan);
-        await db.SaveChangesAsync(ct);
-        await audit.AppendAsync(userId, "scan.run", AuditOutcome.Ok,
-            $"Scan {scan.Id}: {result.FilesScanned} files, {findings.Count} findings, dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
-            engagementId, targetPath, CapabilityTier.T0, ct);
+        var (scan, result, scaResult, findings) = run;
 
         return Results.Json(new
         {
