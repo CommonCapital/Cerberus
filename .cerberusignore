@@ -1,0 +1,9 @@
+# Paths the Cerberus self-scan skips (see backend/README.md, "/scan").
+# Files listed here are counted as "filesIgnored" in every scan result.
+
+# Vendored reference material: attack and defence examples, not code this project ships.
+security-skills/
+
+# The scanner's own rule definitions and the sample lines that test them.
+backend/src/Cerberus.Scanning/Rules.cs
+backend/tests/Cerberus.Tests/ScannerRuleTests.cs

@@ -84,6 +84,43 @@ public class ComplianceEngineTests
         Assert.Equal(ControlVerdict.NonCompliant, Get(report, "C-3").Verdict);
     }
 
+    [Theory]
+    [InlineData("test")]
+    [InlineData("docs")]
+    public void Findings_only_in_test_or_documentation_files_do_not_fail_a_control(string context)
+    {
+        var fixture = F("crypto") with { Context = context, Confidence = "low" };
+
+        var c1 = Get(new ComplianceEngine().Evaluate(TestCatalog, [fixture, fixture]), "C-1");
+
+        Assert.Equal(ControlVerdict.Compliant, c1.Verdict);
+        Assert.Empty(c1.Evidence);
+        Assert.Contains("2 further finding(s) in test or documentation files were not counted", c1.Rationale);
+    }
+
+    [Fact]
+    public void Production_findings_fail_the_control_and_fixtures_are_mentioned_separately()
+    {
+        var fixture = F("crypto", title: "fixture") with { Context = "test" };
+
+        var c1 = Get(new ComplianceEngine().Evaluate(TestCatalog, [F("crypto"), fixture]), "C-1");
+
+        Assert.Equal(ControlVerdict.NonCompliant, c1.Verdict);
+        Assert.Equal("t", Assert.Single(c1.Evidence).Title);
+        Assert.Contains("1 further finding(s)", c1.Rationale);
+    }
+
+    [Fact]
+    public void Suppressed_findings_never_count()
+    {
+        var suppressed = F("crypto") with { Suppressed = true };
+
+        var c1 = Get(new ComplianceEngine().Evaluate(TestCatalog, [suppressed]), "C-1");
+
+        Assert.Equal(ControlVerdict.Compliant, c1.Verdict);
+        Assert.DoesNotContain("further finding", c1.Rationale);
+    }
+
     [Fact]
     public void Score_covers_only_automatically_assessed_controls()
     {
@@ -108,8 +145,9 @@ public class ComplianceEngineTests
 
 public class CatalogLoaderTests
 {
+    // Whatever the static rules emit, plus the dependency (SCA) pass.
     private static readonly HashSet<string> ScannerCategories =
-        new(StringComparer.OrdinalIgnoreCase) { "secret", "crypto", "config", "injection", "dependency" };
+        new(Rules.Categories.Append("dependency"), StringComparer.OrdinalIgnoreCase);
 
     private static CatalogLoader RepoCatalogs()
     {

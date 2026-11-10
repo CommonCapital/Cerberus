@@ -113,9 +113,23 @@ Controls mapped to the `dependency` category (ESAP GSG-07, OWASP A06) use the SC
 
 **Local database upgrades:** on startup the API creates the schema for a new database and, for an existing one, additively creates missing tables/indexes and adds missing columns (`Cerberus.Data/SchemaUpgrader.cs`). It never drops or alters existing columns.
 
-### `/scan` — Phase 1 (Scan & Detect), MVP
+### `/scan` — Phase 1 (Scan & Detect), deterministic layer
 
-Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: current directory) and applies a regex rule set for secret detection (AWS keys, private keys, GitHub/Slack tokens, hardcoded credentials — CWE-798) and common insecure patterns (weak hashes CWE-327, disabled TLS verification CWE-295, `eval` CWE-95, `shell=True` CWE-78). Returns normalized **findings** (`id, title, severity, category, cwe, file, line, evidence, confidence`), sorted by severity. Paths are confined to the scan root (traversal → 400). This is the deterministic layer and a **trusted-target MVP** — real engagements run it inside the sandbox with LLM reasoning on top (PLAN.md M3/M5).
+Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: current directory), applies the rule set line by line, and — unless `sca: false` — resolves dependencies against OSV.dev. Paths are confined to the scan root (traversal → 400) and symbolic links are never followed. This is a **trusted-target** layer: real engagements run it inside the sandbox with LLM reasoning on top (PLAN.md M3/M5).
+
+**Rules** (`Cerberus.Scanning/Rules.cs`, 22 of them): secrets (AWS, GitHub, Slack, Google, Stripe, JWTs, private keys, credentials in connection URLs, hardcoded assignments), weak hashes and ciphers, disabled TLS verification, debug mode, wildcard CORS, world-writable permissions, dynamic code evaluation, shell commands, SQL built by concatenation, and unsafe deserialization — with Erlang/Elixir forms (`os:cmd`, `binary_to_term`, `{verify, verify_none}`, `Code.eval_string`) alongside Python, JS/TS, Java, C#, Go and shell. They are per-line regexes: **candidates to review, not confirmed vulnerabilities**. There is no data-flow analysis, so a rule cannot tell whether untrusted input actually reaches a sink.
+
+**Findings** carry `id, title, severity, category, cwe, owasp, file, line, evidence, confidence, remediation`, plus:
+
+- `context`: `"test"` or `"docs"` when the file is test code, documentation or an example. Confidence is lowered to `low` there, and compliance controls are judged on production-code findings only (the others are mentioned in the control's rationale).
+- `suppressed`: `true` when the target marked the line with `cerberus:ignore` (optionally followed by rule ids or a category, e.g. `cerberus:ignore crypto.weak-hash`), on the same line or alone in a comment on the line above. Suppressed findings are **still returned**, sorted last, but excluded from `findingCount` and from compliance.
+
+**What is not scanned**, and how it is reported: dependency and build directories (`node_modules`, `.git`, `bin`, `obj`, `dist`, `vendor`, …); binary, media, archive, lock and minified files, files over 1 MB and lines over 2,000 characters (`filesSkipped`); and paths listed in a `.cerberusignore` at the scan root or in the scanned directory (`filesIgnored`). Ignore patterns follow `.gitignore` conventions: `dir/`, `*.ext` at any depth, `a/b.py` anchored, `**` across directories. A scan stops at 5,000 findings and sets `truncated`.
+
+Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. Check `suppressedCount` and `filesIgnored` when assessing code you do not control.
+
+**Measured** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
+
 
 ### Per-user API keys
 
@@ -137,4 +151,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, the scanner's rule set, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
