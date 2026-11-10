@@ -32,7 +32,7 @@ public static class JobEndpoints
 
     private static async Task<IResult> Submit(
         SubmitJobRequest body, HttpContext http, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, CancellationToken ct)
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct)
     {
         var userId = UserId(http);
         var type = string.IsNullOrWhiteSpace(body.Type) ? JobTypes.Scan : body.Type.Trim().ToLowerInvariant();
@@ -84,6 +84,7 @@ public static class JobEndpoints
         const CapabilityTier tier = CapabilityTier.T0;
 
         // Scope gate at submission; the worker checks again when the job starts.
+        if (EngagementEndpoints.RequireEngagement(policy, engagementId) is { } required) return required;
         if (engagementId is not null &&
             await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId, "job.submit", tier, targetPath, ct) is { } denied)
         {

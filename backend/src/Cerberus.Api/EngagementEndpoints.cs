@@ -10,6 +10,13 @@ namespace Cerberus.Api;
 
 public sealed record CreateEngagementRequest(string? Name, string? MaxTier, DateTime? StartsAt, DateTime? EndsAt);
 
+/// <summary>
+/// Whether every run must name an engagement (PLAN.md §3: "every run belongs
+/// to an Engagement"). Off by default for local use; turn on with
+/// CERBERUS_REQUIRE_ENGAGEMENT=true.
+/// </summary>
+public sealed record RunPolicy(bool RequireEngagement);
+
 public sealed record AddTargetRequest(string? Type, string? Locator, bool? OwnershipAttested);
 
 /// <summary>
@@ -34,6 +41,8 @@ public static class EngagementEndpoints
         engagements.MapGet("/{id}", Get);
         engagements.MapPost("/{id}/targets", AddTarget);
         engagements.MapDelete("/{id}/targets/{targetId}", RemoveTarget);
+        engagements.MapGet("/{id}/targets/{targetId}/challenge", GetChallenge);
+        engagements.MapPost("/{id}/targets/{targetId}/verify", VerifyTarget);
         engagements.MapPost("/{id}/abort", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, Jobs.JobControl jobs, CancellationToken ct) =>
             End(id, EngagementStatus.Aborted, http, db, audit, jobs, ct));
         engagements.MapPost("/{id}/close", (string id, HttpContext http, CerberusDbContext db, AuditLog audit, Jobs.JobControl jobs, CancellationToken ct) =>
@@ -42,6 +51,7 @@ public static class EngagementEndpoints
         var auditGroup = app.MapGroup("/audit").AddEndpointFilter<RequireAuthFilter>();
         auditGroup.MapGet("/", ListAudit);
         auditGroup.MapGet("/verify", VerifyAudit);
+        auditGroup.MapGet("/export", ExportAudit);
     }
 
     // --- scope gate used by run endpoints -------------------------------------
@@ -83,6 +93,12 @@ public static class EngagementEndpoints
             decision.Reason, engagement.Id, path, tier, ct);
         return decision;
     }
+
+    /// <summary>The refusal for a run submitted without an engagement when one is mandatory.</summary>
+    public static IResult? RequireEngagement(RunPolicy policy, string? engagementId) =>
+        engagementId is null && policy.RequireEngagement
+            ? Results.Json(new { error = "An engagementId is required: this server only runs work under an engagement." }, statusCode: 400)
+            : null;
 
     // --- engagements ----------------------------------------------------------
 
@@ -226,7 +242,7 @@ public static class EngagementEndpoints
         }
         else
         {
-            // Live targets need a proof-of-control challenge, which is not built yet.
+            // Live targets start unverified; see GET .../challenge and POST .../verify.
             verification = VerificationStatus.Pending;
         }
 
@@ -245,6 +261,7 @@ public static class EngagementEndpoints
             Type = type.ToString(),
             Locator = locator,
             Verification = verification.ToString(),
+            ChallengeToken = type == TargetType.Path ? null : OwnershipVerifier.NewToken(),
         };
         db.EngagementTargets.Add(target);
         await db.SaveChangesAsync(ct);
@@ -273,7 +290,167 @@ public static class EngagementEndpoints
         return Results.Json(new { removed = target.Id });
     }
 
+    // --- proof of control -----------------------------------------------------
+
+    private static async Task<IResult> GetChallenge(
+        string id, string targetId, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var engagement = await Find(db, id, UserId(http), ct);
+        if (engagement is null) return NotFound();
+        var target = engagement.Targets.FirstOrDefault(t => t.Id == targetId);
+        if (target is null) return Results.Json(new { error = "Target not found" }, statusCode: 404);
+        if (!TryGetChallenge(target, out var type, out var challenge))
+        {
+            return BadRequest("Path targets are attested when added; only host and domain targets have a challenge");
+        }
+
+        return Results.Json(new
+        {
+            targetId = target.Id,
+            type = target.Type,
+            locator = target.Locator,
+            verification = target.Verification,
+            value = challenge.ExpectedValue,
+            dns = challenge.DnsRecordName is null ? null : new
+            {
+                recordType = "TXT",
+                name = challenge.DnsRecordName,
+                value = challenge.ExpectedValue,
+            },
+            http = new
+            {
+                urls = challenge.HttpUrls.Select(u => u.ToString()),
+                body = challenge.ExpectedValue,
+            },
+            instructions = type == TargetType.Domain
+                ? "Publish the value as a DNS TXT record at the name shown, or serve it as the body of the well-known file, then call verify."
+                : "Serve the value as the body of the well-known file (or publish the TXT record, if the host has a DNS name), then call verify.",
+        }, JsonOptions);
+    }
+
+    private static async Task<IResult> VerifyTarget(
+        string id, string targetId, HttpContext http, CerberusDbContext db, AuditLog audit,
+        IOwnershipProbe probe, string? method, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var engagement = await Find(db, id, userId, ct);
+        if (engagement is null) return NotFound();
+        var target = engagement.Targets.FirstOrDefault(t => t.Id == targetId);
+        if (target is null) return Results.Json(new { error = "Target not found" }, statusCode: 404);
+        if (!TryGetChallenge(target, out var type, out _))
+        {
+            return BadRequest("Path targets are attested when added; only host and domain targets are verified");
+        }
+        if (engagement.Status != nameof(EngagementStatus.Active))
+        {
+            return Results.Json(new { error = $"Engagement is {engagement.Status.ToLowerInvariant()}" }, statusCode: 409);
+        }
+
+        ProofMethod? only = null;
+        if (!string.IsNullOrWhiteSpace(method))
+        {
+            if (!Enum.TryParse<ProofMethod>(method, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+            {
+                return BadRequest("method must be dns or http");
+            }
+            only = parsed;
+        }
+
+        var outcome = await OwnershipVerifier.VerifyAsync(type, target.Locator, target.ChallengeToken!, only, probe, ct);
+        if (outcome.Verified)
+        {
+            target.Verification = nameof(VerificationStatus.Verified);
+            target.VerificationMethod = outcome.Method.ToString();
+            target.VerifiedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        await audit.AppendAsync(userId, "target.verify",
+            outcome.Verified ? AuditOutcome.Ok : AuditOutcome.Denied, outcome.Detail,
+            engagement.Id, target.Locator, ct: ct);
+
+        return Results.Json(new
+        {
+            verified = outcome.Verified,
+            method = outcome.Method,
+            detail = outcome.Detail,
+            target = DescribeTarget(target),
+        }, JsonOptions, statusCode: outcome.Verified ? 200 : 422);
+    }
+
+    private static bool TryGetChallenge(EngagementTarget target, out TargetType type, out OwnershipChallenge challenge)
+    {
+        challenge = null!;
+        if (!Enum.TryParse(target.Type, out type) || type == TargetType.Path || target.ChallengeToken is null)
+        {
+            return false;
+        }
+        challenge = OwnershipVerifier.Describe(type, target.Locator, target.ChallengeToken);
+        return true;
+    }
+
     // --- audit log ------------------------------------------------------------
+
+    /// <summary>
+    /// Download the caller's whole audit log, oldest first, with the chain
+    /// hashes — as JSON Lines (default) or CSV. The export can be re-verified
+    /// offline: each line's hash covers its fields and the previous hash.
+    /// </summary>
+    private static async Task<IResult> ExportAudit(
+        HttpContext http, CerberusDbContext db, string? format, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var csv = string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase);
+        if (!csv && !string.IsNullOrWhiteSpace(format) && !string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("format must be jsonl or csv");
+        }
+
+        var events = await db.AuditEvents.AsNoTracking()
+            .Where(a => a.UserId == userId)
+            .OrderBy(a => a.Sequence)
+            .ToListAsync(ct);
+
+        var text = new System.Text.StringBuilder();
+        if (csv)
+        {
+            text.Append("sequence,createdAt,action,outcome,engagementId,target,tier,detail,previousHash,hash\r\n");
+            foreach (var e in events)
+            {
+                text.AppendJoin(',', new[]
+                {
+                    e.Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    e.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    Csv(e.Action), Csv(e.Outcome), Csv(e.EngagementId), Csv(e.Target), Csv(e.Tier), Csv(e.Detail),
+                    e.PreviousHash, e.Hash,
+                }).Append("\r\n");
+            }
+        }
+        else
+        {
+            foreach (var e in events)
+            {
+                text.Append(JsonSerializer.Serialize(new
+                {
+                    e.Sequence, e.CreatedAt, e.Action, e.Outcome, e.EngagementId, e.Target, e.Tier, e.Detail,
+                    e.PreviousHash, e.Hash,
+                }, JsonOptions)).Append('\n');
+            }
+        }
+
+        return Results.File(
+            System.Text.Encoding.UTF8.GetBytes(text.ToString()),
+            csv ? "text/csv; charset=utf-8" : "application/x-ndjson",
+            $"cerberus-audit-{DateTime.UtcNow:yyyyMMdd-HHmmss}.{(csv ? "csv" : "jsonl")}");
+    }
+
+    /// <summary>Quotes a CSV field and neutralizes values a spreadsheet would run as a formula.</summary>
+    private static string Csv(string? value)
+    {
+        value ??= string.Empty;
+        if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r') value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
 
     private static async Task<IResult> ListAudit(
         HttpContext http, CerberusDbContext db, string? engagementId, int? limit, long? before, CancellationToken ct)
@@ -342,7 +519,7 @@ public static class EngagementEndpoints
 
     private static object DescribeTarget(EngagementTarget t) => new
     {
-        t.Id, t.Type, locator = DisplayLocator(t), t.Verification, t.CreatedAt,
+        t.Id, t.Type, locator = DisplayLocator(t), t.Verification, t.VerificationMethod, t.VerifiedAt, t.CreatedAt,
     };
 
     private static object Describe(Engagement e) => new

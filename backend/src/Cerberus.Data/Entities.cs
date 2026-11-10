@@ -127,6 +127,13 @@ public class EngagementTarget
 
     /// <summary>Pending | Attested | Verified.</summary>
     public string Verification { get; set; } = "Pending";
+
+    /// <summary>Random token the operator must publish to prove control (live targets only).</summary>
+    public string? ChallengeToken { get; set; }
+
+    /// <summary>How control was proven: Dns | Http.</summary>
+    public string? VerificationMethod { get; set; }
+    public DateTime? VerifiedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

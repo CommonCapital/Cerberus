@@ -43,7 +43,7 @@ public enum VerificationStatus
     /// <summary>The operator attested they own or were supplied this code target.</summary>
     Attested,
 
-    /// <summary>A proof-of-control challenge passed (not implemented yet).</summary>
+    /// <summary>A proof-of-control challenge passed (DNS TXT record or well-known file).</summary>
     Verified,
 }
 
@@ -112,6 +112,13 @@ public static class ScopePolicy
         if (match is null)
         {
             return ScopeDecision.Deny($"Target \"{locator}\" is outside the engagement's scope.");
+        }
+
+        // Anything beyond passive analysis needs proof that the operator controls the target.
+        if (tier >= CapabilityTier.T1 && match.Verification == VerificationStatus.Pending)
+        {
+            return ScopeDecision.Deny(
+                $"Tier {tier} requires verified ownership, but target \"{Display(match)}\" has not passed its proof-of-control challenge.");
         }
 
         return ScopeDecision.Allow($"In scope of {match.Type.ToString().ToLowerInvariant()} target \"{Display(match)}\".");
