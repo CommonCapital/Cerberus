@@ -27,6 +27,7 @@ public static class ModelRegistry
         new("llama3.1", ModelProvider.Ollama),
         new("qwen2.5-coder", ModelProvider.Ollama),
         new("deepseek-r1", ModelProvider.Ollama),
+        new("codestral", ModelProvider.Ollama),
         // Dev/test model: streams a canned reply with no network or API key.
         new("echo", ModelProvider.Mock),
     ];

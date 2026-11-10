@@ -26,6 +26,9 @@
     <ProjectReference Include="..\..\src\Cerberus.Authorization\Cerberus.Authorization.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Jobs\Cerberus.Jobs.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Api\Cerberus.Api.csproj" />
+    <ProjectReference Include="..\..\src\Cerberus.Triage\Cerberus.Triage.csproj" />
+    <ProjectReference Include="..\..\src\Cerberus.Core\Cerberus.Core.csproj" />
+    <ProjectReference Include="..\..\src\Cerberus.Models\Cerberus.Models.csproj" />
   </ItemGroup>
 
 </Project>

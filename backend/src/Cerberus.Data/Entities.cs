@@ -54,6 +54,9 @@ public class Scan
     /// <summary>True when the dependency (SCA) check ran and covered every discovered dependency.</summary>
     public bool ScaCompleted { get; set; }
     public string Findings { get; set; } = "[]";
+
+    /// <summary>LLM triage opinions on findings (list of TriageResult), as JSON. Advisory only.</summary>
+    public string Triage { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

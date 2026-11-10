@@ -155,6 +155,12 @@ public sealed class JobWorker(
                     .RunAsync(job.UserId, job.EngagementId, catalog, scan, job.TargetPath, assess.Sca, ct);
                 return assessment.Assessment.Id;
 
+            case JobTypes.Triage:
+                var triage = JsonSerializer.Deserialize<TriageJobParameters>(job.Parameters, JobTypes.Json)
+                    ?? throw new InvalidOperationException("The job has no parameters.");
+                await services.GetRequiredService<TriageRunner>().RunAsync(job.UserId, triage, ct);
+                return triage.ScanId;
+
             default:
                 throw new InvalidOperationException($"Unknown job type \"{job.Type}\".");
         }
@@ -199,7 +205,10 @@ public static class JobTypes
     /// <summary>A compliance assessment; the result id is the assessment.</summary>
     public const string Assess = "assess";
 
-    public static readonly IReadOnlyList<string> All = [Scan, Assess];
+    /// <summary>LLM triage of a stored scan's findings; the result id is the scan.</summary>
+    public const string Triage = "triage";
+
+    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage];
 
     public static readonly JsonSerializerOptions Json = new()
     {

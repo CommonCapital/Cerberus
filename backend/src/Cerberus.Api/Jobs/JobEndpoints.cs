@@ -10,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Cerberus.Api.Jobs;
 
 public sealed record SubmitJobRequest(
-    string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId);
+    string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
+    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -45,7 +46,35 @@ public static class JobEndpoints
         var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
         string parameters;
 
-        if (type == JobTypes.Assess)
+        if (type == JobTypes.Triage)
+        {
+            if (string.IsNullOrWhiteSpace(body.ScanId)) return BadRequest("scanId is required for a triage job");
+            // No default model: the caller decides where the code under review is sent.
+            if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+            }
+            if (body.MaxFindings is < 1 or > TriageRunner.MaxFindingsLimit)
+            {
+                return BadRequest($"maxFindings must be between 1 and {TriageRunner.MaxFindingsLimit}");
+            }
+
+            var scan = await db.Scans.AsNoTracking()
+                .Where(s => s.Id == body.ScanId && s.UserId == userId)
+                .Select(s => new { s.Id, s.TargetPath, s.EngagementId })
+                .FirstOrDefaultAsync(ct);
+            if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
+            if (engagementId is not null && engagementId != scan.EngagementId)
+            {
+                return BadRequest("That scan was not run under this engagement");
+            }
+            engagementId = scan.EngagementId;
+            targetPath = scan.TargetPath;
+            parameters = JsonSerializer.Serialize(
+                new TriageJobParameters(scan.Id, body.Model, body.MaxFindings ?? 15, body.IncludeTestsAndDocs ?? false),
+                JobTypes.Json);
+        }
+        else if (type == JobTypes.Assess)
         {
             var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
             if (catalogs.Get(catalogId) is null) return BadRequest($"Unknown catalog '{catalogId}'");

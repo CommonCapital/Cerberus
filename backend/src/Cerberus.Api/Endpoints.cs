@@ -425,6 +425,8 @@ public static class Endpoints
             scan.ScaCompleted,
             scan.CreatedAt,
             findings = ParseStoredMessages(scan.Findings),
+            // Advisory LLM opinions, keyed to findings by findingId. They never alter findings or compliance.
+            triage = ParseStoredMessages(scan.Triage),
         });
     }
 

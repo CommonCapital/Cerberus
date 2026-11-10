@@ -78,6 +78,8 @@ builder.Services.AddSingleton(new JobOptions(
     MaxQueuedPerUser: 50));
 builder.Services.AddScoped<ScanRunner>();
 builder.Services.AddScoped<AssessmentRunner>();
+builder.Services.AddSingleton<Cerberus.Triage.FindingTriager>();
+builder.Services.AddScoped<TriageRunner>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddScoped<JobControl>();
 builder.Services.AddHostedService<JobWorker>();

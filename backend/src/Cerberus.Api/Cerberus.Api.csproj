@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Cerberus.Compliance\Cerberus.Compliance.csproj" />
     <ProjectReference Include="..\Cerberus.Authorization\Cerberus.Authorization.csproj" />
     <ProjectReference Include="..\Cerberus.Jobs\Cerberus.Jobs.csproj" />
+    <ProjectReference Include="..\Cerberus.Triage\Cerberus.Triage.csproj" />
   </ItemGroup>
 
   <ItemGroup>
