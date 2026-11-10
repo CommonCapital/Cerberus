@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
+using Cerberus.Authorization;
 using Cerberus.Api.Chat;
 using Cerberus.Api.Settings;
 using Cerberus.Compliance;
@@ -77,7 +79,8 @@ public static class Endpoints
 
     private static async Task<IResult> RunAssessment(
         ComplianceRequest body, HttpContext http, CerberusDbContext db,
-        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, ScaService sca, CancellationToken ct)
+        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, ScaService sca, AuditLog audit,
+        CancellationToken ct)
     {
         var userId = UserId(http);
         var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
@@ -93,11 +96,25 @@ public static class Endpoints
         string targetPath;
         string? scanId = null;
         bool dependencyCheckCompleted;
+        string? engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
 
         if (!string.IsNullOrWhiteSpace(body.ScanId))
         {
             var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == body.ScanId && s.UserId == userId, ct);
             if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
+
+            // An assessment of a scan belongs to that scan's engagement.
+            if (engagementId is not null && engagementId != scan.EngagementId)
+            {
+                return Results.Json(new { error = "That scan was not run under this engagement" }, statusCode: 400);
+            }
+            engagementId = scan.EngagementId;
+            if (engagementId is not null &&
+                await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
+                    "compliance.assess", CapabilityTier.T0, scan.TargetPath, ct) is { } denied)
+            {
+                return denied;
+            }
             findings = DeserializeFindings(scan.Findings);
             targetPath = scan.TargetPath;
             scanId = scan.Id;
@@ -106,6 +123,12 @@ public static class Endpoints
         else
         {
             targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
+            if (engagementId is not null &&
+                await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
+                    "compliance.assess", CapabilityTier.T0, targetPath, ct) is { } denied)
+            {
+                return denied;
+            }
             try
             {
                 var staticFindings = scanner.Scan(targetPath).Findings;
@@ -129,6 +152,7 @@ public static class Endpoints
             CatalogId = report.CatalogId,
             TargetPath = targetPath,
             ScanId = scanId,
+            EngagementId = engagementId,
             TotalControls = report.TotalControls,
             Compliant = report.Compliant,
             NonCompliant = report.NonCompliant,
@@ -138,6 +162,9 @@ public static class Endpoints
         };
         db.ComplianceAssessments.Add(assessment);
         await db.SaveChangesAsync(ct);
+        await audit.AppendAsync(userId, "compliance.assess", AuditOutcome.Ok,
+            $"Assessment {assessment.Id} against {report.CatalogId}: {report.Compliant} compliant, {report.NonCompliant} non-compliant, {report.NotAssessed} not assessed.",
+            engagementId, targetPath, CapabilityTier.T0, ct);
 
         return Results.Json(new
         {
@@ -147,6 +174,7 @@ public static class Endpoints
             catalogVersion = report.CatalogVersion,
             targetPath,
             scanId,
+            engagementId,
             dependencyCheckCompleted,
             createdAt = assessment.CreatedAt,
             summary = new
@@ -170,7 +198,7 @@ public static class Endpoints
             .OrderByDescending(a => a.CreatedAt)
             .Select(a => new
             {
-                a.Id, a.CatalogId, a.TargetPath, a.ScanId,
+                a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.EngagementId,
                 a.TotalControls, a.Compliant, a.NonCompliant, a.NotAssessed, a.Score, a.CreatedAt,
             })
             .ToListAsync(ct);
@@ -358,10 +386,19 @@ public static class Endpoints
 
     private static async Task<IResult> RunScan(
         ScanRequest body, HttpContext http, CerberusDbContext db,
-        ScanService scanner, ScaService sca, CancellationToken ct)
+        ScanService scanner, ScaService sca, AuditLog audit, CancellationToken ct)
     {
         var userId = UserId(http);
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
+        var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
+
+        // Scope gate: a run under an engagement must be inside its scope.
+        if (engagementId is not null &&
+            await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
+                "scan.run", CapabilityTier.T0, targetPath, ct) is { } denied)
+        {
+            return denied;
+        }
 
         ScanResult result;
         ScaResult scaResult;
@@ -388,6 +425,7 @@ public static class Endpoints
         {
             UserId = userId,
             TargetPath = targetPath,
+            EngagementId = engagementId,
             FilesScanned = result.FilesScanned,
             FindingCount = findings.Count,
             ScaCompleted = scaResult.Completed,
@@ -395,10 +433,14 @@ public static class Endpoints
         };
         db.Scans.Add(scan);
         await db.SaveChangesAsync(ct);
+        await audit.AppendAsync(userId, "scan.run", AuditOutcome.Ok,
+            $"Scan {scan.Id}: {result.FilesScanned} files, {findings.Count} findings, dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
+            engagementId, targetPath, CapabilityTier.T0, ct);
 
         return Results.Json(new
         {
             id = scan.Id,
+            engagementId,
             targetPath = scan.TargetPath,
             createdAt = scan.CreatedAt,
             filesScanned = result.FilesScanned,
@@ -416,7 +458,7 @@ public static class Endpoints
         var scans = await db.Scans
             .Where(s => s.UserId == userId)
             .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new { s.Id, s.TargetPath, s.FilesScanned, s.FindingCount, s.ScaCompleted, s.CreatedAt })
+            .Select(s => new { s.Id, s.EngagementId, s.TargetPath, s.FilesScanned, s.FindingCount, s.ScaCompleted, s.CreatedAt })
             .ToListAsync(ct);
         return Results.Json(scans);
     }

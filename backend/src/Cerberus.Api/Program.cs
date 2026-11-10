@@ -1,4 +1,5 @@
 using Cerberus.Api;
+using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Hubs;
 using Cerberus.Api.Settings;
@@ -55,6 +56,9 @@ builder.Services.AddSingleton(new CatalogOptions(catalogRoot));
 builder.Services.AddSingleton<CatalogLoader>();
 builder.Services.AddSingleton<ComplianceEngine>();
 
+// --- Authorization & safety spine: append-only, hash-chained audit log ------
+builder.Services.AddSingleton<AuditLog>();
+
 // Serialize enums (e.g. Severity) as strings in JSON responses.
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -69,6 +73,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapCerberusEndpoints();
+app.MapEngagementEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
