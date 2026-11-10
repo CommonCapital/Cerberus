@@ -12,6 +12,12 @@ public sealed record SetApiKeyRequest(string Provider, string ApiKey);
 /// </summary>
 public sealed record ScanRequest(string? Path, bool? Sca = true);
 
+/// <summary>
+/// Request a Phase-2 compliance assessment. Either reuse an existing scan's
+/// findings (<see cref="ScanId"/>) or run a fresh scan over <see cref="Path"/>.
+/// </summary>
+public sealed record ComplianceRequest(string? CatalogId, string? ScanId, string? Path);
+
 public sealed record ChatRequestMessage(string Role, string Content);
 
 // Used by the SignalR hub skeleton.

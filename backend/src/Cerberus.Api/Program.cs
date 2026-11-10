@@ -2,6 +2,7 @@ using Cerberus.Api;
 using Cerberus.Api.Auth;
 using Cerberus.Api.Hubs;
 using Cerberus.Api.Settings;
+using Cerberus.Compliance;
 using Cerberus.Core.Models;
 using Cerberus.Data;
 using Cerberus.Models;
@@ -47,6 +48,13 @@ builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<OsvClient>();
 builder.Services.AddSingleton<ScaService>();
 
+// --- Phase 2 compliance (ESAP/ISO/OWASP catalogs shipped as data) ----------
+var catalogRoot = Environment.GetEnvironmentVariable("CERBERUS_CATALOG_ROOT")
+    ?? ResolveCatalogRoot(builder.Environment.ContentRootPath);
+builder.Services.AddSingleton(new CatalogOptions(catalogRoot));
+builder.Services.AddSingleton<CatalogLoader>();
+builder.Services.AddSingleton<ComplianceEngine>();
+
 // Serialize enums (e.g. Severity) as strings in JSON responses.
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -65,3 +73,17 @@ app.MapHub<ChatHub>("/hub/chat");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
 app.Run($"http://localhost:{port}");
+
+// Walk up from the app's content root to find the repo's catalogs/ directory.
+static string ResolveCatalogRoot(string contentRoot)
+{
+    var dir = new DirectoryInfo(contentRoot);
+    while (dir is not null)
+    {
+        var candidate = Path.Combine(dir.FullName, "catalogs");
+        if (Directory.Exists(candidate)) return candidate;
+        dir = dir.Parent;
+    }
+    // Fall back to a catalogs/ next to the content root (created on demand / empty).
+    return Path.Combine(contentRoot, "catalogs");
+}

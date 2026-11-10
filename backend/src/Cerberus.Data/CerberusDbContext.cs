@@ -9,6 +9,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
     public DbSet<Scan> Scans => Set<Scan>();
+    public DbSet<ComplianceAssessment> ComplianceAssessments => Set<ComplianceAssessment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +49,14 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
             e.HasKey(s => s.Id);
             e.HasIndex(s => s.UserId);
             e.HasOne(s => s.User).WithMany(u => u.Scans).HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ComplianceAssessment>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => a.UserId);
+            e.HasOne(a => a.User).WithMany(u => u.ComplianceAssessments).HasForeignKey(a => a.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

@@ -43,7 +43,16 @@ Environment:
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
 | GET | `/scans` | Bearer | List this user's past scans (id, target, counts, timestamp) |
 | GET | `/scans/{id}` | Bearer | A persisted scan with its findings |
+| GET | `/compliance/catalogs` | Bearer | List built-in control catalogs (summary) |
+| GET | `/compliance/catalogs/{id}` | Bearer | A full catalog (sections + controls) |
+| POST | `/compliance/assess` | Bearer | Phase-2 assessment of `{ catalogId?, scanId? \| path? }` → control matrix + score; persists it |
+| GET | `/compliance` | Bearer | List this user's past assessments |
+| GET | `/compliance/{id}` | Bearer | A persisted assessment with its control matrix |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
+
+### `/compliance` — Phase 2 (Compliance), deterministic engine
+
+Catalogs are data: every `*.json` under `catalogs/` (`CERBERUS_CATALOG_ROOT`, default: the repo's `catalogs/`) is loaded at startup. `POST /compliance/assess` takes the findings of an existing scan (`scanId`) or runs a fresh scan of `path`, then maps the catalog's auto-evaluable controls onto scanner finding categories (`Cerberus.Compliance/ComplianceEngine.cs`). A mapped control with triggering findings is **NonCompliant** (findings attached as evidence), a mapped control with none is **Compliant**, and everything else is **NotAssessed** (manual review). `score` is Compliant / (Compliant + NonCompliant) over the automatically assessed controls only — it is not an overall compliance grade. "Compliant" means only that the passive scanner found nothing in the mapped categories.
 
 ### `/scan` — Phase 1 (Scan & Detect), MVP
 
