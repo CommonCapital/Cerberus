@@ -25,4 +25,17 @@ public sealed record Finding(
     string? Version = null,
     string? FixedVersion = null,
     string? VulnId = null,
-    string? Reference = null);
+    string? Reference = null,
+    // --- Optional static-analysis context ---
+    /// <summary>OWASP Top 10 (2021) category, e.g. "A03".</summary>
+    string? Owasp = null,
+    /// <summary>A short hint on how to fix it.</summary>
+    string? Remediation = null,
+    /// <summary>"test" or "docs" when the file is test code or documentation; confidence is lowered there.</summary>
+    string? Context = null,
+    /// <summary>
+    /// True when the target itself marked this line with a <c>cerberus:ignore</c>
+    /// comment. Suppressed findings stay in the results (the target must not be
+    /// able to hide them) but do not count towards totals or compliance.
+    /// </summary>
+    bool Suppressed = false);

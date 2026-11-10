@@ -34,8 +34,10 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
 
         // Merge both passes; re-sort by severity so the combined set is ranked.
         var findings = result.Findings.Concat(scaResult.Findings)
-            .OrderByDescending(f => f.Severity)
+            .OrderBy(f => f.Suppressed)
+            .ThenByDescending(f => f.Severity)
             .ToList();
+        var activeCount = findings.Count(f => !f.Suppressed);
 
         var scan = new Scan
         {
@@ -43,14 +45,14 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
             TargetPath = targetPath,
             EngagementId = engagementId,
             FilesScanned = result.FilesScanned,
-            FindingCount = findings.Count,
+            FindingCount = activeCount,   // suppressed findings are stored but not counted
             ScaCompleted = scaResult.Completed,
             Findings = JsonSerializer.Serialize(findings, JsonOptions),
         };
         db.Scans.Add(scan);
         await db.SaveChangesAsync(ct);
         await audit.AppendAsync(userId, "scan.run", AuditOutcome.Ok,
-            $"Scan {scan.Id}: {result.FilesScanned} files, {findings.Count} findings, dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
+            $"Scan {scan.Id}: {result.FilesScanned} files, {activeCount} findings ({result.SuppressedCount} suppressed, {result.FilesIgnored} files ignored{(result.Truncated ? ", truncated" : "")}), dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
             engagementId, targetPath, CapabilityTier.T0, CancellationToken.None);
 
         return new ScanRun(scan, result, scaResult, findings);

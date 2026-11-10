@@ -58,7 +58,9 @@ public sealed class ComplianceEngine
     public ComplianceReport Evaluate(
         Catalog catalog, IReadOnlyList<Finding> findings, bool dependencyCheckCompleted = true)
     {
+        // Findings the target suppressed are reported but never count against a control.
         var byCategory = findings
+            .Where(f => !f.Suppressed)
             .GroupBy(f => f.Category, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<Finding>)g.ToList(), StringComparer.OrdinalIgnoreCase);
 
@@ -104,17 +106,25 @@ public sealed class ComplianceEngine
                 ControlVerdict.NotAssessed, control.AutoEvaluable, reason, []);
         }
 
-        var evidence = categories
+        var matched = categories
             .SelectMany(c => byCategory.TryGetValue(c, out var fs) ? fs : [])
             .OrderByDescending(f => f.Severity)
             .ToList();
+
+        // A control is judged on production code. Hits in test code or
+        // documentation are overwhelmingly fixtures and examples, so they are
+        // disclosed in the rationale but do not fail the control on their own.
+        var evidence = matched.Where(f => f.Context is null).ToList();
+        var aside = matched.Count - evidence.Count;
+        var asideNote = aside == 0 ? string.Empty
+            : $" {aside} further finding(s) in test or documentation files were not counted; review them in the scan.";
 
         if (evidence.Count > 0)
         {
             var cats = string.Join(", ", categories);
             return new ControlResult(control.Id, section, control.Title,
                 ControlVerdict.NonCompliant, true,
-                $"{evidence.Count} scanner finding(s) in mapped categories ({cats}) indicate non-compliance.",
+                $"{evidence.Count} scanner finding(s) in mapped categories ({cats}) indicate non-compliance.{asideNote}",
                 evidence);
         }
 
@@ -124,13 +134,13 @@ public sealed class ComplianceEngine
         {
             return new ControlResult(control.Id, section, control.Title,
                 ControlVerdict.NotAssessed, true,
-                "No findings, but the dependency (SCA) check did not run or did not complete, so this control cannot be judged. Re-run the scan with dependency analysis enabled and network access to OSV.dev.",
+                "No findings in production code, but the dependency (SCA) check did not run or did not complete, so this control cannot be judged. Re-run the scan with dependency analysis enabled and network access to OSV.dev." + asideNote,
                 []);
         }
 
         return new ControlResult(control.Id, section, control.Title,
             ControlVerdict.Compliant, true,
-            $"No scanner findings in mapped categories ({string.Join(", ", categories)}).",
+            $"No scanner findings in production code in mapped categories ({string.Join(", ", categories)}).{asideNote}",
             []);
     }
 }

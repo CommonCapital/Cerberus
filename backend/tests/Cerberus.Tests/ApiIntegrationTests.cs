@@ -29,6 +29,11 @@ public sealed class ApiHost : IDisposable
         Directory.CreateDirectory(Path.Combine(scanRoot, "other"));
         File.WriteAllText(Path.Combine(scanRoot, "app", "main.py"), "import hashlib\nhashlib.md5(b'x')\n");
         File.WriteAllText(Path.Combine(scanRoot, "other", "ok.py"), "print('hello')\n");
+        Directory.CreateDirectory(Path.Combine(scanRoot, "svc"));
+        File.WriteAllText(Path.Combine(scanRoot, "svc", "loader.py"),
+            "import pickle\n" +
+            "obj = pickle.loads(blob)\n" +
+            "legacy = hashlib.md5(x)  # cerberus:ignore crypto.weak-hash\n");
 
         Environment.SetEnvironmentVariable("CERBERUS_DB", Path.Combine(_root, "test.db"));
         Environment.SetEnvironmentVariable("CERBERUS_KEYRING", Path.Combine(_root, "keys"));
@@ -417,5 +422,31 @@ public class ApiIntegrationTests(ApiHost host)
         var id = (await Json(await client.PostAsJsonAsync("/engagements", new { name = "Required" }))).GetProperty("id").GetString();
         await client.PostAsJsonAsync($"/engagements/{id}/targets", new { locator = "app", ownershipAttested = true });
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/scan", new { path = "app", sca = false, engagementId = id })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Suppressed_findings_are_returned_but_do_not_count_or_fail_controls()
+    {
+        var (client, _) = await host.NewUserAsync();
+
+        var scan = await Json(await client.PostAsJsonAsync("/scan", new { path = "svc", sca = false }));
+        Assert.Equal(1, scan.GetProperty("findingCount").GetInt32());
+        Assert.Equal(1, scan.GetProperty("suppressedCount").GetInt32());
+        Assert.False(scan.GetProperty("truncated").GetBoolean());
+
+        var findings = scan.GetProperty("findings").EnumerateArray().ToList();
+        Assert.Equal(2, findings.Count);
+        Assert.Equal("deserialization", findings[0].GetProperty("category").GetString());
+        Assert.Equal("A08", findings[0].GetProperty("owasp").GetString());
+        Assert.False(string.IsNullOrEmpty(findings[0].GetProperty("remediation").GetString()));
+        Assert.True(findings[1].GetProperty("suppressed").GetBoolean());
+
+        var assessment = await Json(await client.PostAsJsonAsync("/compliance/assess",
+            new { catalogId = "owasp-top10", scanId = scan.GetProperty("id").GetString() }));
+        string Verdict(string id) => assessment.GetProperty("controls").EnumerateArray()
+            .Single(c => c.GetProperty("controlId").GetString() == id).GetProperty("verdict").GetString()!;
+
+        Assert.Equal("NonCompliant", Verdict("A08"));   // unsafe deserialization
+        Assert.Equal("Compliant", Verdict("A02"));      // the only weak-hash hit was suppressed by the target
     }
 }

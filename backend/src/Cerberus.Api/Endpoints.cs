@@ -387,10 +387,14 @@ public static class Endpoints
             targetPath = scan.TargetPath,
             createdAt = scan.CreatedAt,
             filesScanned = result.FilesScanned,
+            filesSkipped = result.FilesSkipped,
+            filesIgnored = result.FilesIgnored,
             manifestsScanned = scaResult.ManifestsScanned,
             dependenciesScanned = scaResult.DependenciesScanned,
             scaCompleted = scaResult.Completed,
-            findingCount = findings.Count,
+            findingCount = scan.FindingCount,
+            suppressedCount = result.SuppressedCount,
+            truncated = result.Truncated,
             findings,
         }, JsonOptions);
     }
