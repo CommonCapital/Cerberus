@@ -43,13 +43,26 @@ public sealed class ApiHost : IDisposable
         _factory = NewFactory();
     }
 
+    /// <summary>The model behind the "echo" model id: calls a deserialization finding real, anything else harmless.</summary>
+    public ScriptedProvider Model { get; } = new(Cerberus.Core.Models.ModelProvider.Mock, request =>
+        request.Messages[^1].Content.Contains("deserialization.unsafe")
+            ? """{"verdict":"true_positive","reasoning":"pickle.loads runs on data from outside.","remediation":"Use JSON."}"""
+            : """{"verdict":"false_positive","reasoning":"Not reachable.","remediation":""}""");
+
     /// <summary>Stands in for DNS and HTTP so ownership verification is testable offline.</summary>
     public FakeOwnershipProbe Probe { get; } = new();
 
     private WebApplicationFactory<Program> NewFactory() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureTestServices(services =>
-                services.AddSingleton<Cerberus.Authorization.IOwnershipProbe>(Probe)));
+            {
+                services.AddSingleton<Cerberus.Authorization.IOwnershipProbe>(Probe);
+
+                // Swap the built-in "echo" model for one that answers triage requests from a script.
+                var echo = services.Single(d => d.ImplementationType == typeof(Cerberus.Models.MockProvider));
+                services.Remove(echo);
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Model);
+            }));
 
     /// <summary>
     /// A second API instance over the same database, started with one extra
@@ -448,5 +461,57 @@ public class ApiIntegrationTests(ApiHost host)
 
         Assert.Equal("NonCompliant", Verdict("A08"));   // unsafe deserialization
         Assert.Equal("Compliant", Verdict("A02"));      // the only weak-hash hit was suppressed by the target
+    }
+
+    [Fact]
+    public async Task Triage_job_annotates_findings_without_changing_them_or_compliance()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var scan = await Json(await client.PostAsJsonAsync("/scan", new { path = "svc", sca = false }));
+        var scanId = scan.GetProperty("id").GetString();
+
+        // The model must be named: no default decides where code is sent.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId, model = "no-such-model" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "triage", model = "echo" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId = "missing", model = "echo" })).StatusCode);
+
+        var submitted = await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId, model = "echo" });
+        Assert.Equal(HttpStatusCode.Accepted, submitted.StatusCode);
+        var job = await WaitForJobAsync(client, (await Json(submitted)).GetProperty("id").GetString()!);
+        Assert.Equal("Succeeded", job.GetProperty("state").GetString());
+        Assert.Equal(scanId, job.GetProperty("resultId").GetString());
+
+        var stored = await client.GetFromJsonAsync<JsonElement>($"/scans/{scanId}");
+        // Only the active finding was sent; the one the target suppressed was not.
+        var opinion = stored.GetProperty("triage").EnumerateArray().Single();
+        Assert.Equal("TruePositive", opinion.GetProperty("verdict").GetString());
+        Assert.Equal("echo", opinion.GetProperty("model").GetString());
+        Assert.StartsWith("deserialization.unsafe:svc/loader.py:", opinion.GetProperty("findingId").GetString());
+        Assert.Equal(2, stored.GetProperty("findings").GetArrayLength());
+        Assert.Equal(1, stored.GetProperty("findingCount").GetInt32());
+
+        var audit = await client.GetFromJsonAsync<JsonElement>("/audit");
+        var entry = audit.EnumerateArray().Single(e => e.GetProperty("action").GetString() == "triage.run");
+        Assert.Contains("1 of 1 finding(s) reviewed by echo", entry.GetProperty("detail").GetString());
+        Assert.Contains("a local model", entry.GetProperty("detail").GetString());
+    }
+
+    [Fact]
+    public async Task A_false_positive_opinion_does_not_clear_a_compliance_control()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var scan = await Json(await client.PostAsJsonAsync("/scan", new { path = "app", sca = false }));
+        var scanId = scan.GetProperty("id").GetString();
+
+        var submitted = await client.PostAsJsonAsync("/jobs", new { type = "triage", scanId, model = "echo" });
+        await WaitForJobAsync(client, (await Json(submitted)).GetProperty("id").GetString()!);
+        var stored = await client.GetFromJsonAsync<JsonElement>($"/scans/{scanId}");
+        Assert.Equal("FalsePositive", stored.GetProperty("triage").EnumerateArray().Single().GetProperty("verdict").GetString());
+
+        // The model said "harmless"; the control still fails on the scanner's finding.
+        var assessment = await Json(await client.PostAsJsonAsync("/compliance/assess", new { catalogId = "owasp-top10", scanId }));
+        var a02 = assessment.GetProperty("controls").EnumerateArray().Single(c => c.GetProperty("controlId").GetString() == "A02");
+        Assert.Equal("NonCompliant", a02.GetProperty("verdict").GetString());
     }
 }

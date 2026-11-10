@@ -8,6 +8,7 @@
     <Project Path="src/Cerberus.Compliance/Cerberus.Compliance.csproj" />
     <Project Path="src/Cerberus.Authorization/Cerberus.Authorization.csproj" />
     <Project Path="src/Cerberus.Jobs/Cerberus.Jobs.csproj" />
+    <Project Path="src/Cerberus.Triage/Cerberus.Triage.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Cerberus.Tests/Cerberus.Tests.csproj" />
