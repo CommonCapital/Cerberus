@@ -55,6 +55,7 @@ public static class Endpoints
         var compliance = app.MapGroup("/compliance").AddEndpointFilter<RequireAuthFilter>();
         compliance.MapGet("/", ListAssessments);
         compliance.MapGet("/{id}", GetAssessment);
+        compliance.MapGet("/{id}/export", ExportAssessment);
         compliance.MapPost("/assess", RunAssessment);
     }
 
@@ -171,6 +172,29 @@ public static class Endpoints
             })
             .ToListAsync(ct);
         return Results.Json(items);
+    }
+
+    /// <summary>Download an assessment as a vendor-assurance spreadsheet (.xlsx).</summary>
+    private static async Task<IResult> ExportAssessment(
+        string id, HttpContext http, CerberusDbContext db, CatalogLoader loader, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var a = await db.ComplianceAssessments.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+        if (a is null) return Results.Json(new { error = "Assessment not found" }, statusCode: 404);
+
+        List<ControlResult> controls;
+        try
+        {
+            controls = JsonSerializer.Deserialize<List<ControlResult>>(a.Matrix, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return Results.Json(new { error = "Stored assessment could not be read" }, statusCode: 500);
+        }
+
+        var info = new AssessmentInfo(a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.CreatedAt, a.Score);
+        var bytes = ComplianceWorkbook.Build(info, loader.Get(a.CatalogId), controls);
+        return Results.File(bytes, ComplianceWorkbook.ContentType, ComplianceWorkbook.FileName(info));
     }
 
     private static async Task<IResult> GetAssessment(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)

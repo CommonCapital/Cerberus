@@ -11,12 +11,22 @@ public sealed record Catalog(
     string Description,
     [property: JsonPropertyName("frameworkAlignment")] IReadOnlyList<string> FrameworkAlignment,
     [property: JsonPropertyName("responseScale")] IReadOnlyList<string> ResponseScale,
-    IReadOnlyList<CatalogSection> Sections)
+    IReadOnlyList<CatalogSection> Sections,
+    CatalogMethodology? Methodology = null)
 {
     public IEnumerable<Control> Controls => Sections.SelectMany(s => s.Controls);
 
     public int ControlCount => Sections.Sum(s => s.Controls.Count);
 }
+
+/// <summary>The parts of a catalog's grading methodology the engine uses (optional per catalog).</summary>
+public sealed record CatalogMethodology(
+    [property: JsonPropertyName("correctiveActions")] CorrectiveActions? CorrectiveActions);
+
+/// <summary>Catalog guidance on remediation deadlines, in days.</summary>
+public sealed record CorrectiveActions(
+    [property: JsonPropertyName("standardDays")] int? StandardDays,
+    [property: JsonPropertyName("maxDays")] int? MaxDays);
 
 public sealed record CatalogSection(
     string? Id,
