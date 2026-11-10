@@ -80,8 +80,7 @@ public static class Endpoints
 
     private static async Task<IResult> RunAssessment(
         ComplianceRequest body, HttpContext http, CerberusDbContext db,
-        CatalogLoader loader, ComplianceEngine engine, ScanService scanner, ScaService sca, AuditLog audit,
-        CancellationToken ct)
+        CatalogLoader loader, AssessmentRunner runner, AuditLog audit, CancellationToken ct)
     {
         var userId = UserId(http);
         var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
@@ -93,15 +92,13 @@ public static class Endpoints
         }
 
         // Findings come from a persisted scan (preferred) or a fresh scan of a path.
-        IReadOnlyList<Finding> findings;
+        Scan? scan = null;
         string targetPath;
-        string? scanId = null;
-        bool dependencyCheckCompleted;
         string? engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
 
         if (!string.IsNullOrWhiteSpace(body.ScanId))
         {
-            var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == body.ScanId && s.UserId == userId, ct);
+            scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == body.ScanId && s.UserId == userId, ct);
             if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
 
             // An assessment of a scan belongs to that scan's engagement.
@@ -110,62 +107,31 @@ public static class Endpoints
                 return Results.Json(new { error = "That scan was not run under this engagement" }, statusCode: 400);
             }
             engagementId = scan.EngagementId;
-            if (engagementId is not null &&
-                await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
-                    "compliance.assess", CapabilityTier.T0, scan.TargetPath, ct) is { } denied)
-            {
-                return denied;
-            }
-            findings = DeserializeFindings(scan.Findings);
             targetPath = scan.TargetPath;
-            scanId = scan.Id;
-            dependencyCheckCompleted = scan.ScaCompleted;
         }
         else
         {
             targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
-            if (engagementId is not null &&
-                await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
-                    "compliance.assess", CapabilityTier.T0, targetPath, ct) is { } denied)
-            {
-                return denied;
-            }
-            try
-            {
-                var staticFindings = scanner.Scan(targetPath).Findings;
-                var scaResult = (body.Sca ?? true)
-                    ? await sca.ScanAsync(targetPath, ct)
-                    : new ScaResult(0, 0, []);
-                findings = staticFindings.Concat(scaResult.Findings).ToList();
-                dependencyCheckCompleted = scaResult.Completed;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Results.Json(new { error = ex.Message }, statusCode: 400);
-            }
         }
 
-        var report = engine.Evaluate(catalog, findings, dependencyCheckCompleted);
-
-        var assessment = new ComplianceAssessment
+        if (engagementId is not null &&
+            await EngagementEndpoints.AuthorizeRunAsync(db, audit, userId, engagementId,
+                "compliance.assess", CapabilityTier.T0, targetPath, ct) is { } denied)
         {
-            UserId = userId,
-            CatalogId = report.CatalogId,
-            TargetPath = targetPath,
-            ScanId = scanId,
-            EngagementId = engagementId,
-            TotalControls = report.TotalControls,
-            Compliant = report.Compliant,
-            NonCompliant = report.NonCompliant,
-            NotAssessed = report.NotAssessed,
-            Score = report.Score,
-            Matrix = JsonSerializer.Serialize(report.Controls, JsonOptions),
-        };
-        db.ComplianceAssessments.Add(assessment);
-        await db.SaveChangesAsync(ct);
-        await audit.AppendAsync(userId, "compliance.assess", AuditOutcome.Ok,
-            $"Assessment {assessment.Id} against {report.CatalogId}: {report.Compliant} compliant, {report.NonCompliant} non-compliant, {report.NotAssessed} not assessed.",
-            engagementId, targetPath, CapabilityTier.T0, ct);
+            return denied;
+        }
+
+        AssessmentRun run;
+        try
+        {
+            run = await runner.RunAsync(userId, engagementId, catalog, scan, targetPath, body.Sca ?? true, ct);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 400);
+        }
+        var (assessment, report, dependencyCheckCompleted) = run;
+        var scanId = scan?.Id;
 
         return Results.Json(new
         {
@@ -680,18 +646,6 @@ public static class Endpoints
     // --- helpers ------------------------------------------------------------
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;
-
-    private static IReadOnlyList<Finding> DeserializeFindings(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<List<Finding>>(json, JsonOptions) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
 
     private static List<JsonElement> ParseStoredMessages(string json)
     {

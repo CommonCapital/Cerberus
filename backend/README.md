@@ -47,7 +47,8 @@ Environment:
 | POST | `/engagements/{id}/abort` · `/close` | Bearer | Abort (kill switch) or close: no further runs are authorized |
 | GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
 | GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
-| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan", path, sca?, engagementId? }` → 202 with the job |
+| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess", path?, sca?, engagementId?, catalogId?, scanId? }` → 202 with the job |
+| WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
 | POST | `/scan` | Bearer | Phase-1 passive scan of `{ path }` (within the scan root) → findings; persists the scan |
@@ -80,7 +81,9 @@ Path targets are relative to the scan root and require `ownershipAttested: true`
 
 ### `/jobs` — background job pipeline (first slice)
 
-`POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Only `scan` jobs exist today; a finished job's `resultId` is the scan id (`GET /scans/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`. Poll `GET /jobs/{id}` for progress (no push notifications yet).
+`POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Two job types exist: `scan` (`resultId` is the scan id, `GET /scans/{id}`) and `assess` (a compliance assessment of `catalogId` over a stored `scanId` or a fresh `path`; `resultId` is the assessment id, `GET /compliance/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`.
+
+**Live updates:** connect a SignalR client to `/hub/jobs` with the bearer token (the `access_token` query parameter, which SignalR clients send for WebSockets, or an `Authorization` header). The hub is receive-only: on every state change of one of your jobs it sends `jobUpdated` with the same object `GET /jobs/{id}` returns. Connections without a valid session are dropped. Updates are best-effort — a client that was disconnected should re-read `GET /jobs`. Only state changes are pushed; findings are not streamed while a job runs.
 
 - **Authorization twice:** a job under an engagement is scope-checked when submitted and again when it starts, so a job that waited in the queue cannot outlive an abort or a scope change.
 - **Platform controls** (`Cerberus.Jobs/JobExecution.cs`), independent of what the work does: operator cancel, a time limit (`CERBERUS_JOB_TIMEOUT_SECONDS`, default 600), and a hard stop — if the work has not returned `CERBERUS_JOB_GRACE_SECONDS` (default 10) after being told to stop, the job is closed anyway and marked abandoned. Abandoned work is not killed (that needs the sandbox); it is only no longer waited for.
@@ -125,4 +128,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, and the job executor (cancel, time limit, hard stop), message bus and state rules. The API endpoints, scanner and SCA have no automated tests yet.
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, engagement scope and abort, audit, cross-user isolation) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, and the job executor (cancel, time limit, hard stop), message bus and state rules. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, the scanner's rule set, and SCA (it needs OSV.dev).

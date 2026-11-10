@@ -9,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Api.Jobs;
 
-public sealed record SubmitJobRequest(string? Type, string? Path, bool? Sca, string? EngagementId);
+public sealed record SubmitJobRequest(
+    string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -31,23 +32,55 @@ public static class JobEndpoints
 
     private static async Task<IResult> Submit(
         SubmitJobRequest body, HttpContext http, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, CancellationToken ct)
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, CancellationToken ct)
     {
         var userId = UserId(http);
         var type = string.IsNullOrWhiteSpace(body.Type) ? JobTypes.Scan : body.Type.Trim().ToLowerInvariant();
-        if (type != JobTypes.Scan)
+        if (!JobTypes.All.Contains(type))
         {
-            return Results.Json(new { error = $"Unknown job type \"{body.Type}\". Supported: {JobTypes.Scan}" }, statusCode: 400);
+            return BadRequest($"Unknown job type \"{body.Type}\". Supported: {string.Join(", ", JobTypes.All)}");
         }
 
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
+        var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
+        string parameters;
+
+        if (type == JobTypes.Assess)
+        {
+            var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
+            if (catalogs.Get(catalogId) is null) return BadRequest($"Unknown catalog '{catalogId}'");
+
+            string? scanId = null;
+            if (!string.IsNullOrWhiteSpace(body.ScanId))
+            {
+                var scan = await db.Scans.AsNoTracking()
+                    .Where(s => s.Id == body.ScanId && s.UserId == userId)
+                    .Select(s => new { s.Id, s.TargetPath, s.EngagementId })
+                    .FirstOrDefaultAsync(ct);
+                if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
+
+                // An assessment of a scan belongs to that scan's engagement.
+                if (engagementId is not null && engagementId != scan.EngagementId)
+                {
+                    return BadRequest("That scan was not run under this engagement");
+                }
+                engagementId = scan.EngagementId;
+                targetPath = scan.TargetPath;
+                scanId = scan.Id;
+            }
+            parameters = JsonSerializer.Serialize(new AssessJobParameters(catalogId, scanId, body.Sca ?? true), JobTypes.Json);
+        }
+        else
+        {
+            parameters = JsonSerializer.Serialize(new ScanJobParameters(body.Sca ?? true), JobTypes.Json);
+        }
+
         // Reject paths that cannot be valid up front instead of failing later in the worker.
         if (ScopePolicy.Normalize(TargetType.Path, targetPath) is null)
         {
-            return Results.Json(new { error = "path must be relative to the scan root, without '..'" }, statusCode: 400);
+            return BadRequest("path must be relative to the scan root, without '..'");
         }
 
-        var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
         const CapabilityTier tier = CapabilityTier.T0;
 
         // Scope gate at submission; the worker checks again when the job starts.
@@ -70,10 +103,11 @@ public static class JobEndpoints
             Type = type,
             Tier = tier.ToString(),
             TargetPath = targetPath,
-            Parameters = JsonSerializer.Serialize(new ScanJobParameters(body.Sca ?? true), JobTypes.Json),
+            Parameters = parameters,
         };
         db.Jobs.Add(job);
         await db.SaveChangesAsync(ct);
+        await events.PublishAsync(job.Id);
         await bus.PublishAsync(new JobMessage(job.Id), ct);
 
         return Results.Json(Describe(job), JsonOptions, statusCode: 202);
@@ -128,7 +162,9 @@ public static class JobEndpoints
 
     private static IResult NotFound() => Results.Json(new { error = "Job not found" }, statusCode: 404);
 
-    private static object Describe(Job j) => new
+    private static IResult BadRequest(string error) => Results.Json(new { error }, statusCode: 400);
+
+    internal static object Describe(Job j) => new
     {
         j.Id, j.Type, j.State, j.Tier, j.EngagementId, j.TargetPath,
         j.ResultId, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt,

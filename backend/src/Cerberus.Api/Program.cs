@@ -70,6 +70,8 @@ builder.Services.AddSingleton(new JobOptions(
     Grace: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_GRACE_SECONDS", 10)),
     MaxQueuedPerUser: 50));
 builder.Services.AddScoped<ScanRunner>();
+builder.Services.AddScoped<AssessmentRunner>();
+builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddScoped<JobControl>();
 builder.Services.AddHostedService<JobWorker>();
 
@@ -90,6 +92,7 @@ app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
+app.MapHub<JobsHub>("/hub/jobs");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
 app.Run($"http://localhost:{port}");
@@ -114,3 +117,6 @@ static string ResolveCatalogRoot(string contentRoot)
     // Fall back to a catalogs/ next to the content root (created on demand / empty).
     return Path.Combine(contentRoot, "catalogs");
 }
+
+// Exposed so the integration tests can host the API in-process.
+public partial class Program;
