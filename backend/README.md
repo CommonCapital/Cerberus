@@ -50,7 +50,7 @@ Environment:
 | GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
 | GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
 | GET | `/audit/export` | Bearer | Download the whole audit log, oldest first (`?format=jsonl\|csv`) |
-| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess", path?, sca?, engagementId?, catalogId?, scanId? }` → 202 with the job |
+| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess" \| "triage", path?, sca?, engagementId?, catalogId?, scanId?, model?, maxFindings? }` → 202 with the job |
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
@@ -130,6 +130,15 @@ Because markers and ignore files live in the target, a target can hide findings 
 
 **Measured** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
 
+
+### LLM triage of findings (`triage` job)
+
+`POST /jobs {"type":"triage","scanId":"…","model":"…","maxFindings"?: 15,"includeTestsAndDocs"?: false}` asks a model to review a stored scan's findings one by one. For each it gets the rule that fired and about 12 lines of code either side, and must answer with a JSON verdict — `TruePositive`, `FalsePositive` or `NeedsReview` — plus its reasoning and a fix. Opinions are saved on the scan as they arrive and returned by `GET /scans/{id}` under `triage` (keyed by `findingId`).
+
+- **Advisory only.** The code under review is untrusted input to the model and may try to talk it into "false positive", so an opinion never removes a finding and never changes a compliance verdict. The system prompt tells the model to treat the source as data, but that is a mitigation, not a guarantee.
+- **You choose the model; there is no default.** A local Ollama model keeps the code on the machine. With a cloud model, the code context is sent to that provider after credential-shaped values are replaced by `[REDACTED len=N]`. The audit log records which model reviewed how many findings and where the code went.
+- **What is reviewed:** unsuppressed static findings in production code, most severe first, up to `maxFindings` (max 100). Dependency findings are skipped. An unusable or failed model reply becomes `NeedsReview` with `modelAnswered: false`.
+- **Status:** tested with a scripted model only. It has **not** been run against a real model yet — see PLAN.md §17 "Pending verification" for the steps and the expected results.
 
 ### Per-user API keys
 
