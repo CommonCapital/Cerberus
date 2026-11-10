@@ -61,11 +61,11 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 
 var app = builder.Build();
 
-// Create the database/schema on first run (no migrations needed for local dev).
+// Create the schema on first run, and additively upgrade an existing local database.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
-    db.Database.EnsureCreated();
+    SchemaUpgrader.EnsureUpToDate(db);
 }
 
 app.MapCerberusEndpoints();

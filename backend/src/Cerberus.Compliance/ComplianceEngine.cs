@@ -48,7 +48,15 @@ public sealed record ComplianceReport(
 /// </summary>
 public sealed class ComplianceEngine
 {
-    public ComplianceReport Evaluate(Catalog catalog, IReadOnlyList<Finding> findings)
+    private const string DependencyCategory = "dependency";
+
+    
+    /// <param name="dependencyCheckCompleted">
+    /// Whether the dependency (SCA) check covered the target. When false, a
+    /// control mapped to the <c>dependency</c> category cannot be Compliant.
+    /// </param>
+    public ComplianceReport Evaluate(
+        Catalog catalog, IReadOnlyList<Finding> findings, bool dependencyCheckCompleted = true)
     {
         var byCategory = findings
             .GroupBy(f => f.Category, StringComparer.OrdinalIgnoreCase)
@@ -60,7 +68,7 @@ public sealed class ComplianceEngine
         {
             foreach (var control in section.Controls)
             {
-                results.Add(Assess(section.Name, control, byCategory));
+                results.Add(Assess(section.Name, control, byCategory, dependencyCheckCompleted));
             }
         }
 
@@ -83,7 +91,8 @@ public sealed class ComplianceEngine
     }
 
     private static ControlResult Assess(
-        string section, Control control, IReadOnlyDictionary<string, IReadOnlyList<Finding>> byCategory)
+        string section, Control control, IReadOnlyDictionary<string, IReadOnlyList<Finding>> byCategory,
+        bool dependencyCheckCompleted)
     {
         var categories = control.ScannerCategories;
         if (categories is not { Count: > 0 })
@@ -107,6 +116,16 @@ public sealed class ComplianceEngine
                 ControlVerdict.NonCompliant, true,
                 $"{evidence.Count} scanner finding(s) in mapped categories ({cats}) indicate non-compliance.",
                 evidence);
+        }
+
+        // Absence of findings only counts where the scanner actually looked.
+        if (!dependencyCheckCompleted &&
+            categories.Contains(DependencyCategory, StringComparer.OrdinalIgnoreCase))
+        {
+            return new ControlResult(control.Id, section, control.Title,
+                ControlVerdict.NotAssessed, true,
+                "No findings, but the dependency (SCA) check did not run or did not complete, so this control cannot be judged. Re-run the scan with dependency analysis enabled and network access to OSV.dev.",
+                []);
         }
 
         return new ControlResult(control.Id, section, control.Title,

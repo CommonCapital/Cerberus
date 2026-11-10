@@ -15,8 +15,10 @@ public sealed record ScanRequest(string? Path, bool? Sca = true);
 /// <summary>
 /// Request a Phase-2 compliance assessment. Either reuse an existing scan's
 /// findings (<see cref="ScanId"/>) or run a fresh scan over <see cref="Path"/>.
+/// <paramref name="Sca"/> toggles dependency analysis for a fresh scan (defaults
+/// on); with it off, dependency-mapped controls are reported as not assessed.
 /// </summary>
-public sealed record ComplianceRequest(string? CatalogId, string? ScanId, string? Path);
+public sealed record ComplianceRequest(string? CatalogId, string? ScanId, string? Path, bool? Sca = true);
 
 public sealed record ChatRequestMessage(string Role, string Content);
 
