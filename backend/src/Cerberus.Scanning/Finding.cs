@@ -19,4 +19,10 @@ public sealed record Finding(
     string File,
     int Line,
     string Evidence,
-    string Confidence);
+    string Confidence,
+    // --- Optional SCA (dependency) context; null for static-analysis findings ---
+    string? Package = null,
+    string? Version = null,
+    string? FixedVersion = null,
+    string? VulnId = null,
+    string? Reference = null);

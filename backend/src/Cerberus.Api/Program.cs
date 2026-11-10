@@ -44,6 +44,9 @@ builder.Services.AddSignalR();
 var scanRoot = Environment.GetEnvironmentVariable("CERBERUS_SCAN_ROOT") ?? Directory.GetCurrentDirectory();
 builder.Services.AddSingleton(new ScanOptions(scanRoot));
 builder.Services.AddSingleton<ScanService>();
+// Phase 1 SCA (dependency/CVE analysis via OSV.dev — passive T0, read-only).
+builder.Services.AddSingleton<OsvClient>();
+builder.Services.AddSingleton<ScaService>();
 
 // --- Phase 2 compliance (ESAP/ISO/OWASP catalogs shipped as data) ----------
 var catalogRoot = Environment.GetEnvironmentVariable("CERBERUS_CATALOG_ROOT")
