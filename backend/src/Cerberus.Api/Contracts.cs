@@ -20,6 +20,9 @@ public sealed record ScanRequest(string? Path, bool? Sca = true);
 /// </summary>
 public sealed record ComplianceRequest(string? CatalogId, string? ScanId, string? Path, bool? Sca = true);
 
+/// <summary>An operator's answer for one control of an assessment.</summary>
+public sealed record ControlResponseRequest(string? Verdict, string? Justification, string? ActionPlan, int? TimeLimitDays);
+
 public sealed record ChatRequestMessage(string Role, string Content);
 
 // Used by the SignalR hub skeleton.

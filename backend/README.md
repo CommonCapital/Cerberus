@@ -49,6 +49,9 @@ Environment:
 | GET | `/compliance` | Bearer | List this user's past assessments |
 | GET | `/compliance/{id}` | Bearer | A persisted assessment with its control matrix |
 | GET | `/compliance/{id}/export` | Bearer | Download the assessment as a vendor-assurance spreadsheet (.xlsx) |
+| POST | `/compliance/{id}/import` | Bearer | Import operator answers from a completed export (body = the raw .xlsx file) |
+| PUT | `/compliance/{id}/responses/{controlId}` | Bearer | Set the operator's answer `{ verdict, justification, actionPlan?, timeLimitDays? }` for a control |
+| DELETE | `/compliance/{id}/responses/{controlId}` | Bearer | Remove the operator's answer (falls back to the scanner's verdict) |
 | WS | `/hub/chat` | — (skeleton) | SignalR streaming hub |
 
 ### `/compliance` — Phase 2 (Compliance), deterministic engine
@@ -58,6 +61,10 @@ Catalogs are data: every `*.json` under `catalogs/` (`CERBERUS_CATALOG_ROOT`, de
 Controls mapped to the `dependency` category (ESAP GSG-07, OWASP A06) use the SCA findings. A fresh `path` assessment runs the dependency check unless `sca: false`; a `scanId` assessment uses whatever that scan recorded (`scaCompleted`). If the check was skipped, failed (OSV.dev unreachable) or truncated, such a control with no findings is **NotAssessed** rather than Compliant, and the response carries `dependencyCheckCompleted: false`. Scans stored before this field existed count as not completed.
 
 **Spreadsheet export:** `GET /compliance/{id}/export` returns an `.xlsx` with three sheets. *Summary* has the totals and how to read them. *Controls* has one row per control in the response schema enterprises expect back: Verdict, Detailed Response, Action Plan, Time limit. *Evidence* lists every finding per control. Only what the engine established is pre-filled: Non-compliant rows get the findings, a generic "remediate and re-scan" action plan and the catalog's standard deadline (ESAP: 30 days); Compliant rows get the scan rationale; controls it could not judge have an empty Verdict (a pick-list from the catalog's response scale) for the operator to complete. Built with ClosedXML (`Cerberus.Compliance/ComplianceWorkbook.cs`).
+
+**Operator answers:** the scanner can judge only a minority of controls, so each control can also carry an operator answer in the catalog's response schema. The verdict must be one of the catalog's response scale, a justification is required, an action plan is required for *Partially compliant* / *Non-compliant*, and the time limit must be within the catalog's maximum (ESAP: 1–180 days). An operator answer takes precedence over the scanner's verdict for that control (e.g. to record a false positive); the scanner's own verdict is kept and stays visible. `GET /compliance/{id}` returns both `summary` (scanner only) and `effective` (operator answers applied: compliant / partiallyCompliant / nonCompliant / notApplicable / unanswered).
+
+**Spreadsheet import:** edit the *Controls* sheet of an export and `POST` the file back as the raw request body (max 5 MB), e.g. `curl -X POST .../compliance/{id}/import -H "Authorization: Bearer …" --data-binary @file.xlsx`. Rows with an empty Verdict and rows unchanged since the export are ignored, valid rows are saved, and invalid rows are returned as `errors` with their row number. Columns are found by header name, so they may be reordered but not renamed.
 
 **Local database upgrades:** on startup the API creates the schema for a new database and, for an existing one, additively creates missing tables/indexes and adds missing columns (`Cerberus.Data/SchemaUpgrader.cs`). It never drops or alters existing columns.
 
@@ -85,4 +92,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories) and the spreadsheet export. The API endpoints, scanner and SCA have no automated tests yet.
+`tests/Cerberus.Tests` covers the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, and the spreadsheet export/import round trip. The API endpoints, scanner and SCA have no automated tests yet.
