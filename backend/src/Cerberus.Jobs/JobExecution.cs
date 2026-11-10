@@ -4,6 +4,8 @@ namespace Cerberus.Jobs;
 
 public enum JobState
 {
+    /// <summary>Accepted, but waiting for the operator to approve it. Nothing runs until they do.</summary>
+    AwaitingApproval,
     Queued,
     Running,
     Succeeded,
@@ -21,9 +23,13 @@ public static class JobStates
     public static bool IsTerminal(JobState state) =>
         state is JobState.Succeeded or JobState.Failed or JobState.Cancelled or JobState.TimedOut;
 
-    /// <summary>Jobs only move forward: Queued → Running → a terminal state, or Queued → Cancelled.</summary>
+    /// <summary>
+    /// Jobs only move forward: (AwaitingApproval →) Queued → Running → a terminal
+    /// state. A job that has not started can be cancelled or failed directly.
+    /// </summary>
     public static bool CanTransition(JobState from, JobState to) => from switch
     {
+        JobState.AwaitingApproval => to is JobState.Queued or JobState.Cancelled or JobState.Failed,
         JobState.Queued => to is JobState.Running or JobState.Cancelled or JobState.Failed,
         JobState.Running => IsTerminal(to),
         _ => false,

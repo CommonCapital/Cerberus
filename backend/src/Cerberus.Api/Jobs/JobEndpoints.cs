@@ -45,6 +45,7 @@ public static class JobEndpoints
         var targetPath = string.IsNullOrWhiteSpace(body.Path) ? "." : body.Path!;
         var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
         string parameters;
+        ApprovalNeed? approvalNeed = null;
 
         if (type == JobTypes.Triage)
         {
@@ -61,7 +62,7 @@ public static class JobEndpoints
 
             var scan = await db.Scans.AsNoTracking()
                 .Where(s => s.Id == body.ScanId && s.UserId == userId)
-                .Select(s => new { s.Id, s.TargetPath, s.EngagementId })
+                .Select(s => new { s.Id, s.TargetPath, s.EngagementId, s.Findings })
                 .FirstOrDefaultAsync(ct);
             if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
             if (engagementId is not null && engagementId != scan.EngagementId)
@@ -70,9 +71,23 @@ public static class JobEndpoints
             }
             engagementId = scan.EngagementId;
             targetPath = scan.TargetPath;
-            parameters = JsonSerializer.Serialize(
-                new TriageJobParameters(scan.Id, body.Model, body.MaxFindings ?? 15, body.IncludeTestsAndDocs ?? false),
-                JobTypes.Json);
+            var triage = new TriageJobParameters(scan.Id, body.Model, body.MaxFindings ?? 15, body.IncludeTestsAndDocs ?? false);
+            parameters = JsonSerializer.Serialize(triage, JobTypes.Json);
+
+            // Code leaving this machine needs the operator's explicit consent, shown what exactly will go.
+            var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
+            if (!Cerberus.Triage.FindingTriager.IsLocal(provider))
+            {
+                var selected = TriageRunner.SelectFor(scan.Findings, triage);
+                approvalNeed = new ApprovalNeed(
+                    ApprovalKinds.SendCodeToCloudModel,
+                    $"Send source code to {provider} ({body.Model}) for triage",
+                    $"Triage of scan {scan.Id} (path \"{scan.TargetPath}\") would send the code around {selected.Count} finding(s) " +
+                    $"in {selected.Select(f => f.File).Distinct().Count()} file(s) to {provider}, model {body.Model}: " +
+                    $"about {2 * Cerberus.Triage.TriagePrompt.ContextLines + 1} lines per finding. " +
+                    "Credential-shaped values are masked before sending; other code is sent as is. " +
+                    "Nothing is sent until you approve.");
+            }
         }
         else if (type == JobTypes.Assess)
         {
@@ -135,12 +150,36 @@ public static class JobEndpoints
             TargetPath = targetPath,
             Parameters = parameters,
         };
-        db.Jobs.Add(job);
-        await db.SaveChangesAsync(ct);
-        await events.PublishAsync(job.Id);
-        await bus.PublishAsync(new JobMessage(job.Id), ct);
+        if (approvalNeed is null)
+        {
+            db.Jobs.Add(job);
+            await db.SaveChangesAsync(ct);
+            await events.PublishAsync(job.Id);
+            await bus.PublishAsync(new JobMessage(job.Id), ct);
+            return Results.Json(Describe(job), JsonOptions, statusCode: 202);
+        }
 
-        return Results.Json(Describe(job), JsonOptions, statusCode: 202);
+        // Human in the loop: store the job, but do not hand it to the workers yet.
+        var approval = new ApprovalRequest
+        {
+            UserId = userId,
+            JobId = job.Id,
+            EngagementId = engagementId,
+            Kind = approvalNeed.Kind,
+            Title = approvalNeed.Title,
+            Detail = approvalNeed.Detail,
+        };
+        job.State = nameof(JobState.AwaitingApproval);
+        job.ApprovalId = approval.Id;
+        db.Jobs.Add(job);
+        db.ApprovalRequests.Add(approval);
+        await db.SaveChangesAsync(ct);
+        await audit.AppendAsync(userId, "approval.request", AuditOutcome.Ok,
+            $"Job {job.Id} ({job.Type}) is waiting for approval: {approval.Title}.", engagementId, targetPath, tier, ct);
+        await events.PublishAsync(job.Id);
+        await events.PublishApprovalAsync(approval.Id, JobsHub.ApprovalRequested);
+
+        return Results.Json(new { job = Describe(job), approval = ApprovalEndpoints.Describe(approval) }, JsonOptions, statusCode: 202);
     }
 
     private static async Task<IResult> List(
@@ -197,6 +236,6 @@ public static class JobEndpoints
     internal static object Describe(Job j) => new
     {
         j.Id, j.Type, j.State, j.Tier, j.EngagementId, j.TargetPath,
-        j.ResultId, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt,
+        j.ResultId, j.ApprovalId, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt,
     };
 }

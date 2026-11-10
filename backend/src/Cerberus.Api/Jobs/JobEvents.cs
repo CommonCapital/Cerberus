@@ -10,11 +10,19 @@ namespace Cerberus.Api.Jobs;
 /// bearer token — as the <c>access_token</c> query parameter (what SignalR
 /// clients send for WebSockets) or an Authorization header — and then receives
 /// a <c>jobUpdated</c> message, carrying the same shape as <c>GET /jobs/{id}</c>,
-/// whenever one of its own jobs changes state. The hub is receive-only.
+/// whenever one of its own jobs changes state, plus <c>approvalRequested</c> /
+/// <c>approvalResolved</c> when a job waits for, or receives, the operator's
+/// decision. The hub is receive-only; decisions go through <c>/approvals</c>.
 /// </summary>
 public sealed class JobsHub : Hub
 {
     public const string JobUpdated = "jobUpdated";
+
+    /// <summary>A job is waiting for the operator's decision; carries the approval request.</summary>
+    public const string ApprovalRequested = "approvalRequested";
+
+    /// <summary>An approval request was approved, denied or cancelled.</summary>
+    public const string ApprovalResolved = "approvalResolved";
 
     public static string GroupFor(string userId) => $"user:{userId}";
 
@@ -63,6 +71,24 @@ public sealed class JobEvents(IHubContext<JobsHub> hub, IServiceScopeFactory sco
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not publish an update for job {JobId}.", jobId);
+        }
+    }
+
+    public async Task PublishApprovalAsync(string approvalId, string eventName)
+    {
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
+            var approval = await db.ApprovalRequests.AsNoTracking().FirstOrDefaultAsync(a => a.Id == approvalId);
+            if (approval is null) return;
+
+            await hub.Clients.Group(JobsHub.GroupFor(approval.UserId))
+                .SendAsync(eventName, ApprovalEndpoints.Describe(approval));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not publish approval {ApprovalId}.", approvalId);
         }
     }
 }

@@ -35,9 +35,7 @@ public sealed class TriageRunner(
         var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == parameters.ScanId && s.UserId == userId, ct)
             ?? throw new InvalidOperationException($"Scan {parameters.ScanId} no longer exists.");
 
-        var findings = JsonSerializer.Deserialize<List<Finding>>(scan.Findings, JsonOptions) ?? [];
-        var selected = FindingTriager.Select(
-            findings, Math.Clamp(parameters.MaxFindings, 1, MaxFindingsLimit), parameters.IncludeTestsAndDocs);
+        var selected = SelectFor(scan.Findings, parameters);
 
         var provider = ModelRegistry.Find(parameters.Model)?.Provider
             ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
@@ -73,6 +71,22 @@ public sealed class TriageRunner(
                 scan.EngagementId, scan.TargetPath, CapabilityTier.T0, CancellationToken.None);
         }
         return done;
+    }
+
+    /// <summary>The findings a triage run with these parameters would review, in order.</summary>
+    public static IReadOnlyList<Finding> SelectFor(string findingsJson, TriageJobParameters parameters)
+    {
+        List<Finding> findings;
+        try
+        {
+            findings = JsonSerializer.Deserialize<List<Finding>>(findingsJson, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            findings = [];
+        }
+        return FindingTriager.Select(
+            findings, Math.Clamp(parameters.MaxFindings, 1, MaxFindingsLimit), parameters.IncludeTestsAndDocs);
     }
 
     public static IReadOnlyList<TriageResult> ReadTriage(string? json)

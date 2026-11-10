@@ -19,11 +19,13 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
 
     public async Task<CancelResult> CancelAsync(Job job, CancellationToken ct)
     {
-        // A queued job is cancelled outright. The conditional update makes this
-        // atomic against a worker claiming the job at the same moment.
+        // A job that has not started is cancelled outright. The conditional update
+        // makes this atomic against a worker claiming it, or an approval releasing
+        // it, at the same moment.
         var now = DateTime.UtcNow;
         var cancelledQueued = await db.Jobs
-            .Where(j => j.Id == job.Id && j.State == nameof(JobState.Queued))
+            .Where(j => j.Id == job.Id &&
+                        (j.State == nameof(JobState.Queued) || j.State == nameof(JobState.AwaitingApproval)))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, nameof(JobState.Cancelled))
                 .SetProperty(j => j.Error, "Cancelled by the operator before it started.")
@@ -32,6 +34,7 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
         {
             await audit.AppendAsync(job.UserId, "job.cancel", AuditOutcome.Ok,
                 $"Job {job.Id} cancelled before it started.", job.EngagementId, job.TargetPath, ct: ct);
+            await WithdrawApprovalsAsync([job.Id], now, ct);
             await events.PublishAsync(job.Id);
             return CancelResult.Cancelled;
         }
@@ -50,11 +53,13 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
     {
         var now = DateTime.UtcNow;
         var queuedIds = await db.Jobs.AsNoTracking()
-            .Where(j => j.UserId == userId && j.EngagementId == engagementId && j.State == nameof(JobState.Queued))
+            .Where(j => j.UserId == userId && j.EngagementId == engagementId &&
+                        (j.State == nameof(JobState.Queued) || j.State == nameof(JobState.AwaitingApproval)))
             .Select(j => j.Id)
             .ToListAsync(ct);
         var queued = await db.Jobs
-            .Where(j => queuedIds.Contains(j.Id) && j.State == nameof(JobState.Queued))
+            .Where(j => queuedIds.Contains(j.Id) &&
+                        (j.State == nameof(JobState.Queued) || j.State == nameof(JobState.AwaitingApproval)))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, nameof(JobState.Cancelled))
                 .SetProperty(j => j.Error, "Cancelled: the engagement was aborted.")
@@ -72,7 +77,26 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
                 $"Kill switch: cancelled {queued} queued job(s) and requested stop of {running} running job(s).",
                 engagementId, ct: ct);
         }
+        await WithdrawApprovalsAsync(queuedIds, now, ct);
         foreach (var id in queuedIds) await events.PublishAsync(id);
         return new CancelSummary(queued, running);
+    }
+
+    /// <summary>Pending approval requests of cancelled jobs are closed, so nobody is asked about work that is gone.</summary>
+    private async Task WithdrawApprovalsAsync(IReadOnlyCollection<string> jobIds, DateTime now, CancellationToken ct)
+    {
+        if (jobIds.Count == 0) return;
+        var pending = await db.ApprovalRequests.AsNoTracking()
+            .Where(a => jobIds.Contains(a.JobId) && a.Status == ApprovalStatus.Pending)
+            .Select(a => a.Id)
+            .ToListAsync(ct);
+        if (pending.Count == 0) return;
+
+        await db.ApprovalRequests
+            .Where(a => pending.Contains(a.Id) && a.Status == ApprovalStatus.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.Status, ApprovalStatus.Cancelled)
+                .SetProperty(a => a.DecidedAt, now), ct);
+        foreach (var id in pending) await events.PublishApprovalAsync(id, JobsHub.ApprovalResolved);
     }
 }
