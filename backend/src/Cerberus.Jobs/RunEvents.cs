@@ -35,6 +35,12 @@ public static class RunEventTypes
     /// <summary>The operator decided, or the request was withdrawn. Data: the approval request.</summary>
     public const string ApprovalResolved = "approval_resolved";
 
+    /// <summary>The run asks the operator something and waits. Data: the question.</summary>
+    public const string Question = "question";
+
+    /// <summary>The question was answered, expired or withdrawn. Data: the question, with its answer.</summary>
+    public const string QuestionResolved = "question_resolved";
+
     /// <summary>The run produced more events than are kept; only state changes follow. Data: <c>{ message }</c>.</summary>
     public const string Truncated = "truncated";
 }
@@ -64,6 +70,13 @@ public interface IRunReporter
     Task FlushTextAsync();
 
     Task EventAsync(string type, object data);
+
+    /// <summary>
+    /// Asks the operator and waits for the answer. Returns null when there is
+    /// nobody to ask (work running outside a job) or nobody answered in time —
+    /// the caller must then fall back to its safe default.
+    /// </summary>
+    Task<OperatorAnswer?> AskAsync(OperatorQuestionSpec question, CancellationToken ct);
 }
 
 public sealed class NullRunReporter : IRunReporter
@@ -81,6 +94,9 @@ public sealed class NullRunReporter : IRunReporter
     public Task FlushTextAsync() => Task.CompletedTask;
 
     public Task EventAsync(string type, object data) => Task.CompletedTask;
+
+    public Task<OperatorAnswer?> AskAsync(OperatorQuestionSpec question, CancellationToken ct) =>
+        Task.FromResult<OperatorAnswer?>(null);
 }
 
 /// <summary>

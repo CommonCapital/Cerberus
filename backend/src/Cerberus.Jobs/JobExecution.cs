@@ -8,6 +8,9 @@ public enum JobState
     AwaitingApproval,
     Queued,
     Running,
+
+    /// <summary>Started, and now waiting for the operator to answer a question. Its time limit is paused.</summary>
+    AwaitingInput,
     Succeeded,
     Failed,
 
@@ -31,7 +34,8 @@ public static class JobStates
     {
         JobState.AwaitingApproval => to is JobState.Queued or JobState.Cancelled or JobState.Failed,
         JobState.Queued => to is JobState.Running or JobState.Cancelled or JobState.Failed,
-        JobState.Running => IsTerminal(to),
+        JobState.Running => IsTerminal(to) || to is JobState.AwaitingInput,
+        JobState.AwaitingInput => IsTerminal(to) || to is JobState.Running,
         _ => false,
     };
 }
@@ -85,9 +89,19 @@ public sealed class JobCancellationRegistry
 /// </summary>
 public static class JobExecutor
 {
-    public static async Task<JobOutcome> RunAsync(
+    public static Task<JobOutcome> RunAsync(
         string jobId,
         Func<CancellationToken, Task<string?>> work,
+        JobCancellationRegistry registry,
+        TimeSpan timeout,
+        TimeSpan grace,
+        CancellationToken shutdown) =>
+        RunAsync(jobId, (ct, _) => work(ct), registry, timeout, grace, shutdown);
+
+    /// <param name="work">Receives the stop token and the job's time limit, which it may pause while waiting for a person.</param>
+    public static async Task<JobOutcome> RunAsync(
+        string jobId,
+        Func<CancellationToken, JobTimeLimit, Task<string?>> work,
         JobCancellationRegistry registry,
         TimeSpan timeout,
         TimeSpan grace,
@@ -102,8 +116,9 @@ public static class JobExecutor
 
         try
         {
-            timeLimit.CancelAfter(timeout);
-            var task = Task.Run(() => work(stop.Token), CancellationToken.None);
+            var limit = new JobTimeLimit(timeLimit, timeout);
+            limit.Start();
+            var task = Task.Run(() => work(stop.Token, limit), CancellationToken.None);
             try
             {
                 var resultId = await task.WaitAsync(hardStop.Token);

@@ -248,6 +248,34 @@ public class JobEvent
     public DateTime CreatedAt { get; set; }
 }
 
+/// <summary>
+/// A question a running job put to the operator (human in the loop, PLAN.md
+/// §6.5). The job waits in AwaitingInput until it is answered, expires, or the
+/// job is cancelled.
+/// </summary>
+public class OperatorQuestion
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string JobId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>The choices offered: list of { label, description }, as JSON.</summary>
+    public string Options { get; set; } = "[]";
+    public bool MultiSelect { get; set; }
+    public bool AllowText { get; set; }
+
+    /// <summary>Pending | Answered | Expired | Cancelled.</summary>
+    public string Status { get; set; } = "Pending";
+
+    /// <summary>The operator's answer: { selected, text }, as JSON.</summary>
+    public string? Answer { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

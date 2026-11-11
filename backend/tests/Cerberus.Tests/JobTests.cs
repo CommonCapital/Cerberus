@@ -137,6 +137,10 @@ public class JobStateTests
     [InlineData(JobState.AwaitingApproval, JobState.Running, false)]    // never straight to running
     [InlineData(JobState.AwaitingApproval, JobState.Succeeded, false)]
     [InlineData(JobState.Queued, JobState.AwaitingApproval, false)]
+    [InlineData(JobState.Running, JobState.AwaitingInput, true)]        // asks the operator
+    [InlineData(JobState.AwaitingInput, JobState.Running, true)]        // answered
+    [InlineData(JobState.AwaitingInput, JobState.Cancelled, true)]      // stopped while waiting
+    [InlineData(JobState.Queued, JobState.AwaitingInput, false)]        // only a running job can ask
     [InlineData(JobState.Queued, JobState.Running, true)]
     [InlineData(JobState.Queued, JobState.Cancelled, true)]
     [InlineData(JobState.Queued, JobState.Succeeded, false)]

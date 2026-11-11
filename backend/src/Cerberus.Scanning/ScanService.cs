@@ -62,7 +62,12 @@ public sealed partial class ScanService(ScanOptions options)
     private const int MaxLineLength = 2_000;      // longer lines are minified or data, not code
     private const int MaxFindings = 5_000;
 
-    public ScanResult Scan(string relativePath, CancellationToken ct = default)
+    /// <param name="honourExclusions">
+    /// When false, the target's own <c>.cerberusignore</c> files and
+    /// <c>cerberus:ignore</c> markers are disregarded: every file is scanned and
+    /// no finding is suppressed. Use it for code you do not trust.
+    /// </param>
+    public ScanResult Scan(string relativePath, CancellationToken ct = default, bool honourExclusions = true)
     {
         var root = Path.GetFullPath(options.ScanRoot);
         var target = Path.GetFullPath(Path.Combine(root, relativePath));
@@ -74,7 +79,7 @@ public sealed partial class ScanService(ScanOptions options)
             throw new UnauthorizedAccessException("Path is outside the scan root.");
         }
 
-        var ignore = IgnoreList.Load(root, target);
+        var ignore = honourExclusions ? IgnoreList.Load(root, target) : IgnoreList.Empty;
         var findings = new List<Finding>();
         int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0;
         var truncated = false;
@@ -115,7 +120,7 @@ public sealed partial class ScanService(ScanOptions options)
                     catch (RegexMatchTimeoutException) { continue; }
                     if (!match) continue;
 
-                    var isSuppressed = IsSuppressed(rule.Id, line) || (i > 0 && IsSuppressed(rule.Id, lines[i - 1], commentOnly: true));
+                    var isSuppressed = honourExclusions && (IsSuppressed(rule.Id, line) || (i > 0 && IsSuppressed(rule.Id, lines[i - 1], commentOnly: true)));
                     if (isSuppressed) suppressed++;
 
                     findings.Add(new Finding(
@@ -319,6 +324,8 @@ public sealed partial class ScanService(ScanOptions options)
 internal sealed class IgnoreList
 {
     private readonly List<Regex> _patterns = [];
+
+    public static IgnoreList Empty { get; } = new();
 
     public static IgnoreList Load(string root, string target)
     {

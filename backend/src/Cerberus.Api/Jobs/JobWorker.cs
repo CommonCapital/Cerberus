@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Api.Jobs;
 
-public sealed record ScanJobParameters(bool Sca = true);
+public sealed record ScanJobParameters(bool Sca = true, string Exclusions = ScanExclusions.Ask);
 
 public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool Sca = true);
 
@@ -19,7 +19,7 @@ public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool 
 /// </summary>
 public sealed class JobWorker(
     IMessageBus bus, IServiceScopeFactory scopes, JobCancellationRegistry registry,
-    JobOptions options, JobEvents events, RunStream stream, ILogger<JobWorker> logger) : BackgroundService
+    JobOptions options, JobEvents events, RunStream stream, OperatorDesk desk, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -42,11 +42,18 @@ public sealed class JobWorker(
 
         var now = DateTime.UtcNow;
         var interrupted = await db.Jobs
-            .Where(j => j.State == nameof(JobState.Running))
+            .Where(j => j.State == nameof(JobState.Running) || j.State == nameof(JobState.AwaitingInput))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, nameof(JobState.Failed))
                 .SetProperty(j => j.Error, "Interrupted by a server restart.")
                 .SetProperty(j => j.FinishedAt, now), ct);
+
+        // Questions of jobs that died with the old process can no longer be answered.
+        await db.OperatorQuestions
+            .Where(q => q.Status == QuestionStatus.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(q => q.Status, QuestionStatus.Cancelled)
+                .SetProperty(q => q.ResolvedAt, now), ct);
 
         var queued = await db.Jobs.AsNoTracking()
             .Where(j => j.State == nameof(JobState.Queued))
@@ -136,7 +143,10 @@ public sealed class JobWorker(
         await events.PublishAsync(jobId);
 
         var outcome = await JobExecutor.RunAsync(
-            jobId, ct => RunWorkAsync(services, job, stream.For(job), ct), registry, options.Timeout, options.Grace, stoppingToken);
+            jobId,
+            (ct, timeLimit) => RunWorkAsync(
+                services, job, stream.For(job, (question, askCt) => desk.AskAsync(job, timeLimit, question, askCt)), ct),
+            registry, options.Timeout, options.Grace, stoppingToken);
 
         await FinishAsync(db, audit, job, nameof(JobState.Running), outcome);
     }
@@ -150,7 +160,7 @@ public sealed class JobWorker(
             case JobTypes.Scan:
                 var parameters = JsonSerializer.Deserialize<ScanJobParameters>(job.Parameters, JobTypes.Json) ?? new();
                 var run = await services.GetRequiredService<ScanRunner>()
-                    .RunAsync(job.UserId, job.EngagementId, job.TargetPath, parameters.Sca, ct, reporter);
+                    .RunAsync(job.UserId, job.EngagementId, job.TargetPath, parameters.Sca, ct, reporter, parameters.Exclusions);
                 return run.Scan.Id;
 
             case JobTypes.Assess:
@@ -191,8 +201,10 @@ public sealed class JobWorker(
             ? $"{outcome.Error} The work did not stop within the grace period and was abandoned."
             : outcome.Error;
 
+        // A job that started may end while it is waiting for the operator.
+        var alsoFrom = fromState == nameof(JobState.Running) ? nameof(JobState.AwaitingInput) : fromState;
         await db.Jobs
-            .Where(j => j.Id == job.Id && j.State == fromState)
+            .Where(j => j.Id == job.Id && (j.State == fromState || j.State == alsoFrom))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, state)
                 .SetProperty(j => j.Error, error)

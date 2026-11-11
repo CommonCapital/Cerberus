@@ -10,7 +10,7 @@ public sealed record SetApiKeyRequest(string Provider, string ApiKey);
 /// A Phase-1 scan request. <paramref name="Sca"/> toggles dependency/CVE
 /// analysis via OSV.dev (defaults on); set false for fully-offline runs.
 /// </summary>
-public sealed record ScanRequest(string? Path, bool? Sca = true, string? EngagementId = null);
+public sealed record ScanRequest(string? Path, bool? Sca = true, string? EngagementId = null, string? Exclusions = null);
 
 /// <summary>
 /// Request a Phase-2 compliance assessment. Either reuse an existing scan's
