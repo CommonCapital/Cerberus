@@ -196,7 +196,7 @@ public abstract class OpenAiCompatibleProvider(HttpClient httpClient) : IModelPr
     }
 
     /// <summary>The conversation in Chat Completions form: tool calls on the assistant message, one "tool" message per result.</summary>
-    internal static List<object> ToWireMessages(ChatRequest request)
+    public static List<object> ToWireMessages(ChatRequest request)
     {
         var messages = new List<object>();
         if (!string.IsNullOrWhiteSpace(request.System))
