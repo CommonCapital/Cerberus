@@ -128,13 +128,14 @@ public static class ApprovalEndpoints
                 approval.EngagementId, ct: ct);
         }
 
+        var release = false;
         if (approve)
         {
-            // Release the job to the workers. It is authorized again when it starts.
+            // Mark the job ready for the workers. It is authorized again when it starts.
             var released = await db.Jobs
                 .Where(j => j.Id == approval.JobId && j.State == nameof(JobState.AwaitingApproval))
                 .ExecuteUpdateAsync(s => s.SetProperty(j => j.State, nameof(JobState.Queued)), ct);
-            if (released == 1) await bus.PublishAsync(new JobMessage(approval.JobId), ct);
+            release = released == 1;
         }
         else
         {
@@ -147,8 +148,11 @@ public static class ApprovalEndpoints
                     .SetProperty(j => j.FinishedAt, now), ct);
         }
 
+        // Announce the decision and the job's new state BEFORE handing it to the workers:
+        // a worker can claim it instantly, and "Running" must not overtake "Queued".
         await events.PublishApprovalAsync(id, JobsHub.ApprovalResolved);
         await events.PublishAsync(approval.JobId);
+        if (release) await bus.PublishAsync(new JobMessage(approval.JobId), ct);
 
         var current = await db.ApprovalRequests.AsNoTracking().FirstAsync(a => a.Id == id, ct);
         return Results.Json(Describe(current), JsonOptions);
