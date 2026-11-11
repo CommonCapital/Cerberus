@@ -51,6 +51,7 @@ public static class ReviewEndpoints
         targetPath = r.TargetPath,
         scanId = r.ScanId,
         agentRunId = r.AgentRunId,
+        threatModelRunId = r.ThreatModelRunId,
         assessmentIds = JsonSerializer.Deserialize<List<string>>(r.AssessmentIds) ?? [],
         findingCount = r.FindingCount,
         createdAt = r.CreatedAt,

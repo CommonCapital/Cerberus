@@ -37,6 +37,56 @@ public class ReviewPlanTests
     }
 
     [Fact]
+    public void With_a_model_the_review_dispatches_the_sast_agent_alone_unless_other_agents_are_named()
+    {
+        var byDefault = ReviewPlan.Build("app", new ReviewJobParameters(["owasp-top10"], AgentModel: "llama3.1"), Catalogs());
+        var all = ReviewPlan.Build("app",
+            new ReviewJobParameters(["owasp-top10", "enterprise-sap"], AgentModel: "llama3.1", Agents: ["sast", "threat-model", "evidence"]), Catalogs());
+        var none = new ReviewJobParameters(["owasp-top10"], Agents: ["sast"]);   // no model: nothing to run them
+
+        Assert.Equal(["scan", "sast", "assess:owasp-top10", "report"], byDefault.Select(s => s.Id).ToArray());
+        Assert.Equal(
+            ["scan", "sast", "threat-model", "assess:owasp-top10", "evidence:owasp-top10", "assess:enterprise-sap", "evidence:enterprise-sap", "report"],
+            all.Select(s => s.Id).ToArray());
+        Assert.All(all.Where(s => s.Id is "sast" or "threat-model" || s.Id.StartsWith("evidence:")), s => Assert.Contains("no code leaves this machine", s.Detail));
+        Assert.Empty(none.AgentsToRun);
+    }
+
+    [Fact]
+    public void The_report_says_for_each_model_finding_what_the_scanner_saw_at_that_place()
+    {
+        Cerberus.Scanning.Finding Scanner(string file, int line, string? context = null, bool suppressed = false) =>
+            new($"rule:{file}:{line}", "Weak hash", Cerberus.Scanning.Severity.Medium, "crypto", null, file, line, "x", "medium",
+                Context: context, Suppressed: suppressed);
+        Cerberus.Api.Agents.AgentFinding Model(string file, int line) =>
+            new($"agent.sast:{file}:{line}", $"Problem in {file}", Cerberus.Scanning.Severity.High, "other", null, file, line, "x", "Because.", null);
+
+        List<Cerberus.Scanning.Finding> findings =
+        [
+            Scanner("svc/a.py", 10),                       // production
+            Scanner("svc/tests/t.py", 5, context: "test"), // test code
+            Scanner("svc/hidden.py", 7, suppressed: true), // the target marked it to be ignored
+        ];
+        var scan = new ScanRun(new Cerberus.Data.Scan { Id = "scan-1" },
+            new Cerberus.Scanning.ScanResult(3, findings), new Cerberus.Scanning.ScaResult(0, 0, [], false), findings);
+        var agentRun = new Cerberus.Data.AgentRun
+        {
+            Model = "llama3.1", Complete = true,
+            Findings = JsonSerializer.Serialize(new[] { Model("a.py", 11), Model("tests/t.py", 5), Model("hidden.py", 7), Model("new.py", 1) },
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }),
+        };
+
+        var report = ReviewReport.Write("svc", scan, [], [], DateTime.UtcNow, agentRun);
+
+        Assert.Contains("- **Reported by the model:** 4 (3 at places the scanner also flagged, 1 the model's alone)", report);
+        Assert.Contains("| `svc/a.py:11` | flagged it too |", report);                 // a line apart still counts as the same place
+        Assert.Contains("| `svc/tests/t.py:5` | flagged it too |", report);           // also when the scanner filed it under tests
+        Assert.Contains("| `svc/hidden.py:7` | flagged it, but the target suppressed it |", report);
+        Assert.Contains("| `svc/new.py:1` | model only |", report);
+        Assert.Contains("| `svc/a.py:10` | — | yes |", report);                        // and the scanner's table says so of the model
+    }
+
+    [Fact]
     public void The_description_is_a_numbered_list()
     {
         var plan = ReviewPlan.Build("app", new ReviewJobParameters(["owasp-top10"]), Catalogs());
@@ -197,5 +247,59 @@ public class ReviewApiTests(ApiHost host)
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/reviews/{reviewId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/reviews/{reviewId}/report")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await host.CreateClient().GetAsync("/reviews")).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_review_can_dispatch_every_agent_and_its_report_brings_their_results_together()
+    {
+        var (client, _) = await host.NewUserAsync();
+        await client.PutAsJsonAsync("/settings/permissions", new { allowedKinds = new[] { "run-plan" } });
+
+        var submitted = await Json(await client.PostAsJsonAsync("/jobs", new
+        {
+            type = "review", path = "svc", sca = false, exclusions = "honour", catalogs = new[] { "owasp-top10" },
+            agentModel = "llama3.1", agents = new[] { "evidence", "threat-model", "sast" },
+        }));
+        var job = await WaitForEndAsync(client, submitted.GetProperty("id").GetString()!);
+        Assert.Equal("Succeeded", job.GetProperty("state").GetString());
+
+        // The steps, in the order they run whatever order the agents were named in.
+        var steps = (await EventsAsync(client, job.GetProperty("id").GetString()!))
+            .Where(e => e.GetProperty("type").GetString() == "step")
+            .Select(e => e.GetProperty("data").GetProperty("id").GetString()!).Distinct().ToArray();
+        Assert.Equal(["scan", "sast", "threat-model", "assess:owasp-top10", "evidence:owasp-top10", "report"], steps);
+
+        var review = await client.GetFromJsonAsync<JsonElement>($"/reviews/{job.GetProperty("resultId").GetString()}");
+        var report = review.GetProperty("report").GetString()!;
+
+        // Correlation: the scanner and the model point at the same line, and each table says so.
+        Assert.Contains("- **Reported by the model:** 1 (1 at places the scanner also flagged, 0 the model's alone)", report);
+        Assert.Contains("| `svc/loader.py:2` | — | yes |", report);
+        Assert.Contains("| `svc/loader.py:2` | flagged it too |", report);
+
+        // The threat model, in short, pointing at the full one.
+        var threatModelRunId = review.GetProperty("threatModelRunId").GetString();
+        Assert.Contains("## Threat model (`llama3.1`)", report);
+        Assert.Contains("1 component(s), 1 threat(s): 1 medium.", report);
+        Assert.Contains($"agent run `{threatModelRunId}`", report);
+        Assert.Equal("threat-model", (await client.GetFromJsonAsync<JsonElement>($"/agent-runs/{threatModelRunId}")).GetProperty("agent").GetString());
+
+        // The evidence agent's suggestions: counted in the report, stored on the assessment, changing nothing.
+        Assert.Contains("- **OWASP Top 10 (2021):** 1 suggestion(s) by `llama3.1` — 1 \"Cannot tell\"", report);
+        var assessment = await client.GetFromJsonAsync<JsonElement>($"/compliance/{review.GetProperty("assessmentIds")[0].GetString()}");
+        Assert.Equal("Cannot tell", assessment.GetProperty("controls").EnumerateArray()
+            .Single(c => c.GetProperty("controlId").GetString() == "A01").GetProperty("suggestion").GetProperty("suggestion").GetString());
+        Assert.Equal(0, assessment.GetProperty("effective").GetProperty("operatorAnswered").GetInt32());
+    }
+
+    [Fact]
+    public async Task Agents_need_a_model_and_must_be_ones_a_review_can_dispatch()
+    {
+        var (client, _) = await host.NewUserAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", agents = new[] { "sast" } })).StatusCode);
+        var unknown = await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", agentModel = "llama3.1", agents = new[] { "sast", "exploit" } });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Contains("sast, threat-model, evidence", (await Json(unknown)).GetProperty("error").GetString());
     }
 }

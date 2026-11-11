@@ -13,7 +13,7 @@ public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
     string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs,
     int? MaxSteps = null, string? Instructions = null, string? AgentModel = null,
-    string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null);
+    string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null, List<string>? Agents = null);
 
 public sealed record JobMessageRequest(string? Text);
 
@@ -109,6 +109,18 @@ public static class JobEndpoints
             {
                 return BadRequest($"maxSteps must be between 1 and {Agents.SastAgent.MaxSteps}");
             }
+            List<string>? reviewAgents = null;
+            if (body.Agents is { Count: > 0 })
+            {
+                if (body.AgentModel is null) return BadRequest("agents needs agentModel: the model that runs them");
+                reviewAgents = body.Agents.Select(a => a.Trim().ToLowerInvariant()).Distinct().ToList();
+                if (reviewAgents.FirstOrDefault(a => !ReviewAgents.All.Contains(a)) is { } unknownAgent)
+                {
+                    return BadRequest($"Unknown agent '{unknownAgent}'. A review can dispatch: {string.Join(", ", ReviewAgents.All)}");
+                }
+                // In the order they run, whatever order they were named in.
+                reviewAgents = ReviewAgents.All.Where(reviewAgents.Contains).ToList();
+            }
             var reviewExclusions = string.IsNullOrWhiteSpace(body.Exclusions) ? ScanExclusions.Ask : body.Exclusions.Trim().ToLowerInvariant();
             if (!ScanExclusions.IsValid(reviewExclusions, allowAsk: true))
             {
@@ -116,7 +128,7 @@ public static class JobEndpoints
             }
 
             var review = new ReviewJobParameters(wanted, body.Sca ?? true, reviewExclusions, body.Model, body.MaxFindings ?? 15,
-                body.AgentModel, body.MaxSteps ?? Agents.SastAgent.DefaultSteps);
+                body.AgentModel, body.MaxSteps ?? Agents.SastAgent.DefaultSteps, reviewAgents);
             parameters = JsonSerializer.Serialize(review, JobTypes.Json);
 
             // Plan first: the operator approves exactly the steps that will run.
