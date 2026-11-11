@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Cerberus.Api.Audit;
 using Cerberus.Api.Auth;
+using Cerberus.Authorization;
 using Cerberus.Data;
 using Cerberus.Jobs;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,11 @@ namespace Cerberus.Api.Jobs;
 /// <summary>Why a job must wait for the operator, and what they are being asked to allow.</summary>
 public sealed record ApprovalNeed(string Kind, string Title, string Detail);
 
-public sealed record DecisionRequest(string? Note);
+/// <param name="Remember">
+/// With an approval: also "always allow" this kind of action from now on — for
+/// the job's engagement if it has one, otherwise for the user.
+/// </param>
+public sealed record DecisionRequest(string? Note, bool? Remember = null);
 
 public static class ApprovalKinds
 {
@@ -114,6 +119,15 @@ public static class ApprovalEndpoints
             $"{(approve ? "Approved" : "Denied")}: {approval.Title}" + (note is null ? "." : $" — {note}"),
             approval.EngagementId, ct: ct);
 
+        if (approve && body?.Remember == true)
+        {
+            var kinds = ReadKinds(approval);
+            await PermissionEndpoints.AllowAsync(db, userId, approval.EngagementId, kinds, ct);
+            await audit.AppendAsync(userId, "permissions.update", AuditOutcome.Ok,
+                $"Always allow from now on, for {(approval.EngagementId is null ? "the user" : "this engagement")}: {string.Join(", ", kinds)}.",
+                approval.EngagementId, ct: ct);
+        }
+
         if (approve)
         {
             // Release the job to the workers. It is authorized again when it starts.
@@ -146,6 +160,20 @@ public static class ApprovalEndpoints
 
     internal static object Describe(ApprovalRequest a) => new
     {
-        a.Id, a.JobId, a.EngagementId, a.Kind, a.Title, a.Detail, a.Status, a.Note, a.CreatedAt, a.DecidedAt,
+        a.Id, a.JobId, a.EngagementId, a.Kind, kinds = ReadKinds(a), a.Title, a.Detail, a.Status, a.Note, a.CreatedAt, a.DecidedAt,
     };
+
+    /// <summary>Every action kind the request covers; requests stored before this existed cover their one kind.</summary>
+    private static List<string> ReadKinds(ApprovalRequest a)
+    {
+        try
+        {
+            var kinds = JsonSerializer.Deserialize<List<string>>(string.IsNullOrWhiteSpace(a.Kinds) ? "[]" : a.Kinds) ?? [];
+            return kinds.Count > 0 ? kinds : [a.Kind];
+        }
+        catch (JsonException)
+        {
+            return [a.Kind];
+        }
+    }
 }

@@ -213,6 +213,9 @@ public class ApprovalRequest
     /// <summary>Machine-readable reason, e.g. "send-code-to-cloud-model".</summary>
     public string Kind { get; set; } = string.Empty;
 
+    /// <summary>Every action kind this request covers (JSON list); what "always allow" would remember.</summary>
+    public string Kinds { get; set; } = "[]";
+
     /// <summary>One line: what the operator is being asked to allow.</summary>
     public string Title { get; set; } = string.Empty;
 
@@ -274,6 +277,24 @@ public class OperatorQuestion
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
     public DateTime? ResolvedAt { get; set; }
+}
+
+/// <summary>
+/// A permission policy (PLAN.md §6.5): the user's default (EngagementId null)
+/// or one engagement's override.
+/// </summary>
+public class PermissionSetting
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+
+    /// <summary>Default | Ask.</summary>
+    public string Mode { get; set; } = "Default";
+
+    /// <summary>Action kinds that never ask (JSON list).</summary>
+    public string AllowedKinds { get; set; } = "[]";
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>

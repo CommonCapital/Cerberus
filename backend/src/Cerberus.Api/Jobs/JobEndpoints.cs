@@ -157,6 +157,32 @@ public static class JobEndpoints
             TargetPath = targetPath,
             Parameters = parameters,
         };
+        // Permission mode: which of the things this job does must the operator still approve?
+        var (permissions, permissionScope) = await PermissionEndpoints.ResolveAsync(db, userId, engagementId, ct);
+        var involved = new List<string> { ActionKinds.RunJob };
+        if (approvalNeed is not null) involved.Add(ActionKinds.SendCodeToCloudModel);
+        var unapproved = permissions.Unapproved(involved);
+
+        if (unapproved.Count == 0)
+        {
+            if (approvalNeed is not null)
+            {
+                // Would have asked, but the operator said "always allow" for this kind. Say so in the log.
+                await audit.AppendAsync(userId, "approval.auto", AuditOutcome.Allowed,
+                    $"Not asked: \"{approvalNeed.Title}\" is always allowed by the {permissionScope} permissions.",
+                    engagementId, targetPath, tier, ct);
+            }
+            approvalNeed = null;
+        }
+        else if (!unapproved.Contains(ActionKinds.SendCodeToCloudModel))
+        {
+            approvalNeed = new ApprovalNeed(
+                ActionKinds.RunJob,
+                $"Run a {type} of \"{targetPath}\"",
+                "The permission mode is \"ask\": every run waits for your approval, including passive ones. " +
+                "Approve to start this job; choose \"always allow\" to stop being asked about starting jobs.");
+        }
+
         if (approvalNeed is null)
         {
             db.Jobs.Add(job);
@@ -173,6 +199,7 @@ public static class JobEndpoints
             JobId = job.Id,
             EngagementId = engagementId,
             Kind = approvalNeed.Kind,
+            Kinds = JsonSerializer.Serialize(unapproved),
             Title = approvalNeed.Title,
             Detail = approvalNeed.Detail,
         };
