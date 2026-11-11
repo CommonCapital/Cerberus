@@ -57,9 +57,10 @@ const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assess
   review: "Security review",
   sast: "Code review by a model",
   evidence: "Compliance evidence by a model",
+  "threat-model": "Threat model by a model",
 };
 
-const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment" };
+const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment", "threat-model": "agent run" };
 
 export function RunView({ view, selectedOption, error, report }: Props) {
   const { colors } = useTheme();
@@ -170,7 +171,7 @@ export function RunView({ view, selectedOption, error, report }: Props) {
       ) : null}
 
       {/* Model output while it is being written */}
-      {textLines.length > 0 && (!isFinished(view) || job.type === "sast" || job.type === "evidence") ? (
+      {textLines.length > 0 && (!isFinished(view) || job.type === "sast" || job.type === "evidence") && !report ? (
         <box flexDirection="column" border={["left"]} borderColor={colors.thinkingBorder} paddingLeft={1}>
           {textLines.map((line, index) => (
             <text key={index} fg={colors.thinking} attributes={TextAttributes.DIM}>
@@ -205,6 +206,35 @@ export function RunView({ view, selectedOption, error, report }: Props) {
                 <text attributes={TextAttributes.DIM}>{opinion.findingId.split(":").slice(1).join(":")}</text>
               </box>
               <text attributes={TextAttributes.DIM}>  {opinion.reasoning}</text>
+            </box>
+          ))}
+        </box>
+      ) : null}
+
+      {/* The threat model as it is being built */}
+      {view.components.length > 0 || view.threats.length > 0 ? (
+        <box flexDirection="column">
+          <text attributes={TextAttributes.BOLD}>
+            Threat model ({view.components.length} component{view.components.length === 1 ? "" : "s"}, {view.threats.length} threat
+            {view.threats.length === 1 ? "" : "s"})
+          </text>
+          {view.threats.slice(-MAX_FINDINGS_SHOWN).map((threat) => (
+            <box key={threat.id} flexDirection="row" gap={1} height={1} overflow="hidden">
+              <text
+                fg={
+                  threat.risk === "critical" || threat.risk === "high"
+                    ? colors.error
+                    : threat.risk === "medium"
+                      ? colors.planMode
+                      : undefined
+                }
+              >
+                {threat.risk.toUpperCase().padEnd(8)}
+              </text>
+              <text>{threat.title}</text>
+              <text attributes={TextAttributes.DIM}>
+                {threat.category} · {threat.component}
+              </text>
             </box>
           ))}
         </box>
@@ -319,7 +349,7 @@ export function RunView({ view, selectedOption, error, report }: Props) {
         </text>
       ) : null}
 
-      {/* A review ends in a report: show it as written */}
+      {/* A review or a threat model ends in a report: show it as written */}
       {report ? (
         <box flexDirection="column" border={["top"]} borderColor={colors.dimSeparator}>
           {report.split("\n").map((line, index) => (

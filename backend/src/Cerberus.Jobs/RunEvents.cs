@@ -32,6 +32,12 @@ public static class RunEventTypes
     /// <summary>A model's suggested answer for one compliance control. Data: the suggestion.</summary>
     public const string Suggestion = "suggestion";
 
+    /// <summary>A security-relevant part of the system, recorded by the threat-model agent. Data: the component.</summary>
+    public const string ThreatComponent = "threat_component";
+
+    /// <summary>A threat recorded by the threat-model agent. Data: the threat.</summary>
+    public const string Threat = "threat";
+
     /// <summary>An agent calls a tool. Data: <c>{ id, name, input }</c>.</summary>
     public const string ToolCall = "tool_call";
 

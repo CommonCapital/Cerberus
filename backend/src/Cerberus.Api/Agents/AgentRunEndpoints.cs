@@ -13,6 +13,18 @@ public static class AgentRunEndpoints
         var runs = app.MapGroup("/agent-runs").AddEndpointFilter<RequireAuthFilter>();
         runs.MapGet("/", List);
         runs.MapGet("/{id}", Get);
+        runs.MapGet("/{id}/report", Report);
+    }
+
+    /// <summary>The run's written report, as Markdown. Only some agents write one.</summary>
+    private static async Task<IResult> Report(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var run = await db.AgentRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId, ct);
+        if (run is null) return Results.Json(new { error = "Agent run not found" }, statusCode: 404);
+        return run.Report.Length == 0
+            ? Results.Json(new { error = "This agent run has no report" }, statusCode: 404)
+            : Results.Text(run.Report, "text/markdown; charset=utf-8");
     }
 
     private static async Task<IResult> List(HttpContext http, CerberusDbContext db, int? limit, CancellationToken ct)
@@ -49,7 +61,9 @@ public static class AgentRunEndpoints
         findingCount = r.FindingCount,
         summary = r.Summary,
         createdAt = r.CreatedAt,
+        hasReport = r.Report.Length > 0,
         findings = withFindings ? JsonSerializer.Deserialize<JsonElement>(r.Findings) : (JsonElement?)null,
+        report = withFindings && r.Report.Length > 0 ? r.Report : null,
     };
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;

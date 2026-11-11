@@ -22,13 +22,19 @@ export const ReviewDialogContent = () => <TargetDialog type="review" />;
  */
 export const AgentReviewDialogContent = ({ model }: { model: string }) => <TargetDialog type="sast" model={model} />;
 
+/** Asks which code the model should build a threat model of, and starts the threat-model agent with it. */
+export const ThreatModelDialogContent = ({ model }: { model: string }) => <TargetDialog type="threat-model" model={model} />;
+
 const HINT = {
   scan: "enter to scan · secrets, weak crypto, injection sinks, vulnerable dependencies",
   review: "enter to plan a review · scan, compliance assessments, report — you approve the plan first",
   sast: "enter to start · the model reads the code (read-only) and reports what it finds; change it with /models",
+  "threat-model": "enter to start · the model maps components and threats (STRIDE) and writes them up; change it with /models",
 };
 
-const TargetDialog = ({ type, model }: { type: "scan" | "review" | "sast"; model?: string }) => {
+const LABEL = { scan: "scan", review: "review", sast: "code review", "threat-model": "threat model" };
+
+const TargetDialog = ({ type, model }: { type: "scan" | "review" | "sast" | "threat-model"; model?: string }) => {
   const inputRef = useRef<InputRenderable>(null);
   const [starting, setStarting] = useState(false);
   const { close } = useDialog();
@@ -43,14 +49,14 @@ const TargetDialog = ({ type, model }: { type: "scan" | "review" | "sast"; model
     const path = (inputRef.current?.value ?? "").trim() || ".";
     setStarting(true);
     cerberus
-      .submitJob(type === "sast" ? { type, path, model: model ?? "" } : { type, path })
+      .submitJob(type === "sast" || type === "threat-model" ? { type, path, model: model ?? "" } : { type, path })
       .then((job) => {
         close();
         navigate(`/runs/${job.id}`);
       })
       .catch((problem: unknown) => {
         setStarting(false);
-        show({ variant: "error", message: problem instanceof Error ? problem.message : `Could not start the ${type === "sast" ? "code review" : type}` });
+        show({ variant: "error", message: problem instanceof Error ? problem.message : `Could not start the ${LABEL[type]}` });
       });
   });
 

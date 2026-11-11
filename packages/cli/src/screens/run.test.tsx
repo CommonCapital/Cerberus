@@ -29,6 +29,8 @@ mock.module("../lib/cerberus/api", () => ({
     deny: async (id: string) => { calls.push(`deny ${id}`); },
     answer: async (id: string, selected: string[]) => { calls.push(`answer ${id} ${selected.join(",")}`); },
     cancelJob: async (id: string) => { calls.push(`cancel ${id}`); },
+    review: async (id: string) => { calls.push(`review ${id}`); return { report: "# Security review" }; },
+    agentRun: async (id: string) => { calls.push(`agentRun ${id}`); return { report: "# Threat model of `svc`" }; },
     sendMessage: async (id: string, text: string) => { calls.push(`message ${id} ${text}`); },
   },
 }));
@@ -211,4 +213,13 @@ test("a finished assessment run offers to open the assessment it produced", asyn
   ui.mockInput.pressKey("o");
   await ui.settle();
   expect(ui.captureCharFrame()).toContain("ASSESSMENT assess-7");
+});
+
+test("a finished threat model, like a finished review, loads and shows its report", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", { ...job("Succeeded"), type: "threat-model", resultId: "run-8" }]]));
+  await ui.settle();
+
+  expect(calls).toEqual(["agentRun run-8"]);
+  expect(ui.captureCharFrame()).toContain("# Threat model of `svc`");
 });

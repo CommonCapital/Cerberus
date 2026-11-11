@@ -8,6 +8,7 @@ import {
   EngagementDialogContent,
   MemoryDialogContent,
   ScopeDialogContent,
+  ThreatModelDialogContent,
   PermissionsDialogContent,
   AgentReviewDialogContent,
   ReviewDialogContent,
@@ -87,6 +88,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: `Code review by ${ctx.model}`,
         children: <AgentReviewDialogContent model={ctx.model} />,
+      })
+    },
+  },
+  {
+    name: "threatmodel",
+    description: "Have the current model map the code's components and threats",
+    value: "/threatmodel",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: `Threat model by ${ctx.model}`,
+        children: <ThreatModelDialogContent model={ctx.model} />,
       })
     },
   },

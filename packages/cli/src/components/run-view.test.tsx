@@ -254,3 +254,27 @@ test("an evidence run shows each suggested answer, its evidence, and that it is 
   expect(text).toContain("change nothing until you accept them");
   expect(text).toContain("Result: assessment assess-4");
 });
+
+test("a threat-model run shows the model as it is built, then its report", async () => {
+  const events: [string, unknown][] = [
+    ["state", job("Running", { type: "threat-model" })],
+    ["threat_component", { name: "Upload endpoint", kind: "entry-point" }],
+    ["threat_component", { name: "File store", kind: "data-store" }],
+    ["threat", { id: "T1", title: "Path traversal", category: "tampering", component: "Upload endpoint", risk: "critical" }],
+    ["threat", { id: "T2", title: "Disk filling", category: "denial-of-service", component: "File store", risk: "low" }],
+  ];
+  const building = await frame(view(events));
+
+  expect(building).toContain("Threat model by a model · services/api");
+  expect(building).toContain("Threat model (2 components, 2 threats)");
+  expect(building).toContain("CRITICAL Path traversal tampering · Upload endpoint");
+  expect(building).toContain("LOW      Disk filling denial-of-service · File store");
+
+  const finished = await frame(
+    view([...events, ["state", job("Succeeded", { type: "threat-model", resultId: "run-8" })]]),
+    0,
+    "# Threat model of `services/api`\n\n## Components",
+  );
+  expect(finished).toContain("Result: agent run run-8");
+  expect(finished).toContain("# Threat model of `services/api`");
+});
