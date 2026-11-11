@@ -11,7 +11,8 @@ namespace Cerberus.Api.Jobs;
 
 public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
-    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs);
+    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs,
+    int? MaxSteps = null, string? Instructions = null);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -85,8 +86,37 @@ public static class JobEndpoints
             sendsCodeOut = body.Model is not null &&
                 !Cerberus.Triage.FindingTriager.IsLocal(Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider);
         }
-        else
-        if (type == JobTypes.Triage)
+        else if (type == JobTypes.Sast)
+        {
+            // No default model: the caller decides where the code under review is sent.
+            if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+            }
+            if (body.MaxSteps is < 1 or > Agents.SastAgent.MaxSteps)
+            {
+                return BadRequest($"maxSteps must be between 1 and {Agents.SastAgent.MaxSteps}");
+            }
+            if (body.Instructions is { Length: > Agents.SastAgent.MaxInstructions })
+            {
+                return BadRequest($"instructions must be at most {Agents.SastAgent.MaxInstructions} characters");
+            }
+            var sast = new Agents.SastJobParameters(body.Model, body.MaxSteps ?? Agents.SastAgent.DefaultSteps,
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim());
+            parameters = JsonSerializer.Serialize(sast, JobTypes.Json);
+
+            var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
+            if (!Cerberus.Triage.FindingTriager.IsLocal(provider))
+            {
+                approvalNeed = new ApprovalNeed(
+                    ApprovalKinds.SendCodeToCloudModel,
+                    $"Let {body.Model} ({provider}) read the code under \"{targetPath}\"",
+                    $"The SAST agent decides for itself which files under \"{targetPath}\" to read, in up to {sast.MaxSteps} steps; " +
+                    $"whatever it reads is sent to {provider}. Credential-shaped values are masked before sending; other code is sent as is. " +
+                    "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
+            }
+        }
+        else if (type == JobTypes.Triage)
         {
             if (string.IsNullOrWhiteSpace(body.ScanId)) return BadRequest("scanId is required for a triage job");
             // No default model: the caller decides where the code under review is sent.

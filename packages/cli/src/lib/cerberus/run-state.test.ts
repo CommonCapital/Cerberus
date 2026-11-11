@@ -70,6 +70,20 @@ describe("applyEvents", () => {
     expect(isFinished(view)).toBe(true);
   });
 
+  test("a tool call gets its result when the tool answers", () => {
+    sequence = 0;
+    const { view } = applyEvents(emptyRun(), [
+      event("tool_call", { id: "c1", name: "readFile", input: { path: "a.py" } }),
+      event("tool_call", { id: "c2", name: "grep", input: { pattern: "eval" } }),
+      event("tool_result", { id: "c1", name: "readFile", output: "1\tx", truncated: false, isError: false }),
+    ]);
+
+    expect(view.tools).toEqual([
+      { id: "c1", name: "readFile", input: { path: "a.py" }, output: "1\tx", truncated: false, isError: false },
+      { id: "c2", name: "grep", input: { pattern: "eval" } },
+    ]);
+  });
+
   test("planned steps keep their order as they start and finish", () => {
     sequence = 0;
     const { view } = applyEvents(emptyRun(), [

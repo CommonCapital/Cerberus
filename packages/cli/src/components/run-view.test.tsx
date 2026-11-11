@@ -207,3 +207,30 @@ test("a finished review shows its report", async () => {
   expect(text).toContain("# Security review of `services/api`");
   expect(text).toContain("- **Findings:** 2");
 });
+
+test("an agent run shows each tool call, how it ended, its findings and its closing words", async () => {
+  const text = await frame(
+    view([
+      ["state", job("Succeeded", { type: "sast", resultId: "run-3" })],
+      ["tool_call", { id: "c1", name: "listDirectory", input: { path: "." } }],
+      ["tool_result", { id: "c1", name: "listDirectory", output: "{}", truncated: false, isError: false }],
+      ["tool_call", { id: "c2", name: "readFile", input: { path: "../etc/passwd" } }],
+      ["tool_result", { id: "c2", name: "readFile", output: "That path is outside the code under review.", truncated: false, isError: true }],
+      ["tool_call", { id: "c3", name: "grep", input: { pattern: "os\\.system", path: "src" } }],
+      ["tool_call", { id: "c4", name: "reportFinding", input: { file: "app.py", line: 9, title: "Command injection" } }],
+      ["tool_result", { id: "c4", name: "reportFinding", output: "Recorded as finding 1.", truncated: false, isError: false }],
+      ["finding", { id: "agent.sast:app.py:9", title: "Command injection", severity: "High", category: "injection", file: "app.py", line: 9 }],
+      ["text", { channel: "agent-5", text: "Reviewed the request handlers. One command injection." }],
+    ]),
+  );
+
+  expect(text).toContain("Code review by a model · services/api");
+  expect(text).toContain("Tool calls (4)");
+  expect(text).toContain("✔ listDirectory .");
+  expect(text).toContain("✘ readFile ../etc/passwd — That path is outside the code under review.");
+  expect(text).toContain("▶ grep os\\.system in src");
+  expect(text).toContain("✔ reportFinding app.py:9 Command injection");
+  expect(text).toContain("HIGH     Command injection app.py:9");
+  expect(text).toContain("Reviewed the request handlers. One command injection.");
+  expect(text).toContain("Result: agent run run-3");
+});

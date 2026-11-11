@@ -34,7 +34,7 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 
 | Area | Status |
 |---|---|
-| TypeScript CLI | ✅ chat, plus `/scan`, `/review` and `/runs` against the .NET backend |
+| TypeScript CLI | ✅ chat, plus `/scan`, `/review`, `/sast` and `/runs` against the .NET backend |
 | TypeScript server (`packages/server`) | 🗄 superseded by the .NET backend, which has all of its features; kept for reference |
 | .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
 | Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
@@ -109,6 +109,7 @@ With the backend and the CLI running, `/login`, and:
 
 - **`/scan`** — type a path under the backend's scan root; the scan starts as a background job and its run opens.
 - **`/review`** — type a path; Cerberus shows its plan (scan, compliance assessments against every catalog, report) and waits. `a` approves, `r` approves and stops asking about plans, `d` denies. The run then shows each step as it goes and the report at the end.
+- **`/sast`** — type a path; the model chosen with `/models` reads that code (read-only) and reports vulnerabilities. You see each file it opens and each search it makes as it goes. With a cloud model the run first asks for approval, because the code it reads is sent to the provider. Its findings are a model's candidates, kept apart from scans.
 - **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
 
 On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on).

@@ -16,12 +16,19 @@ export const ScanDialogContent = () => <TargetDialog type="scan" />;
  */
 export const ReviewDialogContent = () => <TargetDialog type="review" />;
 
+/**
+ * Asks what the model should review and starts the SAST agent with it. With a
+ * cloud model the run opens waiting for approval: the code it reads is sent out.
+ */
+export const AgentReviewDialogContent = ({ model }: { model: string }) => <TargetDialog type="sast" model={model} />;
+
 const HINT = {
   scan: "enter to scan · secrets, weak crypto, injection sinks, vulnerable dependencies",
   review: "enter to plan a review · scan, compliance assessments, report — you approve the plan first",
+  sast: "enter to start · the model reads the code (read-only) and reports what it finds; change it with /models",
 };
 
-const TargetDialog = ({ type }: { type: "scan" | "review" }) => {
+const TargetDialog = ({ type, model }: { type: "scan" | "review" | "sast"; model?: string }) => {
   const inputRef = useRef<InputRenderable>(null);
   const [starting, setStarting] = useState(false);
   const { close } = useDialog();
@@ -36,14 +43,14 @@ const TargetDialog = ({ type }: { type: "scan" | "review" }) => {
     const path = (inputRef.current?.value ?? "").trim() || ".";
     setStarting(true);
     cerberus
-      .submitJob({ type, path })
+      .submitJob(type === "sast" ? { type, path, model: model ?? "" } : { type, path })
       .then((job) => {
         close();
         navigate(`/runs/${job.id}`);
       })
       .catch((problem: unknown) => {
         setStarting(false);
-        show({ variant: "error", message: problem instanceof Error ? problem.message : `Could not start the ${type}` });
+        show({ variant: "error", message: problem instanceof Error ? problem.message : `Could not start the ${type === "sast" ? "code review" : type}` });
       });
   });
 

@@ -6,6 +6,7 @@ import {
   type Finding,
   type RunView as RunViewModel,
   type Step,
+  type ToolActivity,
 } from "../lib/cerberus/run-state";
 import type { JobState } from "../lib/cerberus/api";
 
@@ -15,6 +16,20 @@ import type { JobState } from "../lib/cerberus/api";
 
 const MAX_FINDINGS_SHOWN = 10;
 const MAX_TEXT_LINES = 6;
+const MAX_TOOLS_SHOWN = 8;
+
+/** A tool call on one line: its name and the argument that says most about it. */
+export function describeTool(tool: ToolActivity): string {
+  const input = (tool.input ?? {}) as Record<string, unknown>;
+  const main =
+    tool.name === "reportFinding"
+      ? `${String(input.file ?? "?")}:${String(input.line ?? "?")} ${String(input.title ?? "")}`
+      : (["pattern", "query", "name", "path"] as const)
+          .filter((key) => typeof input[key] === "string")
+          .map((key) => String(input[key]))
+          .join(" in ");
+  return `${tool.name}${main ? ` ${main}` : ""}`;
+}
 
 type Props = {
   view: RunViewModel;
@@ -40,9 +55,10 @@ const STEP_MARK: Record<Step["status"], string> = { pending: "○", running: "�
 
 const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assessment", triage: "Finding triage",
   review: "Security review",
+  sast: "Code review by a model",
 };
 
-const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review" };
+const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run" };
 
 export function RunView({ view, selectedOption, error, report }: Props) {
   const { colors } = useTheme();
@@ -108,6 +124,25 @@ export function RunView({ view, selectedOption, error, report }: Props) {
         </box>
       ) : null}
 
+      {/* What the agent is doing: its tool calls, latest last */}
+      {view.tools.length > 0 ? (
+        <box flexDirection="column">
+          <text attributes={TextAttributes.BOLD}>Tool calls ({view.tools.length})</text>
+          {view.tools.length > MAX_TOOLS_SHOWN ? (
+            <text attributes={TextAttributes.DIM}>  … {view.tools.length - MAX_TOOLS_SHOWN} earlier</text>
+          ) : null}
+          {view.tools.slice(-MAX_TOOLS_SHOWN).map((tool) => (
+            <box key={tool.id} flexDirection="row" gap={1} height={1} overflow="hidden">
+              <text fg={tool.output === undefined ? colors.info : tool.isError ? colors.error : colors.success}>
+                {tool.output === undefined ? "▶" : tool.isError ? "✘" : "✔"}
+              </text>
+              <text>{describeTool(tool)}</text>
+              {tool.isError && tool.output ? <text attributes={TextAttributes.DIM}>— {tool.output}</text> : null}
+            </box>
+          ))}
+        </box>
+      ) : null}
+
       {/* Findings, as they arrive */}
       {view.findings.length > 0 ? (
         <box flexDirection="column">
@@ -134,7 +169,7 @@ export function RunView({ view, selectedOption, error, report }: Props) {
       ) : null}
 
       {/* Model output while it is being written */}
-      {textLines.length > 0 && !isFinished(view) ? (
+      {textLines.length > 0 && (!isFinished(view) || job.type === "sast") ? (
         <box flexDirection="column" border={["left"]} borderColor={colors.thinkingBorder} paddingLeft={1}>
           {textLines.map((line, index) => (
             <text key={index} fg={colors.thinking} attributes={TextAttributes.DIM}>

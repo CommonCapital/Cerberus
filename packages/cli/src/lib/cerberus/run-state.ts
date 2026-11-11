@@ -23,6 +23,17 @@ export type TriageOpinion = {
   model: string;
 };
 
+/** One tool call of an agent, with its result once it has answered. */
+export type ToolActivity = {
+  id: string;
+  name: string;
+  input: unknown;
+  /** Undefined while the tool is still running. */
+  output?: string;
+  truncated?: boolean;
+  isError?: boolean;
+};
+
 export type RunView = {
   job: Job | null;
   lastSequence: number;
@@ -32,6 +43,8 @@ export type RunView = {
   /** Model output per channel, in arrival order of the channels. */
   text: { channel: string; text: string }[];
   triage: TriageOpinion[];
+  /** What the agent did, in order. */
+  tools: ToolActivity[];
   notes: string[];
   /** Set while the run waits for the operator's decision. */
   approval: Approval | null;
@@ -49,6 +62,7 @@ export const emptyRun = (): RunView => ({
   findings: [],
   text: [],
   triage: [],
+  tools: [],
   notes: [],
   approval: null,
   question: null,
@@ -119,6 +133,14 @@ function applyOne(view: RunView, event: RunEvent): RunView {
     case "triage":
       next.triage = [...view.triage, data as unknown as TriageOpinion];
       break;
+    case "tool_call":
+      next.tools = [...view.tools, data as unknown as ToolActivity];
+      break;
+    case "tool_result": {
+      const result = data as unknown as ToolActivity;
+      next.tools = view.tools.map((tool) => (tool.id === result.id ? { ...tool, ...result, input: tool.input } : tool));
+      break;
+    }
     case "note":
     case "truncated":
       next.notes = [...view.notes, String(data.message ?? "")];

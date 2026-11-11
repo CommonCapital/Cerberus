@@ -187,6 +187,11 @@ public sealed class JobWorker(
                 await services.GetRequiredService<TriageRunner>().RunAsync(job.UserId, triage, ct, reporter);
                 return triage.ScanId;
 
+            case JobTypes.Sast:
+                var sast = JsonSerializer.Deserialize<Agents.SastJobParameters>(job.Parameters, JobTypes.Json)
+                    ?? throw new InvalidOperationException("The job has no parameters.");
+                return (await services.GetRequiredService<Agents.SastAgentRunner>().RunAsync(job, sast, reporter, ct)).Id;
+
             case JobTypes.Review:
                 var review = JsonSerializer.Deserialize<ReviewJobParameters>(job.Parameters, JobTypes.Json)
                     ?? throw new InvalidOperationException("The job has no parameters.");
@@ -245,7 +250,10 @@ public static class JobTypes
     /// <summary>A planned, multi-step review: scan, optional triage, assessments, report. The result id is the review.</summary>
     public const string Review = "review";
 
-    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review];
+    /// <summary>The SAST agent: a model reads the code and reports vulnerabilities. The result id is the agent run.</summary>
+    public const string Sast = "sast";
+
+    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review, Sast];
 
     public static readonly JsonSerializerOptions Json = new()
     {
