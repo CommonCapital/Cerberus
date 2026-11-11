@@ -6,7 +6,9 @@ using Cerberus.Skills;
 
 namespace Cerberus.Api.Chat;
 
-public sealed record ChatRun(string Mode, string Model, List<JsonObject> Messages, ModelCredentials Credentials);
+/// <param name="Memory">The operator's standing instructions and notes, as a prompt section; empty for none.</param>
+public sealed record ChatRun(
+    string Mode, string Model, List<JsonObject> Messages, ModelCredentials Credentials, string Memory = "");
 
 /// <param name="Messages">The conversation including the reply.</param>
 /// <param name="Complete">
@@ -45,7 +47,7 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
 
         var turns = UiMessages.ToTurns(messages);
         var tools = ChatTools.For(run.Mode);
-        var system = SystemPrompt.Build(run.Mode);
+        var system = SystemPrompt.Build(run.Mode) + (run.Memory.Length > 0 ? "\n\n" + run.Memory : "");
         var provider = resolver.Resolve(run.Model);
 
         int? inputTokens = null, outputTokens = null;

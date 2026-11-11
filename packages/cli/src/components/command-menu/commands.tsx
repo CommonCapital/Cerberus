@@ -2,6 +2,7 @@ import { SUPPORTED_CHAT_MODELS } from "@nightcode/shared";
 import { 
   AgentsDialogContent,
   ModelsDialogContent,
+  MemoryDialogContent,
   PermissionsDialogContent,
   AgentReviewDialogContent,
   ReviewDialogContent,
@@ -103,6 +104,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: "Permissions",
         children: <PermissionsDialogContent />,
+      })
+    },
+  },
+  {
+    name: "memory",
+    description: "See, add or forget what agents remember between runs",
+    value: "/memory",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Memory",
+        children: <MemoryDialogContent />,
       })
     },
   },

@@ -345,6 +345,33 @@ public class AgentRun
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// Something remembered across runs: a standing instruction from the
+/// operator, or a note (by the operator, or by an agent during a run).
+/// </summary>
+public class MemoryNote
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+
+    /// <summary>Null: applies to all the user's work. Set: only under that engagement.</summary>
+    public string? EngagementId { get; set; }
+
+    /// <summary>instruction | note.</summary>
+    public string Kind { get; set; } = "note";
+
+    /// <summary>operator | agent.</summary>
+    public string Source { get; set; } = "operator";
+
+    /// <summary>For a note about one target: its normalized path. Null: about no target in particular.</summary>
+    public string? TargetPath { get; set; }
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>The job whose agent wrote it, for agent notes.</summary>
+    public string? JobId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

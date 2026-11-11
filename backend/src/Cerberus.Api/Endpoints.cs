@@ -618,10 +618,12 @@ public static class Endpoints
         }
 
         var credentials = await keys.ResolveCredentialsAsync(userId, ct);
+        // What the operator asked to be remembered: their instructions and their notes about no target in particular.
+        var memory = await Memory.PromptSectionAsync(db, userId, engagementId: null, targetPath: null, ct);
 
         UiMessageStreamWriter.ApplyHeaders(http.Response);
         var result = await runner.RunAsync(
-            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials), ct);
+            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials, memory), ct);
 
         // Stored only once the reply is whole. While tool calls are waiting for the
         // client, the client holds the message and sends it back with the results.

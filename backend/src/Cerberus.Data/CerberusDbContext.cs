@@ -19,6 +19,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<PermissionSetting> PermissionSettings => Set<PermissionSetting>();
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
+    public DbSet<MemoryNote> MemoryNotes => Set<MemoryNote>();
     public DbSet<OperatorQuestion> OperatorQuestions => Set<OperatorQuestion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -96,6 +97,12 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
         {
             e.HasKey(r => r.Id);
             e.HasIndex(r => new { r.UserId, r.CreatedAt });
+        });
+
+        modelBuilder.Entity<MemoryNote>(e =>
+        {
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => new { m.UserId, m.CreatedAt });
         });
 
         modelBuilder.Entity<PermissionSetting>(e =>

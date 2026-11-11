@@ -72,6 +72,18 @@ export type Permissions = {
   kinds: { kind: string; description: string; asks: boolean }[];
 };
 
+export type MemoryEntry = {
+  id: string;
+  kind: "instruction" | "note";
+  /** Who wrote it. An agent's note is a hint for later runs, not an instruction. */
+  source: "operator" | "agent";
+  text: string;
+  engagementId: string | null;
+  targetPath: string | null;
+  jobId: string | null;
+  createdAt: string;
+};
+
 export type Catalog = { id: string; name: string; version: string; controlCount: number };
 
 export class ApiError extends Error {
@@ -177,5 +189,9 @@ export const cerberus = {
   answer: (id: string, selected: string[], text?: string) =>
     request<Question>("POST", `/questions/${id}/answer`, { selected, text }),
   review: (id: string) => request<Review>("GET", `/reviews/${id}`),
+  memory: () => request<MemoryEntry[]>("GET", "/memory"),
+  remember: (kind: "instruction" | "note", text: string, targetPath?: string) =>
+    request<MemoryEntry>("POST", "/memory", { kind, text, targetPath }),
+  forget: (id: string) => request<null>("DELETE", `/memory/${id}`),
   catalogs: () => request<Catalog[]>("GET", "/compliance/catalogs"),
 };

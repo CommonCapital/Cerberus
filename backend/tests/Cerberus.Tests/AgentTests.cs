@@ -310,6 +310,7 @@ public class SastAgentApiTests(ApiHost host)
             "tool_call:listDirectory", "tool_result:listDirectory",
             "tool_call:readFile", "tool_result:readFile",
             "tool_call:reportFinding", "tool_result:reportFinding",
+            "tool_call:remember", "tool_result:remember",
         ], tools);
         var read = events.First(e => e.GetProperty("type").GetString() == "tool_call" && e.GetProperty("data").GetProperty("name").GetString() == "readFile");
         Assert.Equal("loader.py", read.GetProperty("data").GetProperty("input").GetProperty("path").GetString());
@@ -320,7 +321,7 @@ public class SastAgentApiTests(ApiHost host)
         // The stored run.
         var run = await client.GetFromJsonAsync<JsonElement>($"/agent-runs/{job.GetProperty("resultId").GetString()}");
         Assert.True(run.GetProperty("complete").GetBoolean());
-        Assert.Equal(("sast", "llama3.1", 3, 1), (run.GetProperty("agent").GetString(), run.GetProperty("model").GetString(),
+        Assert.Equal(("sast", "llama3.1", 4, 1), (run.GetProperty("agent").GetString(), run.GetProperty("model").GetString(),
             run.GetProperty("toolCalls").GetInt32(), run.GetProperty("findingCount").GetInt32()));
         var finding = run.GetProperty("findings")[0];
         Assert.Equal("obj = pickle.loads(blob)", finding.GetProperty("evidence").GetString());

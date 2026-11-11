@@ -169,6 +169,12 @@ public sealed partial class MockProvider : IModelProvider
             }
         }
 
+        // Before closing: leave one note for the next run, if it can.
+        if (read.Count > 0 && request.Tools.Any(t => t.Name == "remember") && calls.All(c => c.Name != "remember"))
+        {
+            return ("remember", new { note = $"The dev model read these top-level files on an earlier run: {string.Join(", ", read)}." }, null);
+        }
+
         return (null, null,
             $"Read {read.Count} file(s) and reported {reported.Count} finding(s). This was the dev model following fixed rules, not a review.");
     }
