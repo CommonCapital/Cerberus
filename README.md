@@ -117,6 +117,7 @@ With the backend and the CLI running, `/login`, and:
 - **`/scope`** — the directories the current engagement may be run on. Type a path to add it — doing so is your statement that you own that code or are authorized to test it. With nothing typed, Enter removes the highlighted one.
 - **`/abort`** — the kill switch: after one confirmation, stops every queued and running job under the current engagement and ends it for good.
 - **`/memory`** — what Cerberus remembers between runs: your standing instructions, your notes, and notes agents left (marked as a model's). Type to add one and choose note or instruction; with nothing typed, Enter forgets the highlighted entry.
+- **Notices** — wherever you are in the CLI, a notice appears when one of your runs starts waiting for your approval or answer, and when one ends; the status bar shows how many are waiting. The run you are looking at is not announced.
 - **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
 
 On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on).
