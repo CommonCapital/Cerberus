@@ -1,0 +1,15 @@
+# Keep build contexts small and free of local state and secrets.
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/dp-keys
+**/.DS_Store
+**/TestResults

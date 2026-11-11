@@ -54,10 +54,18 @@ builder.Services.AddSingleton<ScaService>();
 
 // --- Phase 2 compliance (ESAP/ISO/OWASP catalogs shipped as data) ----------
 var catalogRoot = Environment.GetEnvironmentVariable("CERBERUS_CATALOG_ROOT")
-    ?? ResolveCatalogRoot(builder.Environment.ContentRootPath);
+    ?? ResolveUpwards(builder.Environment.ContentRootPath, "catalogs");
 builder.Services.AddSingleton(new CatalogOptions(catalogRoot));
 builder.Services.AddSingleton<CatalogLoader>();
 builder.Services.AddSingleton<ComplianceEngine>();
+
+// --- Skills library (vendored under security-skills/; agents search and load from it) ---
+var skillsRoot = Environment.GetEnvironmentVariable("CERBERUS_SKILLS_ROOT")
+    ?? Path.Combine(ResolveUpwards(builder.Environment.ContentRootPath, "security-skills"), "skills");
+builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
+builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
+builder.Services.AddSingleton<SkillAdvisor>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
 
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();
@@ -93,6 +101,27 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 
 var app = builder.Build();
 
+// Errors are JSON, as clients of this API expect: a request that cannot be read is a
+// 400 "Invalid request body", and anything unexpected is a 500 without internals.
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next(context);
+    }
+    catch (BadHttpRequestException) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = "Invalid request body" });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException && !context.Response.HasStarted)
+    {
+        app.Logger.LogError(ex, "Unhandled server error");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
+    }
+});
+
 // Create the schema on first run, and additively upgrade an existing local database.
 using (var scope = app.Services.CreateScope())
 {
@@ -105,11 +134,15 @@ app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapApprovalEndpoints();
 app.MapQuestionEndpoints();
+app.MapSkillEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
-app.Run($"http://localhost:{port}");
+// Listens on this machine only by default. A container sets CERBERUS_BIND=0.0.0.0
+// so the port can be published — and publishes it to localhost only (docker-compose.yml).
+var bind = Environment.GetEnvironmentVariable("CERBERUS_BIND") ?? "localhost";
+app.Run($"http://{bind}:{port}");
 
 static int EnvInt(string name, int fallback) =>
     int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : fallback;
@@ -118,18 +151,18 @@ static double EnvDouble(string name, double fallback) =>
     double.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float,
         System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0 ? value : fallback;
 
-// Walk up from the app's content root to find the repo's catalogs/ directory.
-static string ResolveCatalogRoot(string contentRoot)
+// Walk up from the app's content root to find a directory of the repository (catalogs/, security-skills/).
+static string ResolveUpwards(string contentRoot, string name)
 {
     var dir = new DirectoryInfo(contentRoot);
     while (dir is not null)
     {
-        var candidate = Path.Combine(dir.FullName, "catalogs");
+        var candidate = Path.Combine(dir.FullName, name);
         if (Directory.Exists(candidate)) return candidate;
         dir = dir.Parent;
     }
-    // Fall back to a catalogs/ next to the content root (created on demand / empty).
-    return Path.Combine(contentRoot, "catalogs");
+    // Not found: a path next to the content root, which simply yields an empty set.
+    return Path.Combine(contentRoot, name);
 }
 
 // Exposed so the integration tests can host the API in-process.

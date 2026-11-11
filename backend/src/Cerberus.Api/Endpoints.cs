@@ -510,9 +510,16 @@ public static class Endpoints
     }
 
     private static bool IsValid(CredentialsRequest body) =>
-        !string.IsNullOrWhiteSpace(body.Email)
-        && body.Email.Contains('@')
-        && body.Password?.Length >= 6;
+        IsEmail(body.Email) && body.Password?.Length >= 6;
+
+    /// <summary>A plain address of the form local@domain.tld — what the TypeScript server's schema accepted.</summary>
+    private static bool IsEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 254 || value.Any(char.IsWhiteSpace)) return false;
+        if (!System.Net.Mail.MailAddress.TryCreate(value, out var address) || address.Address != value) return false;
+        var host = address.Host;
+        return host.Contains('.') && !host.StartsWith('.') && !host.EndsWith('.') && !host.Contains("..");
+    }
 
     // --- sessions -----------------------------------------------------------
 
@@ -547,6 +554,10 @@ public static class Endpoints
     private static async Task<IResult> CreateSession(CreateSessionRequest body, HttpContext http, CerberusDbContext db, CancellationToken ct)
     {
         var userId = UserId(http);
+        if (body.Title is null)
+        {
+            return Results.Json(new { error = "Invalid request body" }, statusCode: 400);
+        }
         var session = new Session { UserId = userId, Title = body.Title };
         db.Sessions.Add(session);
         await db.SaveChangesAsync(ct);
@@ -565,10 +576,27 @@ public static class Endpoints
     // --- chat (AI-SDK UI message stream) ------------------------------------
 
     private static async Task StreamChat(
-        UiChatRequest body, HttpContext http, CerberusDbContext db, IModelProviderResolver resolver,
+        UiChatRequest body, HttpContext http, CerberusDbContext db, ChatRunner runner,
         ApiKeyService keys, CancellationToken ct)
     {
         var userId = UserId(http);
+
+        // Same request contract as the TypeScript server: id, at least one well-formed
+        // message, a mode of BUILD or PLAN, and a supported model.
+        var mode = body.Mode?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(body.Id) || body.Messages is not { Count: > 0 } ||
+            !body.Messages.All(UiMessages.IsValid) || !ChatTools.IsValidMode(mode))
+        {
+            http.Response.StatusCode = 400;
+            await http.Response.WriteAsJsonAsync(new { error = "Invalid request body" }, ct);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(body.Model) || !ModelRegistry.IsSupported(body.Model))
+        {
+            http.Response.StatusCode = 400;
+            await http.Response.WriteAsJsonAsync(new { error = $"Unsupported model: {body.Model}" }, ct);
+            return;
+        }
 
         var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == body.Id && s.UserId == userId, ct);
         if (session is null)
@@ -578,84 +606,31 @@ public static class Endpoints
             return;
         }
 
-        if (!ModelRegistry.IsSupported(body.Model))
+        // Incoming messages replace stored ones with the same id, and are stamped with the mode and model in use.
+        var messages = UiMessages.Merge(ParseStoredMessages(session.Messages), body.Messages);
+        var incomingIds = body.Messages.Select(m => m.GetProperty("id").GetString()).ToHashSet();
+        foreach (var message in messages.Where(m => incomingIds.Contains(UiMessages.IdOf(m))))
         {
-            http.Response.StatusCode = 400;
-            await http.Response.WriteAsJsonAsync(new { error = $"Unsupported model: {body.Model}" }, ct);
-            return;
+            var metadata = message["metadata"] as System.Text.Json.Nodes.JsonObject ?? [];
+            metadata["mode"] = mode;
+            metadata["model"] = body.Model;
+            message["metadata"] = metadata;
         }
 
-        var history = ParseStoredMessages(session.Messages);
-        var promptMessages = BuildPromptMessages(history, body.Messages);
-        var system = SystemPrompt.Build(body.Mode);
+        var credentials = await keys.ResolveCredentialsAsync(userId, ct);
 
         UiMessageStreamWriter.ApplyHeaders(http.Response);
-        var writer = new UiMessageStreamWriter(http.Response);
+        var result = await runner.RunAsync(
+            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials), ct);
 
-        var assistantId = Guid.NewGuid().ToString("n");
-        const string textId = "0";
-        var startedAt = DateTime.UtcNow;
-        var assistant = new StringBuilder();
-
-        await writer.StartAsync(assistantId, new { mode = body.Mode, model = body.Model }, ct);
-        await writer.StartStepAsync(ct);
-
-        try
+        // Stored only once the reply is whole. While tool calls are waiting for the
+        // client, the client holds the message and sends it back with the results.
+        if (result.Complete)
         {
-            var provider = resolver.Resolve(body.Model);
-            var credentials = await keys.ResolveCredentialsAsync(userId, ct);
-            var completion = new ChatCompletionRequest(body.Model, promptMessages, system, credentials);
-
-            await writer.TextStartAsync(textId, ct);
-            await foreach (var delta in provider.StreamAsync(completion, ct))
-            {
-                assistant.Append(delta);
-                await writer.TextDeltaAsync(textId, delta, ct);
-            }
-            await writer.TextEndAsync(textId, ct);
+            session.Messages = JsonSerializer.Serialize(result.Messages, JsonOptions);
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(CancellationToken.None);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            await writer.ErrorAsync(ex.Message, ct);
-            await writer.DoneAsync(ct);
-            return;
-        }
-
-        await writer.FinishStepAsync(ct);
-        var durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
-        await writer.FinishAsync(new { mode = body.Mode, model = body.Model, durationMs }, ct);
-
-        await PersistAsync(db, session, history, body, assistantId, assistant.ToString(), durationMs, ct);
-
-        await writer.DoneAsync(ct);
-    }
-
-    private static async Task PersistAsync(
-        CerberusDbContext db, Session session, List<JsonElement> history, UiChatRequest body,
-        string assistantId, string assistantText, long durationMs, CancellationToken ct)
-    {
-        var merged = new List<object>();
-        foreach (var h in history) merged.Add(h);
-        foreach (var m in body.Messages)
-        {
-            merged.Add(new
-            {
-                id = m.Id,
-                role = m.Role,
-                parts = m.Parts.Select(p => new { type = p.Type, text = p.Text }),
-            });
-        }
-        merged.Add(new
-        {
-            id = assistantId,
-            role = "assistant",
-            parts = new[] { new { type = "text", text = assistantText } },
-            metadata = new { mode = body.Mode, model = body.Model, durationMs },
-        });
-
-        session.Messages = JsonSerializer.Serialize(merged, JsonOptions);
-        session.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
     }
 
     // --- helpers ------------------------------------------------------------
@@ -678,41 +653,4 @@ public static class Endpoints
         }
         return [];
     }
-
-    private static List<ChatMessage> BuildPromptMessages(List<JsonElement> history, List<UiMessage> incoming)
-    {
-        var result = new List<ChatMessage>();
-        foreach (var h in history)
-        {
-            var text = ExtractText(h);
-            if (!string.IsNullOrEmpty(text)) result.Add(new ChatMessage(RoleOf(h), text));
-        }
-        foreach (var m in incoming)
-        {
-            var text = string.Concat(m.Parts.Where(p => p.Type == "text").Select(p => p.Text));
-            if (!string.IsNullOrEmpty(text)) result.Add(new ChatMessage(m.Role, text));
-        }
-        return result;
-    }
-
-    private static string ExtractText(JsonElement message)
-    {
-        if (!message.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
-        var sb = new StringBuilder();
-        foreach (var part in parts.EnumerateArray())
-        {
-            if (part.TryGetProperty("type", out var type) && type.GetString() == "text" &&
-                part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
-            {
-                sb.Append(text.GetString());
-            }
-        }
-        return sb.ToString();
-    }
-
-    private static string RoleOf(JsonElement message) =>
-        message.TryGetProperty("role", out var role) ? role.GetString() ?? "user" : "user";
 }

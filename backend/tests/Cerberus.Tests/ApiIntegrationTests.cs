@@ -49,6 +49,9 @@ public sealed class ApiHost : IDisposable
             ? """{"verdict":"true_positive","reasoning":"pickle.loads runs on data from outside.","remediation":"Use JSON."}"""
             : """{"verdict":"false_positive","reasoning":"Not reachable.","remediation":""}""");
 
+    /// <summary>Behind the Ollama model ids in tests: follows the dev model's rules, so it can call tools.</summary>
+    public RuleFollowingProvider Tools { get; } = new(Cerberus.Core.Models.ModelProvider.Ollama);
+
     /// <summary>Stands in for the Anthropic API; records every request that would have left the machine.</summary>
     public ScriptedProvider Cloud { get; } = new(Cerberus.Core.Models.ModelProvider.Anthropic,
         _ => """{"verdict":"true_positive","reasoning":"Reviewed remotely.","remediation":"Fix it."}""");
@@ -78,8 +81,9 @@ public sealed class ApiHost : IDisposable
                 services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Cloud);
                 services.AddSingleton<Cerberus.Core.Models.IModelProvider>(
                     new ScriptedProvider(Cerberus.Core.Models.ModelProvider.OpenAI, _ => throw new InvalidOperationException("not used")));
-                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(
-                    new ScriptedProvider(Cerberus.Core.Models.ModelProvider.Ollama, _ => throw new InvalidOperationException("local models are never run in tests")));
+                // Ollama model ids are served by a rule-following stand-in that can call tools
+                // (the same rules as the "echo" dev model). No local model is ever run.
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Tools);
             }));
 
     /// <summary>

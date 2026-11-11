@@ -20,7 +20,8 @@ public sealed record TriageJobParameters(string ScanId, string Model, int MaxFin
 /// run keeps what it finished. Authorization is the caller's job.
 /// </summary>
 public sealed class TriageRunner(
-    FindingTriager triager, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions)
+    FindingTriager triager, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions,
+    SkillAdvisor advisor)
 {
     public const int MaxFindingsLimit = 100;
 
@@ -62,7 +63,10 @@ public sealed class TriageRunner(
 
                 // The model's reply is streamed as it is written, on a channel named after the finding.
                 var result = await triager.TriageAsync(finding, lines, parameters.Model, credentials, DateTime.UtcNow, ct,
-                    delta => reporter.TextAsync(finding.Id, delta));
+                    delta => reporter.TextAsync(finding.Id, delta),
+                    // The reviewer works at the passive tier, so it is only offered skills that tier may load.
+                    advisor.ForFinding(finding, CapabilityTier.T0)
+                        .Select(s => new SkillReference(s.Name, s.Description)).ToList());
                 await reporter.FlushTextAsync();
                 results[result.FindingId] = result;   // a newer opinion replaces an older one
                 done++;

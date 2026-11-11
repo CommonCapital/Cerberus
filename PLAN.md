@@ -12,18 +12,18 @@
 2. [Core engineering principles](#2-core-engineering-principles)
 3. [The authorization & safety spine (non-negotiable)](#3-the-authorization--safety-spine-non-negotiable)
 4. [Target architecture](#4-target-architecture)
-5. [Portable seams: local-first, Azure in production](#5-portable-seams-local-first-azure-in-production)
+5. [Portable seams (local implementations)](#5-portable-seams-local-implementations)
 6. [Multi-agent fleet ("multi-agency")](#6-multi-agent-fleet-multi-agency)
    - 6.5 [Agent experience — the same capabilities and feel as Claude Code](#65-agent-experience--the-same-capabilities-and-feel-as-claude-code)
 7. [LLM model abstraction (Ollama + user API keys)](#7-llm-model-abstraction-ollama--user-api-keys)
-8. [Sandbox design (local Docker → Azure AKS)](#8-sandbox-design-local-docker--azure-aks)
+8. [Sandbox design (OpenSandbox on local Docker)](#8-sandbox-design--alibaba-opensandbox-on-local-docker)
 9. [Phase 1 engine — Scan & Detect (CodeQL-class)](#9-phase-1-engine--scan--detect-codeql-class)
 10. [Phase 2 engine — Enterprise compliance checks (ESAP/ISO/OWASP)](#10-phase-2-engine--enterprise-compliance-checks-esapisoowasp)
 11. [Phase 3 engine — Aggressive hacking mode (break & solve)](#11-phase-3-engine--aggressive-hacking-mode-break--solve)
 12. [Data model](#12-data-model)
 13. [Repository structure](#13-repository-structure)
 14. [Build roadmap (engineering milestones)](#14-build-roadmap-engineering-milestones)
-15. [Azure production topology](#15-azure-production-topology)
+15. [Local deployment (Docker Compose)](#15-local-deployment-docker-compose)
 16. [Tech stack summary](#16-tech-stack-summary)
 17. [Dogfooding & test targets](#17-dogfooding--test-targets)
 18. [Open decisions & risks](#18-open-decisions--risks)
@@ -64,9 +64,9 @@ Actively attempt to **break and penetrate** the system, then solve what it found
 
 ## 2. Core engineering principles
 
-1. **Local-first, zero SaaS lock-in.** The whole platform runs on a laptop with no proprietary cloud service required. No Clerk, no Polar, no Neon, no hosted-only dependency. Cloud (Azure) is an *optional deploy target*, never a runtime requirement.
-2. **Portable seams.** Every external concern (DB, cache, queue, realtime, sandbox, auth, LLM) sits behind an interface with a **local** implementation and an **Azure** implementation, selected by configuration + DI. See §5.
-3. **Backend in .NET, frontends in TypeScript.** The agent orchestration, APIs, and job pipeline are .NET (first-class SignalR, EF Core, AKS, Azure SDKs). The CLI and web UI are TypeScript.
+1. **Local-first, zero SaaS lock-in.** The whole platform runs on a laptop with no proprietary cloud service required. No Clerk, no Polar, no Neon, no hosted-only dependency. **The goal for now is a fully local project**: there is no cloud deployment target in this plan (decision of 2026-11-11; see §15).
+2. **Portable seams.** Every external concern (DB, cache, queue, realtime, sandbox, auth, LLM) sits behind an interface with a **local** implementation, selected by configuration + DI. The interfaces keep a later hosted deployment possible without committing to any vendor now. See §5.
+3. **Backend in .NET, frontends in TypeScript.** The agent orchestration, APIs, and job pipeline are .NET (first-class SignalR and EF Core). The CLI and web UI are TypeScript.
 4. **Tools/agents execute in a sandbox, never on the raw host.** The baseline runs tools directly in the CLI cwd — unacceptable for a security tool. All execution moves into `ISandboxProvider`.
 5. **Everything is a job.** Scans and attacks are long-running jobs: enqueue → sandbox worker → stream progress/results over realtime. This is the backbone that makes multi-agent + scope-enforcement + kill-switch possible.
 6. **Authorization is a first-class subsystem, not a flag.** See §3.
@@ -122,21 +122,20 @@ Built **before** any active/offensive agent. This is what separates a pentest pl
 ┌───────▼─────────────┐        ┌─────────▼───────────┐
 │  Message queue      │        │  Database           │
 │  local: RabbitMQ/   │        │  local: SQLite/PG   │
-│  in-proc channel    │        │  prod: Azure SQL/PG │
-│  prod: RabbitMQ@AKS │        └─────────────────────┘
+│  in-proc channel    │        │                     │
+│                     │        └─────────────────────┘
 └───────┬─────────────┘
         │ dispatch
 ┌───────▼──────────────────────────────────────────────┐
 │  Agent workers (.NET)  →  ISandboxProvider           │
 │   run each agent's tools inside an OpenSandbox box   │
 │   local: OpenSandbox + Docker runtime                │
-│   prod:  OpenSandbox + Kubernetes runtime on AKS     │
 │   egress FQDN allowlist = engagement scope (§3)      │
 │   Agents: Recon · SAST · SCA · Secrets · ThreatModel │
 │           · Compliance · Exploit · Resilience · Fix  │
 └───────────────────────────────────────────────────────┘
         │ IDistributedCache (dedupe, rate state)
-        ▼  local: in-memory/Redis   prod: Azure Cache for Redis
+        ▼  local: in-memory/Redis
 ```
 
 ### Shared contracts
@@ -144,23 +143,23 @@ A shared schema package defines tool I/O, finding shape, compliance control shap
 
 ---
 
-## 5. Portable seams: local-first, Azure in production
+## 5. Portable seams (local implementations)
 
-Nothing talks to a vendor directly. Each concern is an interface with two implementations, chosen by config.
+Nothing talks to a vendor directly. Each concern is an interface with a local implementation, chosen by config. Everything runs on one machine, or as local containers (§15).
 
-| Concern | Interface | Local (dev / self-host) | Production (Azure) |
-|---|---|---|---|
-| Database | EF Core `DbContext` | SQLite or local Postgres | Azure SQL / Postgres Flexible Server |
-| Auth | `IAuthService` | Own sessions in local DB (Better-Auth-style) | Same code, Azure DB-backed |
-| Cache | `IDistributedCache` | In-memory / local Redis | Azure Cache for Redis |
-| Queue / jobs | `IMessageBus` | In-proc channel / local RabbitMQ | RabbitMQ on AKS (or Azure Service Bus) |
-| Realtime | SignalR | Self-hosted SignalR | Azure SignalR Service |
-| Sandbox | `ISandboxProvider` | **OpenSandbox** server + Docker runtime | **OpenSandbox** server + Kubernetes runtime on AKS |
-| LLM | `IModelProvider` | Ollama **or** user API key | User keys / Ollama / Azure OpenAI |
-| Secrets | `ISecretStore` | OS keychain / encrypted local file | Azure Key Vault |
-| Blob/artifacts | `IArtifactStore` | Local filesystem | Azure Blob Storage |
+| Concern | Interface | Local implementation |
+|---|---|---|
+| Database | EF Core `DbContext` | SQLite (default) or local Postgres |
+| Auth | `IAuthService` | Own sessions in the local DB (Better-Auth-style) |
+| Cache | `IDistributedCache` | In-memory / local Redis |
+| Queue / jobs | `IMessageBus` | In-proc channel / local RabbitMQ |
+| Realtime | SignalR | Self-hosted SignalR |
+| Sandbox | `ISandboxProvider` | **OpenSandbox** server + Docker runtime |
+| LLM | `IModelProvider` | Ollama **or** user API key |
+| Secrets | `ISecretStore` | OS keychain / encrypted local file |
+| Blob/artifacts | `IArtifactStore` | Local filesystem |
 
-**Rule:** business/agent logic depends only on the interfaces. Swapping local → Azure is DI registration + deployment manifests, never a code rewrite.
+**Rule:** business/agent logic depends only on the interfaces. That keeps the code testable and leaves room for a hosted deployment later — but none is planned, and nothing may be added that only works in a cloud.
 
 ---
 
@@ -199,13 +198,13 @@ The **Threat-Model agent** is the direct answer to "loopholes in system design, 
 | 4 | **Permission modes** | The operator chooses how much the agent may do unasked (ask every time / allow passive work / allow a named class of action for this engagement), and can change it mid-run. | ⬜ Today: fixed rules — scope gate, tier cap, approval for cloud models. |
 | 5 | **Plan → approve → execute** | For anything substantial the agent first presents a plan (for Phase 3: the attack plan, as a dry run); work starts only after the operator accepts it. | ⬜ (M8 "dry-run → authorize → execute"). |
 | 6 | **Visible task list** | Each run shows its steps and which one is in progress, so the operator follows along without reading logs. | 🟡 Jobs emit `step` events (running / completed / skipped) and `progress` within a step. ⬜ Steps are fixed per job type; an agent-authored plan needs the orchestrator. The CLI renders them; web is M9. |
-| 7 | **Transparent tool use** | Every tool call an agent makes is shown with its input and result, and kept in the run's transcript. | ⬜ Needs tool-calling (M2). The audit log already records runs, decisions and results. |
+| 7 | **Transparent tool use** | Every tool call an agent makes is shown with its input and result, and kept in the run's transcript. | 🟡 In chat, every tool call is streamed with its input and result and stored in the session, for client-run and server-run tools alike. ⬜ Tool-call events on job runs (no job uses tools yet). |
 | 8 | **Interrupt and steer** | The operator can stop a run at any moment, or send a correction while it is running. | 🟡 Cancel a job, kill switch per engagement, time limit and hard stop. ⬜ Steering a running agent with a message. |
 | 9 | **Sessions** | Conversations and runs are saved, listed, and can be resumed with their context. | 🟡 Chat sessions are stored and listed; scans, assessments and jobs are persisted. ⬜ Resuming an agent run. |
 | 10 | **Background work + notifications** | Long work runs in the background; the operator is told when it finishes or needs them. | 🟡 Background jobs with a pushed, replayable event stream. ⬜ Notifications outside an open client. |
 | 11 | **Sub-agents** | The orchestrator delegates to specialist agents (§6) and reports their results back in one place. | ⬜ |
 | 12 | **Memory and instructions** | Per-engagement and per-operator notes and standing instructions that agents load and follow. | ⬜ |
-| 13 | **Skills** | Agents load task-specific procedures on demand (§7.5). | ⬜ Library vendored, not wired in. |
+| 13 | **Skills** | Agents load task-specific procedures on demand (§7.5). | 🟡 The library is indexed and searchable (`Cerberus.Skills`, `/skills`). The chat agent searches and loads skills itself (`searchSkills`, `loadSkill`, run in the backend); the triage reviewer is pointed at matching skills. Access follows the capability tier, so offensive procedures are out of reach of passive-tier agents. ⬜ Per-agent skill sets for the specialist agents (§6); bundled scripts and references of a skill are not exposed, only its text. |
 | 14 | **The same experience in every client** | The CLI and the web app render the same stream: messages, tool calls, approvals, questions, task list. | 🟡 The CLI follows a run live (`/scan`, `/runs`): state, task list, progress, findings, model output and verdicts, with approvals and questions answered in place. ⬜ Starting assessments and triage from the CLI, engagements, pending-approval notifications outside a run's screen; chat still goes through the TypeScript server path (M2); web is M9. |
 
 **Design rules that follow from it**
@@ -219,9 +218,8 @@ The **Threat-Model agent** is the direct answer to "loopholes in system design, 
 ## 7. LLM model abstraction (Ollama + user API keys)
 
 `IModelProvider` with implementations:
-- `AnthropicProvider`, `OpenAIProvider` — use **user-supplied API keys**, never baked-in. Keys are entered by the user, stored per-user **encrypted** (`ISecretStore`: OS keychain for CLI / Key Vault in prod), passed at request time.
+- `AnthropicProvider`, `OpenAIProvider` — use **user-supplied API keys**, never baked-in. Keys are entered by the user, stored per-user **encrypted** (`ISecretStore`: OS keychain / encrypted local file), passed at request time.
 - `OllamaProvider` — local models via HTTP (`localhost:11434` locally, or a serving pod in prod). Makes "fully local & independent" real: a user can run with zero external API.
-- `AzureOpenAIProvider` — optional prod convenience.
 
 A **model registry** advertises available models + capabilities (context window, tool-calling, reasoning) so the orchestrator can route (e.g. cheap local model for triage, stronger model for exploit reasoning). Streaming unified across providers → surfaced to frontends over SignalR.
 
@@ -251,7 +249,7 @@ The repo vendors **`security-skills/`** — **818 Apache-2.0 cybersecurity skill
 
 ---
 
-## 8. Sandbox design — Alibaba OpenSandbox (local Docker → Azure AKS)
+## 8. Sandbox design — Alibaba OpenSandbox on local Docker
 
 **Decision:** the sandbox provider is **Alibaba OpenSandbox** (`github.com/alibaba/OpenSandbox`, Apache-2.0, CNCF Landscape), self-hosted. It replaces the earlier Daytona idea — Daytona's self-hostable OSS was frozen in June 2026 (last tag `v0.190.0`; core moved private), and `daytona/skills` targets Daytona **Cloud** (`app.daytona.io`, needs `DAYTONA_API_KEY`), which conflicts with our no-cloud-dependency goal. OpenSandbox is purpose-built for exactly this: isolated runtimes for AI agents, Docker **and** Kubernetes runtimes from one control plane, and — decisively — a native **C#/.NET SDK** plus an **FQDN egress sidecar** that becomes our scope-enforcement mechanism.
 
@@ -270,7 +268,7 @@ OpenSandbox's **Egress sidecar** shares the sandbox network namespace and enforc
 `CreateSandbox(profile) → handle`, `Exec(handle, command) → stream`, `PutFile/GetFile`, `SetEgressPolicy(handle, allowlist)`, `Dispose(handle)`.
 - **Profiles** map to OpenSandbox: base image, runtime (Docker/K8s), isolation class (standard / gVisor / Kata / Firecracker), workspace mount (read-only for passive agents, writable scratch for exploit artifacts), resource quota, egress allowlist, capability tier.
 - **Local:** OpenSandbox server with the Docker runtime; passive agents get no egress, active agents get the engagement's FQDN allowlist.
-- **Production:** same server + API, Kubernetes runtime on **AKS**; the egress sidecar + K8s NetworkPolicies encode scope. Identical job contract — local → Azure is a runtime config swap.
+- **Later, if ever needed:** OpenSandbox also has a Kubernetes runtime with the same server API and job contract. Not planned; noted only because it means the local design does not paint us into a corner.
 - All tool execution (baseline `readFile`/`bash`/etc. + security tools) runs **inside** the sandbox. The host is never the execution surface.
 
 ---
@@ -337,7 +335,7 @@ Control {
 
 ## 12. Data model
 
-Core entities (EF Core; local SQLite/PG → Azure SQL/PG):
+Core entities (EF Core; local SQLite, optionally local Postgres):
 
 - **User** — identity, credentials (hashed), encrypted model API keys.
 - **Session** (auth) — Better-Auth-style token/session, stored server-side; CLI keeps token in `~/.cerberus/auth.json` (baseline already has this pattern).
@@ -360,12 +358,12 @@ cerberus/
 │  ├─ Cerberus.Core/                 # domain: engagements, scope, findings, controls
 │  ├─ Cerberus.Auth/                 # own auth (sessions, no Clerk)
 │  ├─ Cerberus.Agents/               # orchestrator + agent definitions + prompts
-│  ├─ Cerberus.Models/               # IModelProvider: Anthropic/OpenAI/Ollama/AzureOpenAI
+│  ├─ Cerberus.Models/               # IModelProvider: Anthropic/OpenAI/Ollama
 │  ├─ Cerberus.Sandbox/              # ISandboxProvider: thin wrapper over OpenSandbox C# SDK (Docker local / K8s prod)
 │  ├─ Cerberus.Messaging/            # IMessageBus: RabbitMQ / in-proc
 │  ├─ Cerberus.Workers/              # job workers that run agents in sandboxes
 │  ├─ Cerberus.Compliance/           # catalog engine + ESAP/ISO/OWASP catalogs + xlsx import/export
-│  ├─ Cerberus.Data/                 # EF Core contexts + providers (SQLite/PG/Azure)
+│  ├─ Cerberus.Data/                 # EF Core contexts + providers (SQLite/PG)
 │  └─ Cerberus.Infrastructure/       # cache, secrets, artifact store adapters
 ├─ frontends/
 │  ├─ cli/                        # TypeScript — evolved from current packages/cli
@@ -381,9 +379,9 @@ cerberus/
 │  └─ LICENSE
 ├─ third_party/
 │  └─ opensandbox/                # Alibaba OpenSandbox (server + C# SDK) — self-hosted sandbox runtime
-├─ deploy/
-│  ├─ local/                      # docker-compose: db, redis, rabbitmq, ollama, opensandbox-server
-│  └─ azure/                      # Bicep/Terraform + AKS manifests, Key Vault, SignalR, opensandbox-on-k8s
+├─ docker-compose.yml             # all services as local containers (§15)
+├─ backend/Dockerfile             # the .NET API
+├─ packages/cli/Dockerfile        # the terminal client (optional, interactive)
 └─ PLAN.md
 ```
 
@@ -395,7 +393,7 @@ cerberus/
 
 ## 14. Build roadmap (engineering milestones)
 
-These are *engineering* phases (how we build), distinct from the three *product* phases (what it does). Recommendation: keep it runnable at every milestone, and build abstractions with **local implementations only** — defer all Azure bindings to M7.
+These are *engineering* phases (how we build), distinct from the three *product* phases (what it does). Recommendation: keep it runnable at every milestone, and build abstractions with **local implementations only**. There is no cloud milestone: the target is a fully local project.
 
 Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 
@@ -403,12 +401,12 @@ Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 |:--:|---|---|---|
 | ✅ | **M0 — Decisions** | Lock open items (§18) | Sandbox provider (OpenSandbox), product name (Cerberus), skills library confirmed |
 | ✅ | **M1 — De-cloud the baseline (still TS)** | Remove all SaaS | Polar/billing removed; Clerk replaced with local session auth; Prisma → local SQLite; Ollama + user-key model support. Fully local baseline, still works. |
-| 🟡 | **M2 — .NET backend (local mode)** | Rebuild the chassis in .NET | ✅ ASP.NET Core + SignalR skeleton, EF Core + SQLite, own auth, `IModelProvider` (Anthropic/OpenAI/Ollama), streaming `/chat` in the AI-SDK UI-message protocol, per-user encrypted API keys. 🟡 The TS CLI talks to the .NET server for security runs (`/scan`, `/runs`; plain-fetch client + SignalR). ⬜ Chat from the CLI against the .NET server (untested); tool-calling. |
+| ✅ | **M2 — .NET backend (local mode)** | Rebuild the chassis in .NET | ✅ ASP.NET Core + SignalR, EF Core + SQLite, own auth, `IModelProvider` (Anthropic via the official SDK, OpenAI, Ollama), per-user encrypted API keys. ✅ **Feature parity with the TypeScript server** (audited route by route, see `backend/README.md`): the chat agent with tool calling — the same seven client tools by mode, executed by the CLI, the reply continuing the resubmitted message — plus server-run tools; same validation, status codes and message shapes for auth and sessions. ✅ The CLI runs entirely against the .NET server (login, sessions, chat with tools, `/scan`, `/runs`). The .NET server is **the** backend; `packages/server` is superseded. ⬜ OpenAI reasoning summaries (needs the Responses API); real-model verification of tool calling and thinking (§17); removing `packages/server` and `packages/database` once the team agrees. |
 | 🟡 | **M3 — Sandbox + job pipeline** | Execution isolation + jobs | ✅ `IMessageBus` with an in-process implementation (`Cerberus.Jobs`), a persisted `Job` model and a background worker: scans and compliance assessments can be submitted as jobs (`POST /jobs`, types `scan` / `assess`), are re-authorized against the engagement scope when they start, and run under platform controls — operator cancel (`POST /jobs/{id}/cancel`), a time limit, and a hard stop that abandons work ignoring the stop signal. Queued jobs survive a restart; jobs that were running are failed. ✅ Job state changes are pushed to the owner over SignalR (`/hub/jobs`, token-authenticated, `jobUpdated`). ✅ In-process API integration tests (jobs, hub, engagements, audit). ⬜ **OpenSandbox server** (Docker runtime) + `ISandboxProvider` over its C# SDK; all tools run in sandbox; egress policy wired to scope; RabbitMQ bus; streaming individual findings / progress within a running job. |
 | 🟡 | **M4 — Authorization & safety spine** | §3 before any offense | ✅ Engagements with in-scope targets, a max capability tier and an optional time window (`/engagements`, `Cerberus.Authorization`). ✅ Dispatch-time scope gate (`ScopePolicy`): a scan or assessment run under an engagement is rejected (403) if the target is out of scope, the engagement is closed/aborted or outside its window, or the tier is too high. ✅ Kill switch (`POST /engagements/{id}/abort`): stops any further runs being authorized and cancels the engagement's queued and running jobs (synchronous `POST /scan` requests already in flight are not interrupted). ✅ Append-only, hash-chained audit log (`/audit`, `/audit/verify`; UPDATE/DELETE blocked by database triggers). ✅ Code targets require an operator ownership attestation. ✅ Proof-of-control for host/domain targets: a per-target random token published as a DNS TXT record (`_cerberus-challenge.<name>`) or a well-known file, checked by `POST /engagements/{id}/targets/{tid}/verify`; tiers above T0 are refused on a target that has not passed. ✅ Audit export (`GET /audit/export`, JSON Lines or CSV, with chain hashes). ✅ Optional mandatory-engagement mode (`CERBERUS_REQUIRE_ENGAGEMENT=true`). ⬜ Mandatory engagement as the default (needs the CLI to create engagements); T2/T3 tiers and the explicit per-run authorization step (not grantable yet); rate/blast-radius caps; re-verification / expiry of proofs. |
 | 🟡 | **M5 — Product Phase 1 (Scan & Detect)** | Passive agents | ✅ Deterministic scanner on the .NET backend (`/scan`): 22 line-based rules across secrets, weak crypto, insecure configuration, injection sinks and unsafe deserialization (Python, JS/TS, Java, C#, Go, shell, Erlang/Elixir) → normalized findings with CWE, OWASP category, remediation hint and confidence; path-confined, symlinks not followed, **persisted** (`/scans`, `/scans/{id}`). Binary/generated/lock files skipped; test and documentation files marked and downgraded; `cerberus:ignore` markers and `.cerberusignore` files honoured but always reported. Every rule has positive and negative tests. ✅ SCA/CVE analysis: parses npm/PyPI/Go/NuGet manifests, resolves known vulns via **OSV.dev** (keyless, read-only), emits dependency findings (CVE, fixed version, CWE, CVSS-bucketed severity) merged into the same scan. ✅ Dogfooded (§17): the upstream RabbitMQ repo (3,512 files, ~3 s) yields 251 candidates, 82 in production code; this repo's own code yields 2, both sample strings in tests. 🟡 LLM triage of findings (`triage` job, `Cerberus.Triage`): a named model reviews each production-code finding in its code context and returns true positive / false positive / needs review with reasoning; advisory only (never changes findings or compliance), secrets redacted before code goes to a cloud model, audited. **Built and tested with a scripted model only — not yet run against a real model; see §17 "Pending verification".** ⬜ LLM SAST + Threat-Model agents, sandbox integration, data-flow / AST analysis (rules are per-line candidates, not proofs), CVSS scoring. |
 | 🟡 | **M6 — Product Phase 2 (Compliance)** | Catalog engine | ✅ ESAP catalog shipped as data (`catalogs/enterprise-sap.{md,json}`: full methodology + 39 controls). ✅ Deterministic catalog engine on the .NET backend (`Cerberus.Compliance`): loads catalogs from `catalogs/`, judges each control that declares `scannerCategories` (the control→finding mapping is catalog data) against Phase-1 scanner findings, and produces a **persisted compliance matrix** with evidence + score (`/compliance/catalogs`, `POST /compliance/assess` from a scan id or path, `/compliance`, `/compliance/{id}`); 8 of 39 ESAP controls are auto-judged today, the rest are flagged for manual review. ✅ OWASP Top 10 (2021) catalog (`catalogs/owasp-top10.json`, 5 of 10 auto-judged). ✅ Dependency (SCA) findings mapped to controls (ESAP GSG-07, OWASP A06); scans record whether the dependency check completed, and a dependency-mapped control is only Compliant when it did. ✅ Spreadsheet export (`GET /compliance/{id}/export` → .xlsx: Summary, Controls with Verdict / Detailed Response / Action Plan / Time limit, Evidence); controls the engine could not judge are left blank for the operator. ✅ Backend unit tests (`backend/tests/Cerberus.Tests`: engine, catalogs, export). ✅ Operator answers: per-control verdict / justification / action plan / time limit validated against the catalog's response schema (`PUT`/`DELETE /compliance/{id}/responses/{controlId}`), which fill in unjudged controls or overrule the scanner; `GET /compliance/{id}` reports an `effective` summary. ✅ Spreadsheet import (`POST /compliance/{id}/import`): reads a completed export back in, skipping untouched rows and reporting invalid ones per row. ⬜ LLM Compliance agent (manual-control evidence), OWASP ASVS/ISO/SOC 2 catalogs. |
-| ⬜ | **M7 — Azure implementations** | Prod swap | Azure SQL/PG, Azure Cache, Azure SignalR, AKS sandbox pods, RabbitMQ@AKS, Key Vault, Blob. DI + manifests only. |
+| 🟡 | **M7 — Local packaging (Docker Compose)** | Run everything locally in containers | ✅ `docker-compose.yml` + Dockerfiles for the .NET API and the CLI, with opt-in profiles for Ollama, RabbitMQ and Redis (written, **not yet run** — see §15). ⬜ First real `docker compose up` and fixes from it; OpenSandbox server as a compose service (with M3); health-checked start order for future workers. *(Replaces the former "Azure implementations" milestone — cloud deployment is out of scope for now.)* |
 | ⬜ | **M8 — Product Phase 3 (Aggressive mode)** | Gated offense | Exploit agent (T2), Resilience/Load (T3), Remediation/Report; dry-run → authorize → execute → solve loop. Built last, after the spine is proven. |
 | ⬜ | **M9 — Web frontend** | Second client | React/Next UI against the same API + SignalR. |
 | 🟡 | **MX — Agent experience (cross-cutting, §6.5)** | Same capabilities and feel as Claude Code | ✅ Requirement and capability table recorded (§6.5). ✅ Human-in-the-loop approvals for jobs (`/approvals`, `AwaitingApproval`), pushed over SignalR and audited. ✅ Run event stream: every job reports state, steps, progress, findings and model text as ordered events, stored and pushed live (`jobEvent`), replayable after a disconnect (`GET /jobs/{id}/events`). ✅ Operator questions: a running job asks, waits with its time limit paused, and continues with the answer (`/questions`, `AwaitingInput`). ✅ CLI renders a run live over SignalR with replay, and takes approvals, answers and cancel from the keyboard (`/scan`, `/runs`). ⬜ Tool-call events (need tool-calling), permission modes, plan-then-execute, task list, steering, sub-agents, memory, and rendering all of it in the CLI and web clients. |
@@ -416,19 +414,26 @@ Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 
 ---
 
-## 15. Azure production topology
+## 15. Local deployment (Docker Compose)
 
-- **Compute:** AKS (API, workers, sandbox pods, RabbitMQ). Sandbox pods scheduled per job with NetworkPolicies encoding scope; ephemeral.
-- **Data:** Azure SQL or Azure Database for PostgreSQL Flexible Server.
-- **Cache:** Azure Cache for Redis (dedupe, rate-limit state, session cache).
-- **Messaging:** RabbitMQ on AKS (or Azure Service Bus) behind `IMessageBus`.
-- **Realtime:** Azure SignalR Service.
-- **Secrets:** Azure Key Vault (`ISecretStore`) — user model API keys, platform secrets.
-- **Artifacts:** Azure Blob Storage (scan reports, evidence, exploit artifacts).
-- **Identity/deploy:** Managed identities, Bicep/Terraform in `deploy/azure`, GitHub Actions CI/CD.
-- **Observability:** Azure Monitor / App Insights; audit log shipped to immutable storage.
+**Decision (product owner, 2026-11-11): the goal is a fully local project first. Azure — and any other cloud — is removed from this plan.** No milestone depends on a hosted service; the §5 interfaces stay, with local implementations only.
 
-All of the above are **implementations of the §5 seams** — the same build runs locally with Docker/Compose equivalents.
+Everything can run two ways, both on one machine:
+
+- **Directly:** `dotnet run` for the API and `bun run dev:cli` for the client (see the README).
+- **In containers:** `docker compose up` from the repository root.
+
+| Service | Compose name | Default? | Purpose |
+|---|---|:--:|---|
+| .NET API | `api` | yes | The one backend: auth, sessions, chat, scans, compliance, jobs, approvals, questions, SignalR hubs. SQLite database and key ring on a named volume. |
+| CLI | `cli` | profile `cli` | The terminal client in a container, for machines without Bun (`docker compose run --rm cli`). |
+| Ollama | `ollama` | profile `models` | Local models. **Opt-in**: heavy (multi-GB models, lots of RAM). Never started by default. |
+| RabbitMQ | `rabbitmq` | profile `infra` | For the `IMessageBus` RabbitMQ implementation, when it exists (M3). Unused today: the bus is in-process. |
+| Redis | `redis` | profile `infra` | For `IDistributedCache`, when something needs it. Unused today. |
+
+Not in the compose file: the **OpenSandbox server** (arrives with M3, as another local container), and the TypeScript server (`packages/server`), which is superseded — the .NET API has all of its features (§14, M2).
+
+**Status: written, not run.** The compose file and Dockerfiles were authored without starting Docker (by instruction). The first person to run them should expect small fixes and record them here.
 
 ---
 
@@ -439,16 +444,16 @@ All of the above are **implementations of the §5 seams** — the same build run
 | Backend | .NET 8/9, ASP.NET Core, EF Core, SignalR |
 | Auth | Own implementation (Better-Auth-style sessions), no Clerk |
 | Frontends | TypeScript — CLI (OpenTUI + React), Web (React/Next) |
-| LLM | `IModelProvider`: Anthropic / OpenAI (user keys) + Ollama (local) + Azure OpenAI |
-| DB | SQLite / Postgres (local) → Azure SQL / PG (prod) |
-| Cache | Redis (local) → Azure Cache for Redis |
-| Queue | RabbitMQ / in-proc (local) → RabbitMQ@AKS / Service Bus |
-| Realtime | SignalR (self-host) → Azure SignalR |
-| Sandbox | **Alibaba OpenSandbox** (self-hosted): Docker runtime local → Kubernetes runtime on AKS; gVisor/Kata/Firecracker isolation; FQDN egress sidecar for scope |
-| Secrets | OS keychain / encrypted file → Azure Key Vault |
+| LLM | `IModelProvider`: Anthropic / OpenAI (user keys) + Ollama (local) |
+| DB | SQLite (default) / local Postgres |
+| Cache | In-memory / local Redis |
+| Queue | In-process channel / local RabbitMQ |
+| Realtime | SignalR (self-hosted) |
+| Sandbox | **Alibaba OpenSandbox** (self-hosted): Docker runtime, local; gVisor/Kata/Firecracker isolation; FQDN egress sidecar for scope |
+| Secrets | OS keychain / encrypted local file |
 | Agent skills | Vendored 818-skill Apache-2.0 library (MITRE/NIST/OWASP-mapped) in `security-skills/` |
 | Scanners | OSS SAST/SCA/secret/IaC tools wrapped in sandbox + LLM reasoning layer |
-| Deploy | Docker Compose (local) / Bicep+Terraform+AKS (Azure) |
+| Deploy | Docker Compose, local (§15) |
 
 ---
 
@@ -479,12 +484,19 @@ All of the above are **implementations of the §5 seams** — the same build run
 
 5. Record here: the model used, time per finding, how many of the five it got right, whether every reply parsed (`modelAnswered: true`), and whether the injection comment swayed it. If replies often fail to parse, tighten `TriagePrompt.System` or add provider-level JSON mode. The job time limit is `CERBERUS_JOB_TIMEOUT_SECONDS` (default 600); partial results are kept if it is hit.
 
+**The chat agent's tool calling and thinking have never been run against a real model either.** The protocol was verified end to end with the CLI's own chat client and a rule-following stand-in (`echo`), and each provider is tested against a canned stream in its documented format — but a real model has never driven it.
+
+1. Start the backend and the CLI (README). Store a key (`PUT /settings/keys`) or set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; or run Ollama on a machine that can host a tool-capable model.
+2. In the CLI pick the model (`/models`) and, in a scratch project, ask for something that needs tools: *"list the files here, read the largest one and summarise it"* (PLAN and BUILD), then in BUILD *"create notes.md with that summary"*. Then: *"find a skill about TLS configuration and tell me its first step"*.
+3. Check and record per provider: tool calls appear with inputs and results; the reply resumes after each client tool; the file is written; the skills tools run without the CLI executing anything; with Anthropic on Opus/Sonnet a reasoning summary is shown and a multi-tool conversation does not fail with a thinking-block error; usage appears in the message metadata.
+4. Known gaps to confirm rather than discover: no reasoning text from OpenAI models; the model list still names older Claude models (`claude-opus-4-6` etc.) — moving to current ones is a separate change that also needs the refusal-fallback handling the current models call for.
+
 ---
 
 ## 18. Open decisions & risks
 
 **Decisions settled:**
-- ✅ **Sandbox provider:** Alibaba **OpenSandbox** (self-hosted; Docker local / K8s on AKS). Daytona dropped — its self-hostable OSS froze June 2026 and `daytona/skills` is Cloud-only.
+- ✅ **Sandbox provider:** Alibaba **OpenSandbox** (self-hosted; local Docker runtime). Daytona dropped — its self-hostable OSS froze June 2026 and `daytona/skills` is Cloud-only.
 - ✅ **Skills library:** vendor the 818-skill Apache-2.0 set under `security-skills/`, select per agent by subdomain/framework.
 - ✅ **Product name:** **Cerberus** (repo `CommonCapital/Cerberus`; package/project prefix `Cerberus.*`).
 
@@ -506,4 +518,4 @@ All of the above are **implementations of the §5 seams** — the same build run
 
 ---
 
-*End of plan. This document captures the full scope discussed: de-clouding (no Clerk/Polar/Neon), local DB + **Alibaba OpenSandbox** sandbox + own authorization, dual LLM support (user API keys + Ollama), .NET backend with TypeScript CLI + web frontends, Azure production (DB, cache, RabbitMQ, Kubernetes, SignalR, OpenSandbox-on-AKS), the multi-agent security fleet powered by a vendored **818-skill** framework-mapped library, and the three product phases — Scan & Detect, Enterprise Compliance (enterprise-grade), and Aggressive Hacking "break & solve" — all bound by an enforced authorization & safety spine whose network-level enforcement is the OpenSandbox FQDN egress allowlist.*
+*End of plan. This document captures the full scope discussed: de-clouding (no Clerk/Polar/Neon), local DB + **Alibaba OpenSandbox** sandbox + own authorization, dual LLM support (user API keys + Ollama), .NET backend with TypeScript CLI + web frontends, a fully local deployment (Docker Compose; no cloud target), the multi-agent security fleet powered by a vendored **818-skill** framework-mapped library, and the three product phases — Scan & Detect, Enterprise Compliance (enterprise-grade), and Aggressive Hacking "break & solve" — all bound by an enforced authorization & safety spine whose network-level enforcement is the OpenSandbox FQDN egress allowlist.*
