@@ -26,22 +26,18 @@ public sealed record ControlResponseRequest(string? Verdict, string? Justificati
 
 public sealed record ChatRequestMessage(string Role, string Content);
 
-// Used by the SignalR hub skeleton.
-public sealed record ChatRequest(
+// Used by the SignalR chat hub skeleton.
+public sealed record HubChatRequest(
     string SessionId,
     string Model,
     string? System,
     List<ChatRequestMessage> Messages);
 
-// --- AI-SDK UI message shapes (CLI-compatible /chat) -----------------------
-// Mirrors @ai-sdk UIMessage: a message has `parts`, each part has a `type`
-// and, for text parts, a `text`. Extra part fields are ignored on read.
-public sealed record UiPart(string Type, string? Text);
-
-public sealed record UiMessage(string Id, string Role, List<UiPart> Parts);
-
+// --- AI-SDK UI message request (CLI-compatible /chat) ----------------------
+// Messages are kept as raw JSON: a UI message's parts include tool calls with
+// their inputs, states and outputs, which must survive the round trip intact.
 public sealed record UiChatRequest(
-    string Id,
-    List<UiMessage> Messages,
-    string Mode,
-    string Model);
+    string? Id,
+    List<System.Text.Json.JsonElement>? Messages,
+    string? Mode,
+    string? Model);

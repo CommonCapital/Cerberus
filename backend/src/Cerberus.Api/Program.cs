@@ -65,6 +65,7 @@ var skillsRoot = Environment.GetEnvironmentVariable("CERBERUS_SKILLS_ROOT")
 builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
 
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();

@@ -12,7 +12,7 @@ namespace Cerberus.Api.Hubs;
 public sealed class ChatHub(IModelProviderResolver resolver) : Hub
 {
     public async IAsyncEnumerable<string> Stream(
-        ChatRequest request,
+        HubChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var provider = resolver.Resolve(request.Model);

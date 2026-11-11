@@ -27,6 +27,23 @@ public interface IModelProvider
     IAsyncEnumerable<string> StreamAsync(
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams one step of a conversation that may use tools and reasoning.
+    /// The default serves providers that only produce text: it flattens the
+    /// conversation to text turns and offers no tools.
+    /// </summary>
+    IAsyncEnumerable<ChatEvent> StreamChatAsync(ChatRequest request, CancellationToken cancellationToken = default)
+    {
+        var messages = request.Turns
+            .Where(t => t.Role is "user" or "assistant")
+            .Select(t => new ChatMessage(t.Role, ChatEvents.TextOf(t)))
+            .Where(m => m.Content.Length > 0)
+            .ToList();
+        return ChatEvents.FromText(
+            StreamAsync(new ChatCompletionRequest(request.ModelId, messages, request.System, request.Credentials), cancellationToken),
+            cancellationToken);
+    }
 }
 
 /// <summary>Resolves the provider responsible for a given model id.</summary>
