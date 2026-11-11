@@ -193,23 +193,23 @@ The **Threat-Model agent** is the direct answer to "loopholes in system design, 
 
 | # | Capability | What it means in Cerberus | Status |
 |---|---|---|:--:|
-| 1 | **Live streaming** | Everything an agent does is pushed as it happens over SignalR: text as it is generated, job state, progress, findings as they are found. | 🟡 Job state changes and approval requests are pushed (`/hub/jobs`). ⬜ Token-level agent output, progress within a job, findings as found; the chat hub is an unauthenticated skeleton. |
+| 1 | **Live streaming** | Everything an agent does is pushed as it happens over SignalR: text as it is generated, job state, progress, findings as they are found. | 🟡 Every job has an ordered, stored **event stream** pushed as `jobEvent` over `/hub/jobs` and replayable from `GET /jobs/{id}/events?after=N`: state changes, steps, progress, findings as they are found, model text as it is written, triage verdicts, approval requests and decisions. ⬜ The chat hub is still an unauthenticated skeleton; findings of the static pass arrive when the pass ends, not file by file. |
 | 2 | **Human in the loop — approvals** | Before a sensitive action the agent stops and asks; the operator sees exactly what will happen and approves or denies. Nothing sensitive runs on the agent's say-so. | 🟡 Approval gate for jobs (`/approvals`): a job that needs consent waits in `AwaitingApproval` until the operator decides. First use: sending code to a cloud model. ⬜ Per-tool-call approvals inside an agent run; T2/T3 authorization (M8). |
 | 3 | **Human in the loop — questions** | An agent that lacks information asks the operator a question (with options) and continues with the answer. | ⬜ |
 | 4 | **Permission modes** | The operator chooses how much the agent may do unasked (ask every time / allow passive work / allow a named class of action for this engagement), and can change it mid-run. | ⬜ Today: fixed rules — scope gate, tier cap, approval for cloud models. |
 | 5 | **Plan → approve → execute** | For anything substantial the agent first presents a plan (for Phase 3: the attack plan, as a dry run); work starts only after the operator accepts it. | ⬜ (M8 "dry-run → authorize → execute"). |
-| 6 | **Visible task list** | Each run shows its steps and which one is in progress, so the operator follows along without reading logs. | ⬜ |
+| 6 | **Visible task list** | Each run shows its steps and which one is in progress, so the operator follows along without reading logs. | 🟡 Jobs emit `step` events (running / completed / skipped) and `progress` within a step. ⬜ Steps are fixed per job type; an agent-authored plan needs the orchestrator. Nothing renders them yet (CLI/web). |
 | 7 | **Transparent tool use** | Every tool call an agent makes is shown with its input and result, and kept in the run's transcript. | ⬜ Needs tool-calling (M2). The audit log already records runs, decisions and results. |
 | 8 | **Interrupt and steer** | The operator can stop a run at any moment, or send a correction while it is running. | 🟡 Cancel a job, kill switch per engagement, time limit and hard stop. ⬜ Steering a running agent with a message. |
 | 9 | **Sessions** | Conversations and runs are saved, listed, and can be resumed with their context. | 🟡 Chat sessions are stored and listed; scans, assessments and jobs are persisted. ⬜ Resuming an agent run. |
-| 10 | **Background work + notifications** | Long work runs in the background; the operator is told when it finishes or needs them. | 🟡 Background jobs with pushed state changes. ⬜ Notifications outside an open client. |
+| 10 | **Background work + notifications** | Long work runs in the background; the operator is told when it finishes or needs them. | 🟡 Background jobs with a pushed, replayable event stream. ⬜ Notifications outside an open client. |
 | 11 | **Sub-agents** | The orchestrator delegates to specialist agents (§6) and reports their results back in one place. | ⬜ |
 | 12 | **Memory and instructions** | Per-engagement and per-operator notes and standing instructions that agents load and follow. | ⬜ |
 | 13 | **Skills** | Agents load task-specific procedures on demand (§7.5). | ⬜ Library vendored, not wired in. |
 | 14 | **The same experience in every client** | The CLI and the web app render the same stream: messages, tool calls, approvals, questions, task list. | ⬜ CLI still targets the TypeScript server (M2); web is M9. |
 
 **Design rules that follow from it**
-- **Every agent action is an event** on one stream per run (text, tool call, tool result, approval request, question, progress, finding, done). Clients render events; they never poll for meaning.
+- **Every agent action is an event** on one stream per run (text, tool call, tool result, approval request, question, progress, finding, done). Clients render events; they never poll for meaning. Events are stored before they are pushed and numbered per run, so a client replays what it missed and continues live.
 - **Waiting on a human is a first-class state**, persisted in the database, so a restart or a closed client loses nothing and the request can be answered later from any client.
 - **Consent is specific**: an approval names the action, the target and what leaves the machine; approving one request approves nothing else.
 - **The human can always say no**, and "no" is as well supported as "yes": a denied step ends cleanly and is recorded.
@@ -411,7 +411,7 @@ Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 | ⬜ | **M7 — Azure implementations** | Prod swap | Azure SQL/PG, Azure Cache, Azure SignalR, AKS sandbox pods, RabbitMQ@AKS, Key Vault, Blob. DI + manifests only. |
 | ⬜ | **M8 — Product Phase 3 (Aggressive mode)** | Gated offense | Exploit agent (T2), Resilience/Load (T3), Remediation/Report; dry-run → authorize → execute → solve loop. Built last, after the spine is proven. |
 | ⬜ | **M9 — Web frontend** | Second client | React/Next UI against the same API + SignalR. |
-| 🟡 | **MX — Agent experience (cross-cutting, §6.5)** | Same capabilities and feel as Claude Code | ✅ Requirement and capability table recorded (§6.5). ✅ Human-in-the-loop approvals for jobs (`/approvals`, `AwaitingApproval`), pushed over SignalR and audited. ⬜ Agent event stream (text, tool calls, progress, findings), operator questions, permission modes, plan-then-execute, task list, steering, sub-agents, memory, and rendering all of it in the CLI and web clients. |
+| 🟡 | **MX — Agent experience (cross-cutting, §6.5)** | Same capabilities and feel as Claude Code | ✅ Requirement and capability table recorded (§6.5). ✅ Human-in-the-loop approvals for jobs (`/approvals`, `AwaitingApproval`), pushed over SignalR and audited. ✅ Run event stream: every job reports state, steps, progress, findings and model text as ordered events, stored and pushed live (`jobEvent`), replayable after a disconnect (`GET /jobs/{id}/events`). ⬜ Tool-call events (need tool-calling), operator questions, permission modes, plan-then-execute, task list, steering, sub-agents, memory, and rendering all of it in the CLI and web clients. |
 | ⬜ | **M10 — Hardening & reporting polish** | Enterprise-ready | Audit exports, framework reports, RBAC, multi-tenant separation. |
 
 ---

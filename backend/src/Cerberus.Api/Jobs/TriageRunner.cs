@@ -5,6 +5,7 @@ using Cerberus.Api.Settings;
 using Cerberus.Authorization;
 using Cerberus.Core.Models;
 using Cerberus.Data;
+using Cerberus.Jobs;
 using Cerberus.Scanning;
 using Cerberus.Triage;
 using Microsoft.EntityFrameworkCore;
@@ -30,8 +31,10 @@ public sealed class TriageRunner(
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public async Task<int> RunAsync(string userId, TriageJobParameters parameters, CancellationToken ct)
+    public async Task<int> RunAsync(
+        string userId, TriageJobParameters parameters, CancellationToken ct, IRunReporter? reporter = null)
     {
+        reporter ??= NullRunReporter.Instance;
         var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == parameters.ScanId && s.UserId == userId, ct)
             ?? throw new InvalidOperationException($"Scan {parameters.ScanId} no longer exists.");
 
@@ -43,24 +46,33 @@ public sealed class TriageRunner(
         var results = ReadTriage(scan.Triage).ToDictionary(r => r.FindingId);
         var files = new Dictionary<string, string[]?>(StringComparer.Ordinal);
         var done = 0;
+        var stepTitle = $"Review {selected.Count} finding(s) with {parameters.Model}";
+        await reporter.StepAsync("review", stepTitle, StepStatus.Running);
 
         try
         {
             foreach (var finding in selected)
             {
                 ct.ThrowIfCancellationRequested();
+                await reporter.ProgressAsync(done, selected.Count, $"Reviewing {finding.Title} at {finding.File}:{finding.Line}");
                 if (!files.TryGetValue(finding.File, out var lines))
                 {
                     files[finding.File] = lines = ReadConfined(finding.File);
                 }
 
-                var result = await triager.TriageAsync(finding, lines, parameters.Model, credentials, DateTime.UtcNow, ct);
+                // The model's reply is streamed as it is written, on a channel named after the finding.
+                var result = await triager.TriageAsync(finding, lines, parameters.Model, credentials, DateTime.UtcNow, ct,
+                    delta => reporter.TextAsync(finding.Id, delta));
+                await reporter.FlushTextAsync();
                 results[result.FindingId] = result;   // a newer opinion replaces an older one
                 done++;
+                await reporter.EventAsync(RunEventTypes.Triage, result);
 
                 scan.Triage = JsonSerializer.Serialize(results.Values, JsonOptions);
                 await db.SaveChangesAsync(CancellationToken.None);
             }
+            await reporter.ProgressAsync(done, selected.Count, $"{done} finding(s) reviewed.");
+            await reporter.StepAsync("review", stepTitle, StepStatus.Completed);
         }
         finally
         {

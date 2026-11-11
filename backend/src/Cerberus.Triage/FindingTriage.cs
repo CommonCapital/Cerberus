@@ -234,7 +234,7 @@ public sealed class FindingTriager(IModelProviderResolver resolver)
 
     public async Task<TriageResult> TriageAsync(
         Finding finding, IReadOnlyList<string>? fileLines, string modelId, ModelCredentials credentials,
-        DateTime now, CancellationToken ct)
+        DateTime now, CancellationToken ct, Func<string, Task>? onDelta = null)
     {
         var provider = resolver.Resolve(modelId);
         var request = new ChatCompletionRequest(
@@ -249,6 +249,7 @@ public sealed class FindingTriager(IModelProviderResolver resolver)
             await foreach (var delta in provider.StreamAsync(request, ct))
             {
                 reply.Append(delta);
+                if (onDelta is not null) await onDelta(delta);   // let the operator watch the model think
                 if (reply.Length > MaxReplyLength) break;   // a runaway answer is not a verdict
             }
         }

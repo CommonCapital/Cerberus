@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Cerberus.Api.Audit;
 using Cerberus.Authorization;
 using Cerberus.Data;
+using Cerberus.Jobs;
 using Cerberus.Scanning;
 
 namespace Cerberus.Api.Jobs;
@@ -25,12 +26,38 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
 
     /// <exception cref="UnauthorizedAccessException">The path is outside the scan root.</exception>
     public async Task<ScanRun> RunAsync(
-        string userId, string? engagementId, string targetPath, bool runSca, CancellationToken ct)
+        string userId, string? engagementId, string targetPath, bool runSca, CancellationToken ct,
+        IRunReporter? reporter = null)
     {
+        reporter ??= NullRunReporter.Instance;
+
         // Static (regex) pass is synchronous; SCA is an async OSV lookup.
+        await reporter.StepAsync("static", "Static analysis", StepStatus.Running);
         var result = scanner.Scan(targetPath, ct);
-        var scaResult = runSca ? await sca.ScanAsync(targetPath, ct) : new ScaResult(0, 0, []);
+        foreach (var finding in result.Findings.Where(f => !f.Suppressed)) await reporter.FindingAsync(finding);
+        await reporter.ProgressAsync(result.FilesScanned, result.FilesScanned,
+            $"{result.FilesScanned} files scanned, {result.ActiveCount} findings.");
+        await reporter.StepAsync("static", "Static analysis", StepStatus.Completed);
+
+        ScaResult scaResult;
+        if (runSca)
+        {
+            await reporter.StepAsync("dependencies", "Dependency check", StepStatus.Running);
+            scaResult = await sca.ScanAsync(targetPath, ct);
+            foreach (var finding in scaResult.Findings) await reporter.FindingAsync(finding);
+            await reporter.ProgressAsync(scaResult.DependenciesScanned, scaResult.DependenciesScanned,
+                scaResult.Completed
+                    ? $"{scaResult.DependenciesScanned} dependencies checked, {scaResult.Findings.Count} known vulnerabilities."
+                    : "The dependency check did not complete; its results are partial.");
+            await reporter.StepAsync("dependencies", "Dependency check", StepStatus.Completed);
+        }
+        else
+        {
+            scaResult = new ScaResult(0, 0, []);
+            await reporter.StepAsync("dependencies", "Dependency check", StepStatus.Skipped);
+        }
         ct.ThrowIfCancellationRequested();   // a stopped run stores nothing
+        await reporter.StepAsync("store", "Store results", StepStatus.Running);
 
         // Merge both passes; re-sort by severity so the combined set is ranked.
         var findings = result.Findings.Concat(scaResult.Findings)
@@ -55,6 +82,7 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
             $"Scan {scan.Id}: {result.FilesScanned} files, {activeCount} findings ({result.SuppressedCount} suppressed, {result.FilesIgnored} files ignored{(result.Truncated ? ", truncated" : "")}), dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
             engagementId, targetPath, CapabilityTier.T0, CancellationToken.None);
 
+        await reporter.StepAsync("store", "Store results", StepStatus.Completed);
         return new ScanRun(scan, result, scaResult, findings);
     }
 }

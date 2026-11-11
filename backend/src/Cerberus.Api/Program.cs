@@ -80,6 +80,7 @@ builder.Services.AddScoped<ScanRunner>();
 builder.Services.AddScoped<AssessmentRunner>();
 builder.Services.AddSingleton<Cerberus.Triage.FindingTriager>();
 builder.Services.AddScoped<TriageRunner>();
+builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddScoped<JobControl>();
 builder.Services.AddHostedService<JobWorker>();

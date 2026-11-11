@@ -15,6 +15,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<ApprovalRequest> ApprovalRequests => Set<ApprovalRequest>();
+    public DbSet<JobEvent> JobEvents => Set<JobEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,6 +80,12 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
             // One chain per user; uniqueness also stops two writers claiming the same position.
             e.HasIndex(a => new { a.UserId, a.Sequence }).IsUnique();
             e.HasIndex(a => a.EngagementId);
+        });
+
+        modelBuilder.Entity<JobEvent>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
         });
 
         modelBuilder.Entity<ApprovalRequest>(e =>
