@@ -6,4 +6,5 @@ export { AgentReviewDialogContent, ReviewDialogContent, ScanDialogContent } from
 export { RunsDialogContent } from "./runs-dialog";
 export { PermissionsDialogContent } from "./permissions-dialog";
 export { MemoryDialogContent } from "./memory-dialog";
+export { AssessDialogContent, AssessmentsDialogContent } from "./assessment-dialogs";
 export { AbortDialogContent, EngagementDialogContent, ScopeDialogContent } from "./engagement-dialog";

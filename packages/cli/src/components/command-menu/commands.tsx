@@ -3,6 +3,8 @@ import {
   AgentsDialogContent,
   ModelsDialogContent,
   AbortDialogContent,
+  AssessDialogContent,
+  AssessmentsDialogContent,
   EngagementDialogContent,
   MemoryDialogContent,
   ScopeDialogContent,
@@ -85,6 +87,28 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: `Code review by ${ctx.model}`,
         children: <AgentReviewDialogContent model={ctx.model} />,
+      })
+    },
+  },
+  {
+    name: "assess",
+    description: "Check code against a compliance catalog",
+    value: "/assess",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Compliance assessment",
+        children: <AssessDialogContent />,
+      })
+    },
+  },
+  {
+    name: "assessments",
+    description: "Open an assessment: controls, suggested answers, your answers",
+    value: "/assessments",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Assessments",
+        children: <AssessmentsDialogContent />,
       })
     },
   },

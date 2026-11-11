@@ -34,6 +34,12 @@ mock.module("../lib/cerberus/api", () => ({
 }));
 
 const { Run } = await import("./run");
+const { useParams } = await import("react-router");
+
+function AssessmentStub() {
+  const { id } = useParams();
+  return <text>ASSESSMENT {id}</text>;
+}
 const { RootLayout } = await import("../layouts/root-layout");
 
 const job = (state: Job["state"]): Job => ({
@@ -66,6 +72,7 @@ async function screen() {
       children: [
         { index: true, element: <text>HOME SCREEN</text> },
         { path: "runs/:id", element: <Run /> },
+        { path: "assessments/:id", element: <AssessmentStub /> },
       ],
     }],
     { initialEntries: ["/runs/job-1"] },
@@ -194,4 +201,14 @@ test("a run without an agent, or one that has finished, takes no messages", asyn
 
   await ui.show(view([["state", { ...job("Succeeded"), type: "sast" }]]));
   expect(ui.captureCharFrame()).not.toContain("message the agent");
+});
+
+test("a finished assessment run offers to open the assessment it produced", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", { ...job("Succeeded"), type: "assess", resultId: "assess-7" }]]));
+  expect(ui.captureCharFrame()).toContain("o open the assessment");
+
+  ui.mockInput.pressKey("o");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("ASSESSMENT assess-7");
 });
