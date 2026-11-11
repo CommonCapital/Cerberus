@@ -89,6 +89,58 @@ export type Engagement = {
   createdAt: string;
 };
 
+export type AssessmentSummary = {
+  id: string;
+  catalogId: string;
+  targetPath: string;
+  totalControls: number;
+  compliant: number;
+  nonCompliant: number;
+  notAssessed: number;
+  score: number | null;
+  createdAt: string;
+};
+
+export type ControlAnswer = { verdict: string; justification: string; actionPlan: string | null; timeLimitDays: number | null };
+
+export type SuggestedAnswer = {
+  controlId: string;
+  suggestion: string;
+  reasoning: string;
+  evidence: { file: string; line: number; text: string }[];
+  model: string;
+};
+
+export type AssessmentControl = {
+  controlId: string;
+  section: string;
+  title: string;
+  /** What the scanner established on its own. */
+  verdict: "Compliant" | "NonCompliant" | "NotAssessed";
+  rationale: string;
+  /** The operator's answer; it overrules the scanner's verdict. */
+  response: ControlAnswer | null;
+  /** A model's suggested answer. Changes nothing until accepted. */
+  suggestion: SuggestedAnswer | null;
+};
+
+export type Assessment = {
+  id: string;
+  catalogId: string;
+  targetPath: string;
+  createdAt: string;
+  summary: { totalControls: number; compliant: number; nonCompliant: number; notAssessed: number; score: number | null };
+  effective: {
+    compliant: number;
+    partiallyCompliant: number;
+    nonCompliant: number;
+    notApplicable: number;
+    unanswered: number;
+    operatorAnswered: number;
+  };
+  controls: AssessmentControl[];
+};
+
 export type MemoryEntry = {
   id: string;
   kind: "instruction" | "note";
@@ -228,6 +280,13 @@ export const cerberus = {
   answer: (id: string, selected: string[], text?: string) =>
     request<Question>("POST", `/questions/${id}/answer`, { selected, text }),
   review: (id: string) => request<Review>("GET", `/reviews/${id}`),
+  assessments: () => request<AssessmentSummary[]>("GET", "/compliance"),
+  assessment: (id: string) => request<Assessment>("GET", `/compliance/${id}`),
+  /** Makes a model's suggestion the operator's answer. A non-compliant one needs an action plan. */
+  acceptSuggestion: (id: string, controlId: string, extra: { actionPlan?: string; timeLimitDays?: number } = {}) =>
+    request<unknown>("POST", `/compliance/${id}/suggestions/${controlId}/accept`, extra),
+  dismissSuggestion: (id: string, controlId: string) =>
+    request<null>("DELETE", `/compliance/${id}/suggestions/${controlId}`),
   memory: () => request<MemoryEntry[]>("GET", "/memory"),
   remember: (kind: "instruction" | "note", text: string, targetPath?: string) =>
     request<MemoryEntry>("POST", "/memory", { kind, text, targetPath }),

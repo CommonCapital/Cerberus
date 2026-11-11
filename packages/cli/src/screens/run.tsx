@@ -50,6 +50,12 @@ export function Run() {
     };
   }, [reviewId]);
 
+  // A finished assessment or evidence run leads to the assessment it produced or worked on.
+  const assessmentId =
+    view.job && view.job.state === "Succeeded" && (view.job.type === "assess" || view.job.type === "evidence")
+      ? view.job.resultId
+      : null;
+
   // A new question starts with its first option highlighted.
   const questionId = view.question?.id;
   useEffect(() => setSelectedOption(0), [questionId]);
@@ -103,6 +109,11 @@ export function Run() {
       return;
     }
 
+    if (key.name === "o" && assessmentId) {
+      navigate(`/assessments/${assessmentId}`);
+      return;
+    }
+
     if (key.name === "m" && canBeSteered(view)) {
       setComposing(true);
       return;
@@ -128,6 +139,12 @@ export function Run() {
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
         <text>{composing ? "enter" : "esc"}</text>
         <text attributes={TextAttributes.DIM}>{composing ? "send · esc discard" : "back"}</text>
+        {!composing && assessmentId ? (
+          <>
+            <text>o</text>
+            <text attributes={TextAttributes.DIM}>open the assessment</text>
+          </>
+        ) : null}
         {!composing && canBeSteered(view) && !waiting ? (
           <>
             <text>m</text>
