@@ -11,12 +11,6 @@ import { cerberus } from "../../lib/cerberus/api";
 export const ScanDialogContent = () => <TargetDialog type="scan" />;
 
 /**
- * Asks what to review and submits the review. Its run opens waiting for
- * approval, showing the plan: scan, assess against every catalog, report.
- */
-export const ReviewDialogContent = () => <TargetDialog type="review" />;
-
-/**
  * Asks what the model should review and starts the SAST agent with it. With a
  * cloud model the run opens waiting for approval: the code it reads is sent out.
  */
@@ -27,14 +21,13 @@ export const ThreatModelDialogContent = ({ model }: { model: string }) => <Targe
 
 const HINT = {
   scan: "enter to scan · secrets, weak crypto, injection sinks, vulnerable dependencies",
-  review: "enter to plan a review · scan, compliance assessments, report — you approve the plan first",
   sast: "enter to start · the model reads the code (read-only) and reports what it finds; change it with /models",
   "threat-model": "enter to start · the model maps components and threats (STRIDE) and writes them up; change it with /models",
 };
 
-const LABEL = { scan: "scan", review: "review", sast: "code review", "threat-model": "threat model" };
+const LABEL = { scan: "scan", sast: "code review", "threat-model": "threat model" };
 
-const TargetDialog = ({ type, model }: { type: "scan" | "review" | "sast" | "threat-model"; model?: string }) => {
+const TargetDialog = ({ type, model }: { type: "scan" | "sast" | "threat-model"; model?: string }) => {
   const inputRef = useRef<InputRenderable>(null);
   const [starting, setStarting] = useState(false);
   const { close } = useDialog();

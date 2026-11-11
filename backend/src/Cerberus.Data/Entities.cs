@@ -316,6 +316,9 @@ public class Review
     /// <summary>The SAST agent's run, when the review included one.</summary>
     public string? AgentRunId { get; set; }
 
+    /// <summary>The threat-model agent's run, when the review included one.</summary>
+    public string? ThreatModelRunId { get; set; }
+
     /// <summary>Ids of the compliance assessments (JSON list).</summary>
     public string AssessmentIds { get; set; } = "[]";
     public int FindingCount { get; set; }

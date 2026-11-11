@@ -222,8 +222,10 @@ export type SubmitJob =
       path: string;
       catalogs?: string[];
       model?: string;
-      /** Also have this model read the code itself (the SAST agent) as a step of the review. */
+      /** The model that runs the review's agents. Without `agents`, only the SAST agent runs. */
       agentModel?: string;
+      /** Which agents the review dispatches with `agentModel`. */
+      agents?: ("sast" | "threat-model" | "evidence")[];
       sca?: boolean;
       exclusions?: "ask" | "honour" | "ignore";
       engagementId?: string;

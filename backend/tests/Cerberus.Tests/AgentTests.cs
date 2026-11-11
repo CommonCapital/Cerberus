@@ -462,7 +462,7 @@ public class SastAgentApiTests(ApiHost host)
         Assert.Equal(1, run.GetProperty("findingCount").GetInt32());
         var report = review.GetProperty("report").GetString()!;
         Assert.Contains("## Reported by the model (`llama3.1`)", report);
-        Assert.Contains("`loader.py:2`", report);
+        Assert.Contains("`svc/loader.py:2`", report);   // from the scan root, like the scanner's own findings
         Assert.Contains("do not change any compliance result", report);
 
         // With a cloud agent model, the plan's approval also covers sending code out.

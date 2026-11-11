@@ -18,7 +18,22 @@ namespace Cerberus.Api.Jobs;
 public sealed record ReviewJobParameters(
     List<string> Catalogs, bool Sca = true, string Exclusions = ScanExclusions.Ask,
     string? TriageModel = null, int MaxFindings = 15,
-    string? AgentModel = null, int AgentSteps = Agents.SastAgent.DefaultSteps);
+    string? AgentModel = null, int AgentSteps = Agents.SastAgent.DefaultSteps, List<string>? Agents = null)
+{
+    /// <summary>The agents this review dispatches: none without a model; the SAST agent alone unless others are named.</summary>
+    public IReadOnlyList<string> AgentsToRun =>
+        AgentModel is null ? [] : Agents is { Count: > 0 } ? Agents : [ReviewAgents.Sast];
+}
+
+/// <summary>The model-driven agents a review can dispatch.</summary>
+public static class ReviewAgents
+{
+    public const string Sast = "sast";
+    public const string ThreatModel = "threat-model";
+    public const string Evidence = "evidence";
+
+    public static readonly IReadOnlyList<string> All = [Sast, ThreatModel, Evidence];
+}
 
 public sealed record PlanStep(string Id, string Title, string Detail);
 
@@ -33,6 +48,9 @@ public static class ReviewPlan
     public const string ScanStep = "scan";
     public const string TriageStep = "triage";
     public const string AgentStep = "sast";
+    public const string ThreatModelStep = "threat-model";
+
+    public static string EvidenceStep(string catalogId) => $"evidence:{catalogId}";
     public const string ReportStep = "report";
 
     public static string AssessStep(string catalogId) => $"assess:{catalogId}";
@@ -56,15 +74,24 @@ public static class ReviewPlan
                 $"The model judges each production-code finding as real, harmless or unsure. Advisory only. {where}"));
         }
 
-        if (parameters.AgentModel is { } agentModel)
+        var agents = parameters.AgentsToRun;
+        var agentModel = parameters.AgentModel;
+        var agentProvider = agentModel is null ? null : ModelRegistry.Find(agentModel)?.Provider;
+        var sentTo = agentProvider is { } remote && !FindingTriager.IsLocal(remote)
+            ? $"Whatever it reads is sent to {remote}; credential-shaped values are masked first."
+            : "The model runs locally; no code leaves this machine.";
+
+        if (agents.Contains(ReviewAgents.Sast))
         {
-            var provider = ModelRegistry.Find(agentModel)?.Provider;
-            var where = provider is { } p && !FindingTriager.IsLocal(p)
-                ? $"Whatever it reads is sent to {p}; credential-shaped values are masked first."
-                : "The model runs locally; no code leaves this machine.";
             steps.Add(new(AgentStep, $"Have {agentModel} read the code",
                 $"The SAST agent explores the code read-only, in up to {parameters.AgentSteps} steps, and reports vulnerabilities the rules cannot see. " +
-                $"Its findings are a model's candidates and do not change compliance results. {where}"));
+                $"Its findings are a model's candidates and do not change compliance results. {sentTo}"));
+        }
+        if (agents.Contains(ReviewAgents.ThreatModel))
+        {
+            steps.Add(new(ThreatModelStep, $"Have {agentModel} build a threat model",
+                $"The threat-model agent maps the code's components and the threats against them, read-only, in up to {parameters.AgentSteps} steps. " +
+                $"A hypothesis for people to review. {sentTo}"));
         }
 
         foreach (var id in parameters.Catalogs)
@@ -72,6 +99,12 @@ public static class ReviewPlan
             var catalog = catalogs.Get(id);
             steps.Add(new(AssessStep(id), $"Assess against {catalog?.Name ?? id}",
                 $"{catalog?.ControlCount ?? 0} controls; those the scanner can judge get a verdict, the rest are left for you."));
+            if (agents.Contains(ReviewAgents.Evidence))
+            {
+                steps.Add(new(EvidenceStep(id), $"Have {agentModel} look for evidence for {catalog?.Name ?? id}",
+                    $"The evidence agent suggests answers for up to {Agents.EvidenceAgent.DefaultControls} controls the scanner could not judge. " +
+                    $"Suggestions change nothing until you accept them. {sentTo}"));
+            }
         }
 
         steps.Add(new(ReportStep, "Write the report", "A Markdown summary of the findings and compliance results, stored with the review."));
@@ -93,6 +126,7 @@ public sealed record ReviewRun(Review Review);
 /// </summary>
 public sealed class ReviewRunner(
     ScanRunner scans, AssessmentRunner assessments, TriageRunner triage, Agents.SastAgentRunner sast,
+    Agents.ThreatModelAgentRunner threatModels, Agents.EvidenceAgentRunner evidence,
     CatalogLoader catalogs, CerberusDbContext db, AuditLog audit)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -131,12 +165,23 @@ public sealed class ReviewRunner(
         }
 
         // 3. The SAST agent (optional): a model reads the code itself
+        var agents = parameters.AgentsToRun;
+        var agentModel = parameters.AgentModel ?? "";
         AgentRun? agentRun = null;
-        if (parameters.AgentModel is { } agentModel)
+        if (agents.Contains(ReviewAgents.Sast))
         {
             await reporter.StepAsync(ReviewPlan.AgentStep, Step(ReviewPlan.AgentStep).Title, StepStatus.Running);
             agentRun = await sast.RunAsync(job, new Agents.SastJobParameters(agentModel, parameters.AgentSteps), inner, ct);
             await reporter.StepAsync(ReviewPlan.AgentStep, Step(ReviewPlan.AgentStep).Title, StepStatus.Completed);
+        }
+
+        // The threat-model agent (optional)
+        AgentRun? threatModelRun = null;
+        if (agents.Contains(ReviewAgents.ThreatModel))
+        {
+            await reporter.StepAsync(ReviewPlan.ThreatModelStep, Step(ReviewPlan.ThreatModelStep).Title, StepStatus.Running);
+            threatModelRun = await threatModels.RunAsync(job, new Agents.ThreatModelJobParameters(agentModel, parameters.AgentSteps), inner, ct);
+            await reporter.StepAsync(ReviewPlan.ThreatModelStep, Step(ReviewPlan.ThreatModelStep).Title, StepStatus.Completed);
         }
 
         // 4. One assessment per catalog, all from the same scan
@@ -146,8 +191,19 @@ public sealed class ReviewRunner(
             var catalog = catalogs.Get(id) ?? throw new InvalidOperationException($"Catalog '{id}' is no longer installed.");
             var stepId = ReviewPlan.AssessStep(id);
             await reporter.StepAsync(stepId, Step(stepId).Title, StepStatus.Running);
-            results.Add(await assessments.RunAsync(job.UserId, job.EngagementId, catalog, scan.Scan, job.TargetPath, parameters.Sca, ct, inner));
+            var assessed = await assessments.RunAsync(job.UserId, job.EngagementId, catalog, scan.Scan, job.TargetPath, parameters.Sca, ct, inner);
+            results.Add(assessed);
             await reporter.StepAsync(stepId, Step(stepId).Title, StepStatus.Completed);
+
+            // The evidence agent (optional): suggested answers for what the engine could not judge
+            if (agents.Contains(ReviewAgents.Evidence))
+            {
+                var evidenceStep = ReviewPlan.EvidenceStep(id);
+                await reporter.StepAsync(evidenceStep, Step(evidenceStep).Title, StepStatus.Running);
+                await evidence.RunAsync(job,
+                    new Agents.EvidenceJobParameters(assessed.Assessment.Id, agentModel, MaxSteps: parameters.AgentSteps), inner, ct);
+                await reporter.StepAsync(evidenceStep, Step(evidenceStep).Title, StepStatus.Completed);
+            }
         }
 
         // 5. Report
@@ -162,13 +218,14 @@ public sealed class ReviewRunner(
             ScanId = scan.Scan.Id,
             AssessmentIds = JsonSerializer.Serialize(results.Select(r => r.Assessment.Id)),
             AgentRunId = agentRun?.Id,
+            ThreatModelRunId = threatModelRun?.Id,
             FindingCount = scan.Scan.FindingCount,
-            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow, agentRun),
+            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow, agentRun, threatModelRun),
         };
         db.Reviews.Add(review);
         await db.SaveChangesAsync(ct);
         await audit.AppendAsync(job.UserId, "review.complete", AuditOutcome.Ok,
-            $"Review {review.Id}: scan {scan.Scan.Id} ({scan.Scan.FindingCount} findings), {results.Count} assessment(s), {opinions.Count} model opinion(s){(agentRun is null ? "" : $", agent run {agentRun.Id} ({agentRun.FindingCount} reported)")}.",
+            $"Review {review.Id}: scan {scan.Scan.Id} ({scan.Scan.FindingCount} findings), {results.Count} assessment(s), {opinions.Count} model opinion(s){(agentRun is null ? "" : $", agent run {agentRun.Id} ({agentRun.FindingCount} reported)")}{(threatModelRun is null ? "" : $", threat model {threatModelRun.Id} ({threatModelRun.FindingCount} threats)")}.",
             job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
         await reporter.StepAsync(ReviewPlan.ReportStep, Step(ReviewPlan.ReportStep).Title, StepStatus.Completed);
 
@@ -198,13 +255,31 @@ public sealed class ReviewRunner(
 public static class ReviewReport
 {
     private const int MaxFindingsListed = 40;
+    private const int MaxThreatsListed = 10;
+
+    /// <summary>How many lines apart a scanner finding and a model finding may be and still count as the same place.</summary>
+    private const int CorrelationLines = 2;
 
     public static string Write(
         string targetPath, ScanRun scan, IReadOnlyList<AssessmentRun> assessments,
-        IReadOnlyList<TriageResult> opinions, DateTime now, AgentRun? agentRun = null)
+        IReadOnlyList<TriageResult> opinions, DateTime now, AgentRun? agentRun = null, AgentRun? threatModelRun = null)
     {
         var active = scan.Findings.Where(f => !f.Suppressed).ToList();
         var production = active.Where(f => f.Context is null).ToList();
+
+        // Correlation: where the scanner and the model point at the same place, each says so of the other.
+        var reported = agentRun is null ? [] : Agents.SastAgentRunner.ReadFindings(agentRun.Findings);
+        var prefix = ScopePolicy.Normalize(TargetType.Path, targetPath) ?? "";
+        string FromRoot(string file) => prefix.Length == 0 ? file : $"{prefix}/{file}";
+        bool SamePlace(Finding scanner, Agents.AgentFinding model) =>
+            scanner.File == FromRoot(model.File) && Math.Abs(scanner.Line - model.Line) <= CorrelationLines;
+        // The model's finding against everything the scanner saw there — also test code, also what the target suppressed.
+        string ScannerSaw(Agents.AgentFinding model)
+        {
+            var same = scan.Findings.Where(f => SamePlace(f, model)).ToList();
+            return same.Count == 0 ? "model only" : same.Any(f => !f.Suppressed) ? "flagged it too" : "flagged it, but the target suppressed it";
+        }
+        var alsoFlagged = reported.Count(m => ScannerSaw(m) != "model only");
         var text = new StringBuilder();
 
         text.AppendLine($"# Security review of `{targetPath}`");
@@ -225,6 +300,14 @@ public static class ReviewReport
             ? $"- **Dependencies:** {scan.Sca.DependenciesScanned} checked, {scan.Sca.Findings.Count} known vulnerabilities" + (scan.Sca.Completed ? "" : " — **the check did not complete; this is partial**")
             : "- **Dependencies:** not checked");
         if (scan.Static.Truncated) text.AppendLine("- **Truncated:** the scan stopped at its finding limit; there may be more.");
+        if (agentRun is not null)
+        {
+            text.AppendLine($"- **Reported by the model:** {reported.Count} ({alsoFlagged} at places the scanner also flagged, {reported.Count - alsoFlagged} the model's alone)");
+        }
+        if (threatModelRun is not null)
+        {
+            text.AppendLine($"- **Threat model:** {threatModelRun.FindingCount} threat(s) recorded by the model");
+        }
         text.AppendLine();
 
         if (assessments.Count > 0)
@@ -241,6 +324,21 @@ public static class ReviewReport
             text.AppendLine();
             text.AppendLine("The score covers automatically assessed controls only.");
             text.AppendLine();
+
+            var suggested = assessments
+                .Select(a => (a.Report.CatalogName, Suggestions: Agents.EvidenceAgent.ReadSuggestions(a.Assessment).Values.ToList()))
+                .Where(x => x.Suggestions.Count > 0).ToList();
+            if (suggested.Count > 0)
+            {
+                text.AppendLine("A model looked for evidence for controls left for manual review and suggested answers. They change nothing until you accept them in the assessment:");
+                text.AppendLine();
+                foreach (var (catalogName, suggestions) in suggested)
+                {
+                    var counts = suggestions.GroupBy(s => s.Suggestion).OrderByDescending(g => g.Count()).Select(g => $"{g.Count()} \"{g.Key}\"");
+                    text.AppendLine($"- **{catalogName}:** {suggestions.Count} suggestion(s) by `{suggestions[0].Model}` — {string.Join(", ", counts)}");
+                }
+                text.AppendLine();
+            }
 
             foreach (var a in assessments)
             {
@@ -265,14 +363,17 @@ public static class ReviewReport
         else
         {
             var verdicts = opinions.ToDictionary(o => o.FindingId, o => o.Verdict);
-            text.AppendLine("| Severity | Finding | Location | Model review |");
-            text.AppendLine("|---|---|---|---|");
-            foreach (var f in production.OrderByDescending(f => f.Severity).Take(MaxFindingsListed))
+            var withModel = agentRun is not null;
+            text.AppendLine("| Severity | Finding | Location | Model review |" + (withModel ? " Model reported it too |" : ""));
+            text.AppendLine("|---|---|---|---|" + (withModel ? "---|" : ""));
+            // Most severe first; among equals, what the model also reported comes first.
+            foreach (var f in production.OrderByDescending(f => f.Severity).ThenByDescending(f => reported.Any(m => SamePlace(f, m))).Take(MaxFindingsListed))
             {
                 var verdict = verdicts.TryGetValue(f.Id, out var v)
                     ? v switch { TriageVerdict.TruePositive => "real", TriageVerdict.FalsePositive => "harmless", _ => "unsure" }
                     : "—";
-                text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(f.File)}:{f.Line}` | {verdict} |");
+                text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(f.File)}:{f.Line}` | {verdict} |" +
+                                (withModel ? $" {(reported.Any(m => SamePlace(f, m)) ? "yes" : "—")} |" : ""));
             }
             if (production.Count > MaxFindingsListed)
             {
@@ -291,7 +392,6 @@ public static class ReviewReport
 
         if (agentRun is not null)
         {
-            var reported = Agents.SastAgentRunner.ReadFindings(agentRun.Findings);
             text.AppendLine($"## Reported by the model (`{agentRun.Model}`)");
             text.AppendLine();
             text.AppendLine("> A model read the code and reported these. They are candidates for a person to check, are not part of the scan, " +
@@ -304,11 +404,11 @@ public static class ReviewReport
             }
             else
             {
-                text.AppendLine("| Severity | Finding | Location | Why |");
-                text.AppendLine("|---|---|---|---|");
+                text.AppendLine("| Severity | Finding | Location | Scanner | Why |");
+                text.AppendLine("|---|---|---|---|---|");
                 foreach (var f in reported.OrderByDescending(f => f.Severity).Take(MaxFindingsListed))
                 {
-                    text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(f.File)}:{f.Line}` | {Cell(Shorten(f.Description, 240))} |");
+                    text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(FromRoot(f.File))}:{f.Line}` | {ScannerSaw(f)} | {Cell(Shorten(f.Description, 240))} |");
                 }
             }
             text.AppendLine();
@@ -321,9 +421,45 @@ public static class ReviewReport
             }
         }
 
+        if (threatModelRun is not null)
+        {
+            var model = Agents.ThreatModelAgentRunner.Read(threatModelRun.Findings);
+            string[] riskOrder = ["critical", "high", "medium", "low"];
+            text.AppendLine($"## Threat model (`{threatModelRun.Model}`)");
+            text.AppendLine();
+            text.AppendLine("> A model's hypothesis from reading the code, for people who know the system to review; nothing here was tested." +
+                            (threatModelRun.Complete ? "" : " **This part of the review did not complete; the model is partial.**"));
+            text.AppendLine();
+            if (model.Threats.Count == 0)
+            {
+                text.AppendLine($"{model.Components.Count} component(s) recorded, no threats.");
+            }
+            else
+            {
+                text.AppendLine($"{model.Components.Count} component(s), {model.Threats.Count} threat(s): " +
+                                string.Join(", ", riskOrder.Select(r => (Risk: r, Count: model.Threats.Count(t => t.Risk == r))).Where(x => x.Count > 0).Select(x => $"{x.Count} {x.Risk}")) + ".");
+                text.AppendLine();
+                text.AppendLine("| Risk | Threat | STRIDE | Component |");
+                text.AppendLine("|---|---|---|---|");
+                foreach (var t in model.Threats.OrderBy(t => Array.IndexOf(riskOrder, t.Risk)).Take(MaxThreatsListed))
+                {
+                    text.AppendLine($"| {t.Risk} | {Cell(t.Title)} | {t.Category} | {Cell(t.Component)} |");
+                }
+                if (model.Threats.Count > MaxThreatsListed)
+                {
+                    text.AppendLine();
+                    text.AppendLine($"…and {model.Threats.Count - MaxThreatsListed} more.");
+                }
+            }
+            text.AppendLine();
+            text.AppendLine($"The full threat model, with descriptions and mitigations, is agent run `{threatModelRun.Id}`.");
+            text.AppendLine();
+        }
+
         text.AppendLine("## What to do next");
         text.AppendLine();
-        text.AppendLine("1. Review the findings above, most severe first; fix or record why each is acceptable.");
+        text.AppendLine("1. Review the findings above, most severe first; fix or record why each is acceptable." +
+                        (agentRun is not null ? " Start with those both the scanner and the model point at." : ""));
         if (assessments.Any(a => a.Report.NotAssessed > 0))
         {
             text.AppendLine("2. Answer the controls left for manual review (export the assessment as a spreadsheet, complete it, import it back).");

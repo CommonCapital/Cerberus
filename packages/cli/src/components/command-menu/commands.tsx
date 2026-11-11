@@ -76,7 +76,7 @@ export const COMMANDS: Command[] = [
     action: (ctx) => {
       ctx.dialog.open({
         title: "Security review",
-        children: <ReviewDialogContent />,
+        children: <ReviewDialogContent model={ctx.model} />,
       })
     },
   },
