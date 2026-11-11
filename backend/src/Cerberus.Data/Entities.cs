@@ -345,6 +345,9 @@ public class AgentRun
 
     /// <summary>False when the run was stopped early: cancelled, failed, timed out or at its step limit.</summary>
     public bool Complete { get; set; }
+
+    /// <summary>A written report of the run (Markdown), for agents that produce one. Empty otherwise.</summary>
+    public string Report { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

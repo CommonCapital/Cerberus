@@ -155,6 +155,35 @@ public static class JobEndpoints
                     "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
             }
         }
+        else if (type == JobTypes.ThreatModel)
+        {
+            if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+            }
+            if (body.MaxSteps is < 1 or > Agents.ThreatModelAgent.MaxSteps)
+            {
+                return BadRequest($"maxSteps must be between 1 and {Agents.ThreatModelAgent.MaxSteps}");
+            }
+            if (body.Instructions is { Length: > Agents.ThreatModelAgent.MaxInstructions })
+            {
+                return BadRequest($"instructions must be at most {Agents.ThreatModelAgent.MaxInstructions} characters");
+            }
+            var threatModel = new Agents.ThreatModelJobParameters(body.Model, body.MaxSteps ?? Agents.ThreatModelAgent.DefaultSteps,
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim());
+            parameters = JsonSerializer.Serialize(threatModel, JobTypes.Json);
+
+            var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
+            if (!Cerberus.Triage.FindingTriager.IsLocal(provider))
+            {
+                approvalNeed = new ApprovalNeed(
+                    ApprovalKinds.SendCodeToCloudModel,
+                    $"Let {body.Model} ({provider}) read the code under \"{targetPath}\" for a threat model",
+                    $"The threat-model agent decides for itself which files under \"{targetPath}\" to read, in up to {threatModel.MaxSteps} steps; " +
+                    $"whatever it reads is sent to {provider}. Credential-shaped values are masked before sending; other code is sent as is. " +
+                    "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
+            }
+        }
         else if (type == JobTypes.Evidence)
         {
             if (string.IsNullOrWhiteSpace(body.AssessmentId)) return BadRequest("assessmentId is required for an evidence job");

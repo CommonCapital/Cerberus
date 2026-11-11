@@ -94,6 +94,7 @@ builder.Services.AddSingleton<Cerberus.Api.Agents.AgentLoop>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.EvidenceAgentRunner>();
+builder.Services.AddScoped<Cerberus.Api.Agents.ThreatModelAgentRunner>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddSingleton<OperatorDesk>();

@@ -43,6 +43,26 @@ public sealed partial class MockProvider : IModelProvider
             .SelectMany(t => t.Parts.OfType<ToolResultPart>())
             .ToList();
 
+        // Offered the threat-model agent's tools: one component, one threat, by fixed rules.
+        if (request.Tools.Any(t => t.Name == "recordThreat"))
+        {
+            var (tool, input, closing) = NextThreatModelAction(request);
+            if (tool is not null)
+            {
+                await foreach (var word in Words($"Calling {tool}.", cancellationToken)) yield return new TextDelta(word);
+                foreach (var e in ToolCall(tool, input!)) yield return e;
+                yield return new UsageReport(InputTokens: 12, OutputTokens: 8);
+                yield return new StepFinished("tool_calls");
+            }
+            else
+            {
+                await foreach (var word in Words(closing!, cancellationToken)) yield return new TextDelta(word);
+                yield return new UsageReport(InputTokens: 20, OutputTokens: 10);
+                yield return new StepFinished("stop");
+            }
+            yield break;
+        }
+
         // Offered the evidence agent's tools: look at one file, then say it cannot tell.
         if (request.Tools.Any(t => t.Name == "suggestVerdict"))
         {
@@ -197,6 +217,43 @@ public sealed partial class MockProvider : IModelProvider
 
         return (null, null,
             $"Read {read.Count} file(s) and reported {reported.Count} finding(s). This was the dev model following fixed rules, not a review.");
+    }
+
+    /// <summary>
+    /// The threat-model agent, acted out without a model: list the top directory,
+    /// record the code as one component and one generic threat against it. Not a threat model.
+    /// </summary>
+    private static (string? Tool, object? Input, string? Closing) NextThreatModelAction(ChatRequest request)
+    {
+        var calls = request.Turns.SelectMany(t => t.Parts.OfType<ToolCallPart>()).ToList();
+        if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
+        if (request.Turns[^1] is { Role: "user" })
+        {
+            return (null, null, "The operator sent a message. Stopping here, as the dev model does for any message.");
+        }
+        if (calls.All(c => c.Name != "recordComponent"))
+        {
+            return ("recordComponent", new
+            {
+                name = "The code under review",
+                kind = "process",
+                description = "Everything in the top directory, recorded as one component by the dev model.",
+            }, null);
+        }
+        if (calls.All(c => c.Name != "recordThreat"))
+        {
+            return ("recordThreat", new
+            {
+                title = "Untrusted input reaches the code unchecked (placeholder)",
+                category = "tampering",
+                component = "The code under review",
+                description = "A placeholder threat recorded by the dev model, which is not a language model and has not analysed the code.",
+                likelihood = "medium",
+                impact = "medium",
+                mitigation = "Have a person or a real model build the threat model.",
+            }, null);
+        }
+        return (null, null, "Recorded one component and one placeholder threat. This was the dev model following fixed rules, not a threat model.");
     }
 
     /// <summary>

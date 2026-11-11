@@ -32,15 +32,18 @@ export function Run() {
     };
   }, [id]);
 
-  // A review that succeeded has a report to show.
-  const reviewId = view.job?.type === "review" && view.job.state === "Succeeded" ? view.job.resultId : null;
+  // A review or a threat model that succeeded has a report to show.
+  const reportOf =
+    view.job?.state === "Succeeded" && view.job.resultId && (view.job.type === "review" || view.job.type === "threat-model")
+      ? `${view.job.type}:${view.job.resultId}`
+      : null;
   useEffect(() => {
-    if (!reviewId) return;
+    if (!reportOf) return;
+    const [kind, resultId] = [reportOf.slice(0, reportOf.lastIndexOf(":")), reportOf.slice(reportOf.lastIndexOf(":") + 1)];
     let current = true;
-    cerberus
-      .review(reviewId)
-      .then((review) => {
-        if (current) setReport(review.report);
+    (kind === "review" ? cerberus.review(resultId) : cerberus.agentRun(resultId))
+      .then((result) => {
+        if (current) setReport(result.report);
       })
       .catch((problem: unknown) => {
         if (current) setError(problem instanceof Error ? problem.message : "Could not load the report");
@@ -48,7 +51,7 @@ export function Run() {
     return () => {
       current = false;
     };
-  }, [reviewId]);
+  }, [reportOf]);
 
   // A finished assessment or evidence run leads to the assessment it produced or worked on.
   const assessmentId =

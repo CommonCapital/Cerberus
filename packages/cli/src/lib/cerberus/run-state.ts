@@ -32,6 +32,15 @@ export type ControlSuggestion = {
   model: string;
 };
 
+/** A threat recorded by the threat-model agent. A hypothesis for people to review. */
+export type Threat = {
+  id: string;
+  title: string;
+  category: string;
+  component: string;
+  risk: "low" | "medium" | "high" | "critical";
+};
+
 /** One tool call of an agent, with its result once it has answered. */
 export type ToolActivity = {
   id: string;
@@ -52,6 +61,9 @@ export type RunView = {
   /** Model output per channel, in arrival order of the channels. */
   text: { channel: string; text: string }[];
   triage: TriageOpinion[];
+  /** Names of the components the threat-model agent recorded. */
+  components: string[];
+  threats: Threat[];
   /** Suggested answers per control; a later one for the same control replaces the earlier. */
   suggestions: ControlSuggestion[];
   /** What the agent did, in order. */
@@ -73,6 +85,8 @@ export const emptyRun = (): RunView => ({
   findings: [],
   text: [],
   triage: [],
+  components: [],
+  threats: [],
   suggestions: [],
   tools: [],
   notes: [],
@@ -89,7 +103,7 @@ export const isFinished = (view: RunView) => view.job !== null && TERMINAL.inclu
 export const canBeSteered = (view: RunView) =>
   view.job !== null &&
   view.job.state === "Running" &&
-  (view.job.type === "sast" || view.job.type === "evidence" || view.tools.length > 0);
+  (["sast", "evidence", "threat-model"].includes(view.job.type) || view.tools.length > 0);
 
 export const isWaitingForOperator = (view: RunView) => view.approval !== null || view.question !== null;
 
@@ -158,6 +172,12 @@ function applyOne(view: RunView, event: RunEvent): RunView {
         index === -1 ? [...view.suggestions, suggestion] : view.suggestions.map((s, i) => (i === index ? suggestion : s));
       break;
     }
+    case "threat_component":
+      next.components = [...view.components, String(data.name ?? "")];
+      break;
+    case "threat":
+      next.threats = [...view.threats, data as unknown as Threat];
+      break;
     case "tool_call":
       next.tools = [...view.tools, data as unknown as ToolActivity];
       break;
