@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -11,6 +11,28 @@ import { type ModeType, type SupportedChatModelId, type ToolContracts } from "@n
 import { apiClient } from "../lib/api-client";
 import { getAuth } from "../lib/auth";
 import { executeLocalTool } from "../lib/local-tools";
+import { cerberus } from "../lib/cerberus/api";
+import {
+  DENIED_MESSAGE,
+  gateToolCall,
+  STANDARD_POLICY,
+  type Policy,
+} from "../lib/cerberus/tool-permissions";
+import type { ToolDecision, ToolRequest } from "../providers/tool-permission";
+
+/**
+ * The permission policy from the server. A server without the endpoint (or one
+ * that cannot be reached) gets the standard policy, which asks before any
+ * change — never the permissive option.
+ */
+async function loadPolicy(): Promise<Policy> {
+  try {
+    const { mode, allowedKinds } = await cerberus.permissions();
+    return { mode, allowedKinds };
+  } catch {
+    return STANDARD_POLICY;
+  }
+}
 
 export type ChatMessageMetadata = {
   mode?: ModeType;
@@ -28,7 +50,14 @@ type ChatTools = {
 
 export type Message = UIMessage<ChatMessageMetadata, never, ChatTools>;
 
-export function useChat(sessionId: string, initialMessages: Message[]) {
+export function useChat(
+  sessionId: string,
+  initialMessages: Message[],
+  askOperator: (request: ToolRequest) => Promise<ToolDecision>,
+) {
+  // Read once per chat, then kept current as the operator chooses "always allow".
+  const policyRef = useRef<Promise<Policy> | null>(null);
+
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
       api: apiClient.chat.$url().toString(),
@@ -67,23 +96,31 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
     transport,
     onToolCall({ toolCall }) {
       const mode = chat.messages.at(-1)?.metadata?.mode ?? "BUILD";
+      const tool = toolCall.toolName as keyof ChatTools;
+      const fail = (errorText: string) =>
+        chat.addToolOutput({ tool, toolCallId: toolCall.toolCallId, state: "output-error", errorText });
 
-      void executeLocalTool(toolCall.toolName, toolCall.input, mode)
-        .then((output) =>
-          chat.addToolOutput({
-            tool: toolCall.toolName as keyof ChatTools,
-            toolCallId: toolCall.toolCallId,
-            output,
-          }),
-        )
-        .catch((error) =>
-          chat.addToolOutput({
-            tool: toolCall.toolName as keyof ChatTools,
-            toolCallId: toolCall.toolCallId,
-            state: "output-error",
-            errorText: error instanceof Error ? error.message : String(error),
-          }),
-        );
+      void (async () => {
+        // Human in the loop: nothing that needs the operator's say-so runs without it.
+        policyRef.current ??= loadPolicy();
+        const gate = await gateToolCall(await policyRef.current, toolCall.toolName, toolCall.input, askOperator);
+        if (!gate.run) {
+          fail(DENIED_MESSAGE);
+          return;
+        }
+        if (gate.remembered) {
+          policyRef.current = Promise.resolve(gate.policy);
+          // Remembered on the server too, so it holds in later chats. If that fails it still holds for this one.
+          void cerberus.setPermissions({ allowedKinds: gate.policy.allowedKinds }).catch(() => {});
+        }
+
+        try {
+          const output = await executeLocalTool(toolCall.toolName, toolCall.input, mode);
+          chat.addToolOutput({ tool, toolCallId: toolCall.toolCallId, output });
+        } catch (error) {
+          fail(error instanceof Error ? error.message : String(error));
+        }
+      })();
     },
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });

@@ -56,6 +56,7 @@ export function Run() {
     const { approval, question } = view;
     if (approval) {
       if (key.name === "a") void act(() => cerberus.approve(approval.id));
+      else if (key.name === "r") void act(() => cerberus.approve(approval.id, { remember: true }));
       else if (key.name === "d") void act(() => cerberus.deny(approval.id));
       return;
     }

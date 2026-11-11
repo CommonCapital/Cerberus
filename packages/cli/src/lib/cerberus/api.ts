@@ -65,6 +65,13 @@ export type RunEvent = {
 
 export type EventsPage = { jobId: string; events: RunEvent[]; lastSequence: number; more: boolean };
 
+export type Permissions = {
+  mode: "Default" | "Ask";
+  allowedKinds: string[];
+  scope: "standard" | "user" | "engagement";
+  kinds: { kind: string; description: string; asks: boolean }[];
+};
+
 export type Catalog = { id: string; name: string; version: string; controlCount: number };
 
 export class ApiError extends Error {
@@ -132,7 +139,12 @@ export const cerberus = {
   jobs: (limit = 30) => request<Job[]>("GET", `/jobs?limit=${limit}`),
   cancelJob: (id: string) => request<unknown>("POST", `/jobs/${id}/cancel`),
   events: (jobId: string, after = 0) => request<EventsPage>("GET", `/jobs/${jobId}/events?after=${after}`),
-  approve: (id: string, note?: string) => request<Approval>("POST", `/approvals/${id}/approve`, { note }),
+  /** `remember` also stops the server asking about this kind of action again. */
+  approve: (id: string, options: { note?: string; remember?: boolean } = {}) =>
+    request<Approval>("POST", `/approvals/${id}/approve`, options),
+  permissions: () => request<Permissions>("GET", "/settings/permissions"),
+  setPermissions: (change: { mode?: "default" | "ask"; allowedKinds?: string[] }) =>
+    request<Permissions>("PUT", "/settings/permissions", change),
   deny: (id: string, note?: string) => request<Approval>("POST", `/approvals/${id}/deny`, { note }),
   answer: (id: string, selected: string[], text?: string) =>
     request<Question>("POST", `/questions/${id}/answer`, { selected, text }),

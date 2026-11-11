@@ -191,6 +191,8 @@ export function RunView({ view, selectedOption, error }: Props) {
           <box flexDirection="row" gap={1} marginTop={1}>
             <text fg={colors.success}>a</text>
             <text attributes={TextAttributes.DIM}>approve</text>
+            <text fg={colors.success}>r</text>
+            <text attributes={TextAttributes.DIM}>approve and always allow</text>
             <text fg={colors.error}>d</text>
             <text attributes={TextAttributes.DIM}>deny</text>
           </box>

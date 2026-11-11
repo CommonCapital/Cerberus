@@ -104,7 +104,7 @@ test("an approval request shows what is being asked and how to decide", async ()
   expect(text).toContain("Approval needed");
   expect(text).toContain("Send source code to Anthropic (claude-haiku-4-5) for triage");
   expect(text).toContain("Nothing is sent until you approve.");
-  expect(text).toContain("a approve d deny");
+  expect(text).toContain("a approve r approve and always allow d deny");
 });
 
 test("a finished run shows the outcome, the answers given and the result", async () => {

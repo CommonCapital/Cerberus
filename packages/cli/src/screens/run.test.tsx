@@ -23,7 +23,9 @@ mock.module("../lib/cerberus/follow", () => ({
 
 mock.module("../lib/cerberus/api", () => ({
   cerberus: {
-    approve: async (id: string) => { calls.push(`approve ${id}`); },
+    approve: async (id: string, options?: { remember?: boolean }) => {
+      calls.push(options?.remember ? `approve+remember ${id}` : `approve ${id}`);
+    },
     deny: async (id: string) => { calls.push(`deny ${id}`); },
     answer: async (id: string, selected: string[]) => { calls.push(`answer ${id} ${selected.join(",")}`); },
     cancelJob: async (id: string) => { calls.push(`cancel ${id}`); },
@@ -102,17 +104,19 @@ test("arrow keys move the highlight and enter sends the highlighted answer", asy
   expect(calls).toEqual(["answer q-1 Scan everything"]);
 });
 
-test("a approves and d denies a pending approval", async () => {
+test("a approves, r approves and remembers, d denies a pending approval", async () => {
   const ui = (current = await screen());
   await ui.show(view([["state", job("AwaitingApproval")], ["approval_requested", approval]]));
   expect(ui.captureCharFrame()).toContain("Approval needed");
 
   ui.mockInput.pressKey("a");
   await ui.settle();
+  ui.mockInput.pressKey("r");
+  await ui.settle();
   ui.mockInput.pressKey("d");
   await ui.settle();
 
-  expect(calls).toEqual(["approve a-1", "deny a-1"]);
+  expect(calls).toEqual(["approve a-1", "approve+remember a-1", "deny a-1"]);
 });
 
 test("while a decision is pending, c does not cancel the run by accident", async () => {
