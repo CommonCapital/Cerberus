@@ -1,0 +1,118 @@
+# Cerberus — everything as local containers. Nothing here needs a cloud service.
+#
+#   docker compose up -d                      # the API (the one backend)
+#   docker compose run --rm cli               # the terminal client, attached to your terminal
+#   docker compose --profile models up -d     # + Ollama (local models; heavy, opt-in)
+#   docker compose --profile infra up -d      # + RabbitMQ and Redis (not used by the API yet)
+#
+# Settings come from a .env file next to this one (copy .env.example). All are optional.
+#
+# NOTE: this file and the Dockerfiles were written without starting Docker
+# (PLAN.md §15). Expect small fixes on the first real run, and record them there.
+
+name: cerberus
+
+services:
+  # The backend: auth, sessions, chat, scans, compliance, jobs, approvals,
+  # questions, skills, and the SignalR hubs. One process, SQLite on a volume.
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: cerberus-api:local
+    restart: unless-stopped
+    ports:
+      # Published on this machine only. Change the left side to expose it, or to move it off 3000.
+      - "127.0.0.1:${CERBERUS_PORT:-3000}:3000"
+    environment:
+      # Model keys are optional; without them, cloud models report "no API key".
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Only reachable when the "models" profile is running.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      # Uncomment to change behaviour (see backend/README.md):
+      # CERBERUS_REQUIRE_ENGAGEMENT: "true"
+      # CERBERUS_JOB_TIMEOUT_SECONDS: "600"
+      # CERBERUS_JOB_CONCURRENCY: "2"
+      # CERBERUS_QUESTION_TIMEOUT_SECONDS: "3600"
+    volumes:
+      # Database and encryption key ring. Losing this volume loses accounts,
+      # scans, the audit log, and the ability to read stored API keys.
+      - cerberus-data:/data
+      # The code to scan, read-only. Defaults to this repository; point
+      # CERBERUS_TARGET at any directory you are authorized to test.
+      - ${CERBERUS_TARGET:-.}:/workspace:ro
+    healthcheck:
+      # The runtime image has no curl; bash can open a TCP connection itself.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  # The terminal client. Interactive, so it is not started by "up":
+  #   docker compose run --rm cli
+  cli:
+    profiles: ["cli"]
+    build:
+      context: .
+      dockerfile: packages/cli/Dockerfile
+    image: cerberus-cli:local
+    stdin_open: true
+    tty: true
+    environment:
+      API_URL: http://api:3000
+    volumes:
+      # Your session token, kept between runs.
+      - cerberus-cli-home:/home/bun
+      # The project the CLI's file tools act on (read-write: BUILD mode edits files).
+      - ${CERBERUS_TARGET:-.}:/workspace
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Local models. Opt-in: images and models are several GB and inference needs
+  # a lot of memory. Pull a model after starting it, e.g.
+  #   docker compose exec ollama ollama pull llama3.1
+  ollama:
+    profiles: ["models"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+  # Message broker for the RabbitMQ implementation of IMessageBus (PLAN.md M3).
+  # The API uses its in-process bus today and does not connect to this.
+  rabbitmq:
+    profiles: ["infra"]
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"   # management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cerberus}
+      # Local-only default (the port is published to this machine only). Set
+      # RABBITMQ_PASSWORD in .env before using this for anything real.
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-cerberus-local-only}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # Cache for IDistributedCache, when something needs one. Unused today.
+  redis:
+    profiles: ["infra"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  cerberus-data:
+  cerberus-cli-home:
+  ollama-models:
+  rabbitmq-data:
+  redis-data:

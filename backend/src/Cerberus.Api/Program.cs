@@ -117,7 +117,10 @@ app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
-app.Run($"http://localhost:{port}");
+// Listens on this machine only by default. A container sets CERBERUS_BIND=0.0.0.0
+// so the port can be published — and publishes it to localhost only (docker-compose.yml).
+var bind = Environment.GetEnvironmentVariable("CERBERUS_BIND") ?? "localhost";
+app.Run($"http://{bind}:{port}");
 
 static int EnvInt(string name, int fallback) =>
     int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : fallback;
