@@ -3,11 +3,13 @@ import { useTheme } from "../providers/theme";
 import { usePromptConfig } from "../providers/prompt-config";
 import { Mode } from "@nightcode/shared";
 import { useCurrentEngagement } from "../lib/cerberus/engagement";
+import { useWaitingCount } from "../lib/cerberus/waiting";
 
 export function StatusBar() {
   const { mode, model } = usePromptConfig();
   const { colors } = useTheme();
   const engagement = useCurrentEngagement();
+  const waiting = useWaitingCount();
 
   return (
     <box flexDirection="row" gap={1}>
@@ -20,6 +22,11 @@ export function StatusBar() {
         ›
       </text>
       <text>{model}</text>
+      {waiting > 0 ? (
+        <text fg={colors.planMode}>
+          ! {waiting} run{waiting === 1 ? "" : "s"} waiting · /runs
+        </text>
+      ) : null}
       {engagement ? (
         <>
           <box flexGrow={1} />

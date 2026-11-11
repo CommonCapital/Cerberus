@@ -134,8 +134,10 @@ public sealed class ApiHost : IDisposable
         return (client, token);
     }
 
-    public HubConnection JobsHub(string? token) => new HubConnectionBuilder()
-        .WithUrl("http://localhost/hub/jobs", options =>
+    public HubConnection JobsHub(string? token) => Hub("/hub/jobs", token);
+
+    public HubConnection Hub(string path, string? token) => new HubConnectionBuilder()
+        .WithUrl($"http://localhost{path}", options =>
         {
             // Route the SignalR client through the in-memory test server.
             options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();

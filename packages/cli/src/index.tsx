@@ -7,11 +7,12 @@ import { NewSession } from "./screens/new-session";
 import { Session } from "./screens/session";
 import { Run } from "./screens/run";
 import { Assessment } from "./screens/assessment";
+import { WaitingWatcher } from "./components/waiting-watcher";
 
 const router = createMemoryRouter([
   {
     path: "/",
-    element: <RootLayout />,
+    element: <RootLayout background={<WaitingWatcher />} />,
     children: [
       { index: true, element: <Home /> },
       { path: "sessions/new", element: <NewSession /> },
