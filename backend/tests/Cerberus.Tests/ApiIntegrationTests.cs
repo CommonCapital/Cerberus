@@ -119,6 +119,9 @@ public sealed class ApiHost : IDisposable
 
     public HttpClient CreateClient() => _factory.CreateClient();
 
+    /// <summary>The running API's services, for tests that need to build one of its parts directly.</summary>
+    public IServiceProvider Services => _factory.Services;
+
     /// <summary>Registers a fresh user and returns a client authenticated as them, plus the token.</summary>
     public async Task<(HttpClient Client, string Token)> NewUserAsync()
     {

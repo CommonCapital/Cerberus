@@ -5,3 +5,4 @@ export { ModelsDialogContent } from "./models-dialog";
 export { AgentReviewDialogContent, ReviewDialogContent, ScanDialogContent } from "./scan-dialog";
 export { RunsDialogContent } from "./runs-dialog";
 export { PermissionsDialogContent } from "./permissions-dialog";
+export { MemoryDialogContent } from "./memory-dialog";
