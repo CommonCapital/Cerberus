@@ -279,7 +279,7 @@ public sealed partial class SastAgentRunner(
     }
 
     /// <summary>The skills library, at the passive tier — the same access the chat agent has.</summary>
-    private sealed class SkillTool(string name, SkillLibrary skills) : IAgentTool
+    public sealed class SkillTool(string name, SkillLibrary skills) : IAgentTool
     {
         public ToolDefinition Definition { get; } = ChatTools.For(ChatTools.ModePlan).First(t => t.Name == name);
 

@@ -56,9 +56,10 @@ const STEP_MARK: Record<Step["status"], string> = { pending: "â—‹", running: "â–
 const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assessment", triage: "Finding triage",
   review: "Security review",
   sast: "Code review by a model",
+  evidence: "Compliance evidence by a model",
 };
 
-const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run" };
+const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment" };
 
 export function RunView({ view, selectedOption, error, report }: Props) {
   const { colors } = useTheme();
@@ -169,7 +170,7 @@ export function RunView({ view, selectedOption, error, report }: Props) {
       ) : null}
 
       {/* Model output while it is being written */}
-      {textLines.length > 0 && (!isFinished(view) || job.type === "sast") ? (
+      {textLines.length > 0 && (!isFinished(view) || job.type === "sast" || job.type === "evidence") ? (
         <box flexDirection="column" border={["left"]} borderColor={colors.thinkingBorder} paddingLeft={1}>
           {textLines.map((line, index) => (
             <text key={index} fg={colors.thinking} attributes={TextAttributes.DIM}>
@@ -206,6 +207,41 @@ export function RunView({ view, selectedOption, error, report }: Props) {
               <text attributes={TextAttributes.DIM}>  {opinion.reasoning}</text>
             </box>
           ))}
+        </box>
+      ) : null}
+
+      {/* Suggested answers for compliance controls */}
+      {view.suggestions.length > 0 ? (
+        <box flexDirection="column">
+          <text attributes={TextAttributes.BOLD}>Suggested answers ({view.suggestions.length})</text>
+          {view.suggestions.map((suggestion) => {
+            const answer = suggestion.suggestion.toLowerCase();
+            return (
+              <box key={suggestion.controlId} flexDirection="column">
+                <box flexDirection="row" gap={1}>
+                  <text>{suggestion.controlId}</text>
+                  <text
+                    fg={
+                      answer === "compliant"
+                        ? colors.success
+                        : answer.startsWith("non") || answer.startsWith("partial")
+                          ? colors.error
+                          : colors.planMode
+                    }
+                  >
+                    {suggestion.suggestion}
+                  </text>
+                  {suggestion.evidence.length > 0 ? (
+                    <text attributes={TextAttributes.DIM}>
+                      {suggestion.evidence.map((e) => `${e.file}:${e.line}`).join(", ")}
+                    </text>
+                  ) : null}
+                </box>
+                <text attributes={TextAttributes.DIM}>  {suggestion.reasoning}</text>
+              </box>
+            );
+          })}
+          <text attributes={TextAttributes.DIM}>  A model's suggestions change nothing until you accept them in the assessment.</text>
         </box>
       ) : null}
 

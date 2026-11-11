@@ -43,6 +43,26 @@ public sealed partial class MockProvider : IModelProvider
             .SelectMany(t => t.Parts.OfType<ToolResultPart>())
             .ToList();
 
+        // Offered the evidence agent's tools: look at one file, then say it cannot tell.
+        if (request.Tools.Any(t => t.Name == "suggestVerdict"))
+        {
+            var (tool, input, closing) = NextEvidenceAction(request);
+            if (tool is not null)
+            {
+                await foreach (var word in Words($"Calling {tool}.", cancellationToken)) yield return new TextDelta(word);
+                foreach (var e in ToolCall(tool, input!)) yield return e;
+                yield return new UsageReport(InputTokens: 12, OutputTokens: 8);
+                yield return new StepFinished("tool_calls");
+            }
+            else
+            {
+                await foreach (var word in Words(closing!, cancellationToken)) yield return new TextDelta(word);
+                yield return new UsageReport(InputTokens: 20, OutputTokens: 10);
+                yield return new StepFinished("stop");
+            }
+            yield break;
+        }
+
         // Offered the review agent's tools: act out a small review by fixed rules.
         if (request.Tools.Any(t => t.Name == "reportFinding"))
         {
@@ -178,6 +198,35 @@ public sealed partial class MockProvider : IModelProvider
         return (null, null,
             $"Read {read.Count} file(s) and reported {reported.Count} finding(s). This was the dev model following fixed rules, not a review.");
     }
+
+    /// <summary>
+    /// The evidence agent, acted out without a model: list the top directory and
+    /// answer "Cannot tell" for the first control it was given. Not an assessment.
+    /// </summary>
+    private static (string? Tool, object? Input, string? Closing) NextEvidenceAction(ChatRequest request)
+    {
+        var calls = request.Turns.SelectMany(t => t.Parts.OfType<ToolCallPart>()).ToList();
+        if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
+        if (request.Turns[^1] is { Role: "user" })
+        {
+            return (null, null, "The operator sent a message. Stopping here, as the dev model does for any message.");
+        }
+
+        var task = request.Turns.Count > 0 ? ChatEvents.TextOf(request.Turns[0]) : "";
+        if (calls.All(c => c.Name != "suggestVerdict") && FirstControl().Match(task) is { Success: true } control)
+        {
+            return ("suggestVerdict", new
+            {
+                controlId = control.Groups[1].Value,
+                suggestion = "Cannot tell",
+                reasoning = "The dev model is not a language model and cannot judge a control. A person has to bring the evidence.",
+            }, null);
+        }
+        return (null, null, "Gave one control the answer \"Cannot tell\". This was the dev model following fixed rules, not an assessment.");
+    }
+
+    [GeneratedRegex(@"^- \[([^\]]+)\]", RegexOptions.Multiline)]
+    private static partial Regex FirstControl();
 
     [GeneratedRegex(@"^(\d+)\t.*?\b(pickle\.loads\(|eval\(|md5\(|os\.system\()", RegexOptions.Multiline)]
     private static partial Regex RiskyLine();

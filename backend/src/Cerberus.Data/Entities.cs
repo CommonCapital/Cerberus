@@ -86,6 +86,9 @@ public class ComplianceAssessment
 
     /// <summary>Operator answers (list of OperatorResponse), serialized as JSON. They overrule the automated matrix.</summary>
     public string Responses { get; set; } = "[]";
+
+    /// <summary>A model's suggested answers (list of ControlSuggestion), serialized as JSON. Advisory: they change nothing until the operator accepts one.</summary>
+    public string Suggestions { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

@@ -29,6 +29,9 @@ public static class RunEventTypes
     /// <summary>A model's opinion on one finding. Data: the triage result.</summary>
     public const string Triage = "triage";
 
+    /// <summary>A model's suggested answer for one compliance control. Data: the suggestion.</summary>
+    public const string Suggestion = "suggestion";
+
     /// <summary>An agent calls a tool. Data: <c>{ id, name, input }</c>.</summary>
     public const string ToolCall = "tool_call";
 

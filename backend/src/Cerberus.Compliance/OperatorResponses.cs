@@ -121,7 +121,7 @@ public static class OperatorResponses
     };
 
     // Verdict wording varies slightly between catalogs ("Non-compliant", "NonCompliant").
-    internal static string Normalize(string? value) =>
+    public static string Normalize(string? value) =>
         new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
     private static bool IsNonCompliant(string verdict) => Normalize(verdict) == "noncompliant";

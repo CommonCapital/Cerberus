@@ -160,6 +160,8 @@ export type SubmitJob =
   | { type: "triage"; scanId: string; model: string; maxFindings?: number }
   /** The SAST agent: a model reads the code under `path` and reports vulnerabilities. */
   | { type: "sast"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string }
+  /** The evidence agent: a model suggests answers for controls of an assessment the scanner could not judge. */
+  | { type: "evidence"; assessmentId: string; model: string; maxControls?: number; maxSteps?: number; controlIds?: string[] }
   /** A planned review: scan, optional model triage, one assessment per catalog (all if none named), a report. */
   | {
       type: "review";

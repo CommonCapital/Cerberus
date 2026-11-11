@@ -62,6 +62,8 @@ public static class Endpoints
         compliance.MapPost("/{id}/import", ImportAssessment);
         compliance.MapPut("/{id}/responses/{controlId}", SetControlResponse);
         compliance.MapDelete("/{id}/responses/{controlId}", DeleteControlResponse);
+        compliance.MapPost("/{id}/suggestions/{controlId}/accept", AcceptSuggestion);
+        compliance.MapDelete("/{id}/suggestions/{controlId}", DismissSuggestion);
         compliance.MapPost("/assess", RunAssessment);
     }
 
@@ -292,6 +294,7 @@ public static class Endpoints
         if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
 
         var responses = ReadResponses(a);
+        var suggestions = Agents.EvidenceAgent.ReadSuggestions(a);
         return Results.Json(new
         {
             a.Id, a.CatalogId, a.TargetPath, a.ScanId, a.CreatedAt,
@@ -303,8 +306,69 @@ public static class Endpoints
             {
                 c.ControlId, c.Section, c.Title, c.Verdict, c.AutoEvaluable, c.Rationale, c.Evidence,
                 response = responses.GetValueOrDefault(c.ControlId),
+                // A model's suggested answer, if one was asked for. Advisory until accepted.
+                suggestion = suggestions.GetValueOrDefault(c.ControlId),
             }),
         }, JsonOptions);
+    }
+
+    /// <summary>
+    /// The operator makes a model's suggestion their own answer. The body may add
+    /// what the response schema requires beyond the suggestion (an action plan, a time limit).
+    /// </summary>
+    private static async Task<IResult> AcceptSuggestion(
+        string id, string controlId, ControlResponseRequest? body, HttpContext http,
+        CerberusDbContext db, CatalogLoader loader, Audit.AuditLog audit, CancellationToken ct)
+    {
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+        if (ReadMatrix(a) is not { } controls) return MatrixUnreadable();
+
+        var suggestions = Agents.EvidenceAgent.ReadSuggestions(a);
+        if (!suggestions.TryGetValue(controlId, out var suggestion))
+        {
+            return Results.Json(new { error = "There is no suggestion for that control" }, statusCode: 404);
+        }
+        if (suggestion.Suggestion == Agents.EvidenceAgent.CannotTell)
+        {
+            return Results.Json(new { error = "The model could not tell; there is nothing to accept. Answer the control yourself." }, statusCode: 400);
+        }
+
+        var places = suggestion.Evidence.Count == 0 ? "" : " Evidence: " + string.Join("; ", suggestion.Evidence.Select(e => $"{e.File}:{e.Line}")) + ".";
+        var justification = string.IsNullOrWhiteSpace(body?.Justification)
+            ? $"Accepted from a suggestion by {suggestion.Model}: {suggestion.Reasoning}{places}"
+            : body.Justification;
+        var (response, error) = OperatorResponses.Validate(
+            suggestion.ControlId,
+            new OperatorResponseInput(suggestion.Suggestion, justification, body?.ActionPlan, body?.TimeLimitDays),
+            loader.Get(a.CatalogId), DateTime.UtcNow);
+        if (response is null) return Results.Json(new { error }, statusCode: 400);
+
+        var responses = ReadResponses(a);
+        responses[suggestion.ControlId] = response;
+        a.Responses = JsonSerializer.Serialize(responses.Values, JsonOptions);
+        await db.SaveChangesAsync(ct);
+        await audit.AppendAsync(UserId(http), "evidence.accept", Audit.AuditOutcome.Ok,
+            $"Operator accepted the suggestion of {suggestion.Model} for control {suggestion.ControlId} of assessment {a.Id}: {suggestion.Suggestion}.",
+            a.EngagementId, a.TargetPath, ct: ct);
+
+        return Results.Json(new { response, effective = OperatorResponses.Summarize(controls, responses) }, JsonOptions);
+    }
+
+    private static async Task<IResult> DismissSuggestion(
+        string id, string controlId, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var a = await FindAssessment(db, id, UserId(http), ct);
+        if (a is null) return AssessmentNotFound();
+
+        var suggestions = Agents.EvidenceAgent.ReadSuggestions(a);
+        if (!suggestions.Remove(controlId))
+        {
+            return Results.Json(new { error = "There is no suggestion for that control" }, statusCode: 404);
+        }
+        Agents.EvidenceAgent.WriteSuggestions(a, suggestions.Values);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private const int MaxImportBytes = 5 * 1024 * 1024;

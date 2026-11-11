@@ -234,3 +234,23 @@ test("an agent run shows each tool call, how it ended, its findings and its clos
   expect(text).toContain("Reviewed the request handlers. One command injection.");
   expect(text).toContain("Result: agent run run-3");
 });
+
+test("an evidence run shows each suggested answer, its evidence, and that it is only a suggestion", async () => {
+  const text = await frame(
+    view([
+      ["state", job("Succeeded", { type: "evidence", resultId: "assess-4" })],
+      ["suggestion", { controlId: "A01", suggestion: "Cannot tell", reasoning: "Too early to say.", evidence: [], model: "llama3.1" }],
+      ["suggestion", { controlId: "A07", suggestion: "Non-compliant", reasoning: "Passwords are compared in plain text.", evidence: [{ file: "auth.py", line: 12, text: "if pw == stored:" }], model: "llama3.1" }],
+      ["suggestion", { controlId: "A01", suggestion: "Not applicable", reasoning: "There are no users in this script.", evidence: [], model: "llama3.1" }],
+    ]),
+  );
+
+  expect(text).toContain("Compliance evidence by a model · services/api");
+  expect(text).toContain("Suggested answers (2)");
+  expect(text).toContain("A01 Not applicable");                 // the later suggestion replaced the earlier
+  expect(text).not.toContain("Too early to say.");
+  expect(text).toContain("A07 Non-compliant auth.py:12");
+  expect(text).toContain("Passwords are compared in plain text.");
+  expect(text).toContain("change nothing until you accept them");
+  expect(text).toContain("Result: assessment assess-4");
+});
