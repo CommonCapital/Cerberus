@@ -18,6 +18,9 @@ public static class ActionKinds
     /// <summary>Starting a background job (scan, assessment, triage).</summary>
     public const string RunJob = "run-job";
 
+    /// <summary>Carrying out a multi-step plan (a review) — asked about so the operator sees the plan first.</summary>
+    public const string RunPlan = "run-plan";
+
     /// <summary>Sending source code to a model provider outside this machine.</summary>
     public const string SendCodeToCloudModel = "send-code-to-cloud-model";
 
@@ -27,6 +30,7 @@ public static class ActionKinds
         (EditFiles, "Create or change files"),
         (RunCommands, "Run shell commands"),
         (RunJob, "Start background jobs (scans, assessments, triage)"),
+        (RunPlan, "Carry out a multi-step plan without showing it first"),
         (SendCodeToCloudModel, "Send source code to a cloud model provider"),
     ];
 

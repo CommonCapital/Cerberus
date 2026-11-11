@@ -67,7 +67,8 @@ docker compose up -d
 | GET | `/audit` | Bearer | The caller's audit log, newest first (`?engagementId=&limit=&before=`) |
 | GET | `/audit/verify` | Bearer | Re-check the audit log's hash chain |
 | GET | `/audit/export` | Bearer | Download the whole audit log, oldest first (`?format=jsonl\|csv`) |
-| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess" \| "triage", path?, sca?, engagementId?, catalogId?, scanId?, model?, maxFindings? }` → 202 with the job |
+| POST | `/jobs` | Bearer | Submit a background job `{ type?: "scan" \| "assess" \| "triage" \| "review", path?, sca?, engagementId?, catalogId?, catalogs?, scanId?, model?, maxFindings? }` → 202 with the job |
+| GET | `/reviews` · `/reviews/{id}` · `/reviews/{id}/report` | Bearer | Outcomes of `review` jobs: the scan and assessments each produced; the report as Markdown |
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
@@ -152,6 +153,7 @@ A **permission policy** says which kinds of action wait for the operator. It has
 |---|---|---|---|
 | `read-files` | chat tools that read the project | runs | asks |
 | `run-job` | starting a scan, assessment or triage | runs | asks |
+| `run-plan` | carrying out a multi-step plan (a `review` job) — asked so you see the plan first | asks | asks |
 | `edit-files` | chat tools that create or change files | asks | asks |
 | `run-commands` | the chat `bash` tool | asks | asks |
 | `send-code-to-cloud-model` | sending source code to a cloud model provider | asks | asks |
@@ -213,6 +215,15 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **What is reviewed:** unsuppressed static findings in production code, most severe first, up to `maxFindings` (max 100). Dependency findings are skipped. An unusable or failed model reply becomes `NeedsReview` with `modelAnswered: false`.
 - **Status:** tested with a scripted model only. It has **not** been run against a real model yet — see PLAN.md §17 "Pending verification" for the steps and the expected results.
 
+### Reviews: plan → approve → execute (`review` job)
+
+`POST /jobs {"type":"review","path":"…","catalogs"?: ["owasp-top10"],"model"?: "…","sca"?: true,"exclusions"?: "ask"}` is the first orchestrated run: one job that scans the target, optionally has a model review the findings, assesses the result against each catalog (all installed ones if none are named), and writes a report.
+
+- **The plan comes first.** The job is parked in `AwaitingApproval` with an approval of kind `run-plan` whose detail is the numbered plan — each step, what it does, and whether anything leaves the machine. The plan is built by rules from the request, so what you approve is exactly what runs. "Always allow" for `run-plan` skips the question (recorded in the audit log as `approval.auto`). With a cloud `model`, the same approval also covers `send-code-to-cloud-model`.
+- **One run, one task list.** The run emits a `plan` event and every step as `pending`, then each step `running` → `completed` in order. Progress, findings, model text and operator questions of the parts appear on the same stream; the parts' own internal steps do not.
+- **The result** is a review (`resultId`): `GET /reviews/{id}` gives the scan id, assessment ids and the report; `GET /reviews/{id}/report` returns the report as `text/markdown`. The scan and assessments are ordinary stored ones and can be opened, exported and answered as usual. The report states its limits: findings are candidates, scores cover auto-assessed controls only, model opinions are advisory.
+- **Not yet:** the plan is not written by a model and cannot be edited before approval; steps run one after another.
+
 ### Per-user API keys
 
 Each user stores their own Anthropic/OpenAI keys via `/settings/keys`. Keys are **encrypted at rest** with ASP.NET Core Data Protection (keyring under `dp-keys/`, or `CERBERUS_KEYRING`), never returned by the API, and decrypted in-memory only to authorize a `/chat` request — taking precedence over the `*_API_KEY` env vars. Ollama models need no key.
@@ -268,4 +279,4 @@ Accounts are not shared between the two servers (each has its own database); the
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`, `ChatTests.cs`: the chat agent with client and server tools, auth and sessions as the TypeScript server answered them; jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, permission modes, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`, `ChatTests.cs`: the chat agent with client and server tools, auth and sessions as the TypeScript server answered them; jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, permission modes, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev). `ReviewTests.cs` covers the review job: the plan, its approval (alone, always allowed, and together with a cloud model), the step sequence on the stream, the report, validation and privacy.

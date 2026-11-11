@@ -3,6 +3,7 @@ import {
   AgentsDialogContent,
   ModelsDialogContent,
   PermissionsDialogContent,
+  ReviewDialogContent,
   RunsDialogContent,
   ScanDialogContent,
   SessionsDialogContent,
@@ -57,6 +58,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: "Scan",
         children: <ScanDialogContent />,
+      })
+    },
+  },
+  {
+    name: "review",
+    description: "Plan a full security review, approve it, and get a report",
+    value: "/review",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Security review",
+        children: <ReviewDialogContent />,
       })
     },
   },

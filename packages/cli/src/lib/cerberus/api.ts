@@ -127,7 +127,29 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export type SubmitJob =
   | { type: "scan"; path: string; sca?: boolean; exclusions?: "ask" | "honour" | "ignore"; engagementId?: string }
   | { type: "assess"; catalogId: string; path?: string; scanId?: string; sca?: boolean; engagementId?: string }
-  | { type: "triage"; scanId: string; model: string; maxFindings?: number };
+  | { type: "triage"; scanId: string; model: string; maxFindings?: number }
+  /** A planned review: scan, optional model triage, one assessment per catalog (all if none named), a report. */
+  | {
+      type: "review";
+      path: string;
+      catalogs?: string[];
+      model?: string;
+      sca?: boolean;
+      exclusions?: "ask" | "honour" | "ignore";
+      engagementId?: string;
+    };
+
+export type Review = {
+  id: string;
+  jobId: string;
+  targetPath: string;
+  scanId: string;
+  assessmentIds: string[];
+  findingCount: number;
+  createdAt: string;
+  /** Markdown. */
+  report: string | null;
+};
 
 export const cerberus = {
   /** A job that needs approval comes back as `{ job, approval }`; unwrap it to the job. */
@@ -148,5 +170,6 @@ export const cerberus = {
   deny: (id: string, note?: string) => request<Approval>("POST", `/approvals/${id}/deny`, { note }),
   answer: (id: string, selected: string[], text?: string) =>
     request<Question>("POST", `/questions/${id}/answer`, { selected, text }),
+  review: (id: string) => request<Review>("GET", `/reviews/${id}`),
   catalogs: () => request<Catalog[]>("GET", "/compliance/catalogs"),
 };
