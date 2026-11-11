@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type InputRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { RunView } from "../components/run-view";
 import { cerberus } from "../lib/cerberus/api";
 import { followRun } from "../lib/cerberus/follow";
-import { emptyRun, isFinished, type RunView as RunViewModel } from "../lib/cerberus/run-state";
+import { canBeSteered, emptyRun, isFinished, type RunView as RunViewModel } from "../lib/cerberus/run-state";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
 import { useToast } from "../providers/toast";
 
@@ -19,6 +19,9 @@ export function Run() {
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState(0);
   const [report, setReport] = useState<string | null>(null);
+  // Writing a message to the running agent; while true, keys go to the text field.
+  const [composing, setComposing] = useState(false);
+  const messageRef = useRef<InputRenderable>(null);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -67,6 +70,16 @@ export function Run() {
   useKeyboard((key) => {
     if (!isTopLayer("base")) return;
 
+    if (composing) {
+      if (key.name === "escape") setComposing(false);
+      else if (key.name === "return" || key.name === "enter") {
+        const text = (messageRef.current?.value ?? "").trim();
+        setComposing(false);
+        if (text && id) void act(() => cerberus.sendMessage(id, text));
+      }
+      return;
+    }
+
     if (key.name === "escape") {
       navigate("/");
       return;
@@ -90,6 +103,11 @@ export function Run() {
       return;
     }
 
+    if (key.name === "m" && canBeSteered(view)) {
+      setComposing(true);
+      return;
+    }
+
     if (key.name === "c" && id && view.job && !isFinished(view)) {
       void act(() => cerberus.cancelJob(id));
     }
@@ -102,10 +120,21 @@ export function Run() {
       <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="bottom">
         <RunView view={view} selectedOption={selectedOption} error={error} report={report} />
       </scrollbox>
+      {composing ? (
+        <box flexShrink={0} flexDirection="column">
+          <input ref={messageRef} placeholder="Tell the agent what to do next" focused />
+        </box>
+      ) : null}
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
-        <text>esc</text>
-        <text attributes={TextAttributes.DIM}>back</text>
-        {view.job && !isFinished(view) && !waiting ? (
+        <text>{composing ? "enter" : "esc"}</text>
+        <text attributes={TextAttributes.DIM}>{composing ? "send · esc discard" : "back"}</text>
+        {!composing && canBeSteered(view) && !waiting ? (
+          <>
+            <text>m</text>
+            <text attributes={TextAttributes.DIM}>message the agent</text>
+          </>
+        ) : null}
+        {view.job && !isFinished(view) && !waiting && !composing ? (
           <>
             <text>c</text>
             <text attributes={TextAttributes.DIM}>cancel run</text>

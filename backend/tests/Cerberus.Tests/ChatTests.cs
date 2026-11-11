@@ -22,10 +22,15 @@ public sealed class RuleFollowingProvider(ModelProvider provider) : IModelProvid
     public IAsyncEnumerable<string> StreamAsync(ChatCompletionRequest request, CancellationToken cancellationToken = default) =>
         _rules.StreamAsync(request, cancellationToken);
 
-    public IAsyncEnumerable<ChatEvent> StreamChatAsync(ChatRequest request, CancellationToken cancellationToken = default)
+    /// <summary>Set by a test to hold the model back until the test lets it answer.</summary>
+    public Func<ChatRequest, Task>? BeforeReply { get; set; }
+
+    public async IAsyncEnumerable<ChatEvent> StreamChatAsync(
+        ChatRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        lock (Requests) Requests.Add(request);
-        return _rules.StreamChatAsync(request, cancellationToken);
+        lock (Requests) Requests.Add(request with { Turns = [.. request.Turns] });
+        if (BeforeReply is { } hold) await hold(request);
+        await foreach (var e in _rules.StreamChatAsync(request, cancellationToken)) yield return e;
     }
 }
 

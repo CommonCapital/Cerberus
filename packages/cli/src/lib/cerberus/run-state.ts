@@ -73,6 +73,12 @@ const TERMINAL: JobState[] = ["Succeeded", "Failed", "Cancelled", "TimedOut"];
 
 export const isFinished = (view: RunView) => view.job !== null && TERMINAL.includes(view.job.state);
 
+/** Whether the run has an agent that could be told something right now. */
+export const canBeSteered = (view: RunView) =>
+  view.job !== null &&
+  view.job.state === "Running" &&
+  (view.job.type === "sast" || view.tools.length > 0);
+
 export const isWaitingForOperator = (view: RunView) => view.approval !== null || view.question !== null;
 
 export type Applied = { view: RunView; gap: boolean };
@@ -141,6 +147,9 @@ function applyOne(view: RunView, event: RunEvent): RunView {
       next.tools = view.tools.map((tool) => (tool.id === result.id ? { ...tool, ...result, input: tool.input } : tool));
       break;
     }
+    case "operator_message":
+      next.resolved = [...view.resolved, `You told the agent: ${String(data.text ?? "")}`];
+      break;
     case "note":
     case "truncated":
       next.notes = [...view.notes, String(data.message ?? "")];

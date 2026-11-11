@@ -310,6 +310,9 @@ public class Review
     public string TargetPath { get; set; } = string.Empty;
     public string ScanId { get; set; } = string.Empty;
 
+    /// <summary>The SAST agent's run, when the review included one.</summary>
+    public string? AgentRunId { get; set; }
+
     /// <summary>Ids of the compliance assessments (JSON list).</summary>
     public string AssessmentIds { get; set; } = "[]";
     public int FindingCount { get; set; }

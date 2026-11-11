@@ -29,6 +29,7 @@ mock.module("../lib/cerberus/api", () => ({
     deny: async (id: string) => { calls.push(`deny ${id}`); },
     answer: async (id: string, selected: string[]) => { calls.push(`answer ${id} ${selected.join(",")}`); },
     cancelJob: async (id: string) => { calls.push(`cancel ${id}`); },
+    sendMessage: async (id: string, text: string) => { calls.push(`message ${id} ${text}`); },
   },
 }));
 
@@ -158,4 +159,39 @@ test("escape leaves the run and stops following it", async () => {
 
   expect(ui.captureCharFrame()).toContain("HOME SCREEN");
   expect(follower.stopped).toBe(true);
+});
+
+test("m writes a message to a running agent; typing does not trigger other keys", async () => {
+  const ui = (current = await screen());
+  const agent = { ...job("Running"), type: "sast" };
+  await ui.show(view([["state", agent], ["tool_call", { id: "c1", name: "listDirectory", input: {} }]]));
+  expect(ui.captureCharFrame()).toContain("m message the agent");
+
+  ui.mockInput.pressKey("m");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Tell the agent what to do next");
+
+  // "c" would cancel the run and "a" approve if the screen still listened to them.
+  for (const key of "check auth") ui.mockInput.pressKey(key);
+  await ui.settle();
+  ui.mockInput.pressEnter();
+  await ui.settle();
+
+  expect(calls).toEqual(["message job-1 check auth"]);
+  expect(ui.captureCharFrame()).not.toContain("Tell the agent what to do next");
+
+  await ui.show(view([["state", agent], ["operator_message", { text: "check auth" }]]));
+  expect(ui.captureCharFrame()).toContain("You told the agent: check auth");
+});
+
+test("a run without an agent, or one that has finished, takes no messages", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", job("Running")]]));
+  expect(ui.captureCharFrame()).not.toContain("message the agent");
+  ui.mockInput.pressKey("m");
+  await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("Tell the agent what to do next");
+
+  await ui.show(view([["state", { ...job("Succeeded"), type: "sast" }]]));
+  expect(ui.captureCharFrame()).not.toContain("message the agent");
 });
