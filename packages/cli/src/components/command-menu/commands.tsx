@@ -2,7 +2,10 @@ import { SUPPORTED_CHAT_MODELS } from "@nightcode/shared";
 import { 
   AgentsDialogContent,
   ModelsDialogContent,
+  AbortDialogContent,
+  EngagementDialogContent,
   MemoryDialogContent,
+  ScopeDialogContent,
   PermissionsDialogContent,
   AgentReviewDialogContent,
   ReviewDialogContent,
@@ -104,6 +107,39 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: "Permissions",
         children: <PermissionsDialogContent />,
+      })
+    },
+  },
+  {
+    name: "engagement",
+    description: "Choose or create the engagement your runs belong to",
+    value: "/engagement",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Engagement",
+        children: <EngagementDialogContent />,
+      })
+    },
+  },
+  {
+    name: "scope",
+    description: "See or change what the current engagement may be run on",
+    value: "/scope",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Scope",
+        children: <ScopeDialogContent />,
+      })
+    },
+  },
+  {
+    name: "abort",
+    description: "Kill switch: stop everything under the current engagement",
+    value: "/abort",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Abort engagement",
+        children: <AbortDialogContent />,
       })
     },
   },

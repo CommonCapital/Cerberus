@@ -1,4 +1,5 @@
 import { clearAuth, getAuth } from "../auth";
+import { explainSubmitError, getCurrentEngagement, setCurrentEngagement, underEngagement } from "./engagement";
 
 // Client for the Cerberus (.NET) backend's job, approval and question
 // endpoints. It talks to the same server address as the rest of the CLI
@@ -72,6 +73,22 @@ export type Permissions = {
   kinds: { kind: string; description: string; asks: boolean }[];
 };
 
+export type EngagementTarget = {
+  id: string;
+  type: "Path" | "Host" | "Domain";
+  locator: string;
+  verification: string;
+};
+
+export type Engagement = {
+  id: string;
+  name: string;
+  status: "Active" | "Closed" | "Aborted";
+  maxTier: string;
+  targets: EngagementTarget[];
+  createdAt: string;
+};
+
 export type MemoryEntry = {
   id: string;
   kind: "instruction" | "note";
@@ -113,6 +130,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   if (response.status === 401) {
     clearAuth();
+    setCurrentEngagement(null);   // it belonged to that sign-in
     throw new ApiError("Not signed in. Run /login first.", 401);
   }
 
@@ -168,11 +186,30 @@ export type Review = {
 };
 
 export const cerberus = {
-  /** A job that needs approval comes back as `{ job, approval }`; unwrap it to the job. */
+  /**
+   * Starts a job — under the engagement the operator has chosen, unless the job
+   * names one itself. A job that needs approval comes back as `{ job, approval }`;
+   * this unwraps it to the job.
+   */
   async submitJob(job: SubmitJob): Promise<Job> {
-    const result = await request<Job | { job: Job }>("POST", "/jobs", job);
-    return "job" in result ? result.job : result;
+    try {
+      const result = await request<Job | { job: Job }>("POST", "/jobs", underEngagement(job, getCurrentEngagement()));
+      return "job" in result ? result.job : result;
+    } catch (problem) {
+      if (problem instanceof ApiError) throw new ApiError(explainSubmitError(problem.message), problem.status);
+      throw problem;
+    }
   },
+  engagements: () => request<Engagement[]>("GET", "/engagements"),
+  engagement: (id: string) => request<Engagement>("GET", `/engagements/${id}`),
+  createEngagement: (name: string) => request<Engagement>("POST", "/engagements", { name }),
+  /** Adds a directory to the engagement's scope. Calling this is the operator's attestation that they may test it. */
+  addPathTarget: (engagementId: string, path: string) =>
+    request<EngagementTarget>("POST", `/engagements/${engagementId}/targets`, { type: "path", locator: path, ownershipAttested: true }),
+  removeTarget: (engagementId: string, targetId: string) =>
+    request<null>("DELETE", `/engagements/${engagementId}/targets/${targetId}`),
+  /** The kill switch: stops the engagement's queued and running jobs and refuses further ones. */
+  abortEngagement: (id: string) => request<unknown>("POST", `/engagements/${id}/abort`),
   job: (id: string) => request<Job>("GET", `/jobs/${id}`),
   jobs: (limit = 30) => request<Job[]>("GET", `/jobs?limit=${limit}`),
   /** Says something to the running agent of a job; it reads it before its next step. */
