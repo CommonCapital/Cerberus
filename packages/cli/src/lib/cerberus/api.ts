@@ -286,6 +286,8 @@ export const cerberus = {
   review: (id: string) => request<Review>("GET", `/reviews/${id}`),
   /** What an agent job produced; `report` is its written report (Markdown) when the agent writes one. */
   agentRun: (id: string) => request<{ id: string; agent: string; summary: string; report: string | null }>("GET", `/agent-runs/${id}`),
+  /** The findings of a scan, a review or a SAST agent run as a SARIF 2.1.0 log. */
+  sarif: (kind: "scans" | "reviews" | "agent-runs", id: string) => request<unknown>("GET", `/${kind}/${id}/sarif`),
   assessments: () => request<AssessmentSummary[]>("GET", "/compliance"),
   assessment: (id: string) => request<Assessment>("GET", `/compliance/${id}`),
   /** Makes a model's suggestion the operator's answer. A non-compliant one needs an action plan. */

@@ -139,6 +139,7 @@ app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapReviewEndpoints();
+Cerberus.Api.Reports.SarifEndpoints.MapSarifEndpoints(app);
 Cerberus.Api.Agents.AgentRunEndpoints.MapAgentRunEndpoints(app);
 app.MapApprovalEndpoints();
 app.MapQuestionEndpoints();
