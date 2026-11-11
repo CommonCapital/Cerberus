@@ -94,6 +94,25 @@ The CLI signs in to the local server automatically (a local account is created o
 cd backend && dotnet run --project src/Cerberus.Api
 ```
 
+### 4. Security runs from the CLI
+
+The CLI's `/scan` and `/runs` commands talk to the **.NET backend**, which listens on the same default address as the TypeScript server (`http://localhost:3000`). Run one or the other on that port, or point the CLI at the backend explicitly:
+
+```bash
+API_URL=http://localhost:3000 bun run dev:cli
+```
+
+Then `/login`, and:
+
+- **`/scan`** — type a path under the backend's scan root; the scan starts as a background job and its run opens.
+- **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
+
+On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on). Against the TypeScript server these commands report that the feature needs the backend.
+
+```bash
+bun run --cwd packages/cli test
+```
+
 Runs on `http://localhost:3000` (configurable via `PORT`), creates its SQLite schema on first run, and exposes the same local-auth / sessions / streaming-chat contract. See [`backend/README.md`](backend/README.md).
 
 ## Local-first by design

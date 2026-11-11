@@ -2,6 +2,8 @@ import { SUPPORTED_CHAT_MODELS } from "@nightcode/shared";
 import { 
   AgentsDialogContent,
   ModelsDialogContent,
+  RunsDialogContent,
+  ScanDialogContent,
   SessionsDialogContent,
   ThemeDialogContent,
 } from "../dialogs";
@@ -43,6 +45,28 @@ export const COMMANDS: Command[] = [
             onSelectModel={ctx.setModel}
           />
         ),
+      })
+    },
+  },
+  {
+    name: "scan",
+    description: "Scan code for security issues and watch the run live",
+    value: "/scan",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Scan",
+        children: <ScanDialogContent />,
+      })
+    },
+  },
+  {
+    name: "runs",
+    description: "Open a run: watch it, approve it, answer its questions",
+    value: "/runs",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Runs",
+        children: <RunsDialogContent />,
       })
     },
   },
