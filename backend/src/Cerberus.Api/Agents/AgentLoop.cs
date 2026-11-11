@@ -38,7 +38,8 @@ public sealed class AgentLoop(IModelProviderResolver providers)
 
     public async Task<AgentOutcome> RunAsync(
         string model, ModelCredentials credentials, string system, string task,
-        IReadOnlyList<IAgentTool> tools, int maxSteps, IRunReporter reporter, CancellationToken ct)
+        IReadOnlyList<IAgentTool> tools, int maxSteps, IRunReporter reporter, CancellationToken ct,
+        Func<IReadOnlyList<string>>? operatorMessages = null)
     {
         var provider = providers.Resolve(model);
         var definitions = tools.Select(t => t.Definition).ToList();
@@ -50,6 +51,8 @@ public sealed class AgentLoop(IModelProviderResolver providers)
         for (var step = 1; ; step++)
         {
             ct.ThrowIfCancellationRequested();
+            // Steering: what the operator said since the last step is read before the model is called again.
+            if (operatorMessages?.Invoke() is { Count: > 0 } said) turns.Add(ChatTurn.User(OperatorTurn(said)));
             var channel = $"agent-{step}";
             var text = new StringBuilder();
             var reasoning = new StringBuilder();
@@ -90,6 +93,13 @@ public sealed class AgentLoop(IModelProviderResolver providers)
             }
             if (calls.Count == 0)
             {
+                // About to finish — unless the operator has just said something and there is a step left to act on it.
+                if (step < maxSteps && operatorMessages?.Invoke() is { Count: > 0 } late)
+                {
+                    if (parts.Count > 0) turns.Add(new ChatTurn("assistant", parts));
+                    turns.Add(ChatTurn.User(OperatorTurn(late)));
+                    continue;
+                }
                 return new AgentOutcome(finalText.Trim(), step, toolCalls, HitStepLimit: false, inputTokens, outputTokens);
             }
 
@@ -111,6 +121,11 @@ public sealed class AgentLoop(IModelProviderResolver providers)
             }
         }
     }
+
+    /// <summary>How the operator's words reach the model: marked as theirs, and as taking priority.</summary>
+    public static string OperatorTurn(IReadOnlyList<string> messages) =>
+        "Message from the operator, sent while you were working. Follow it; it takes priority over what you had planned:\n\n" +
+        string.Join("\n\n", messages);
 
     private static async Task<(JsonElement Input, string Output, bool Failed)> RunToolAsync(
         IReadOnlyList<IAgentTool> tools, ToolCallComplete call, IRunReporter reporter, CancellationToken ct)

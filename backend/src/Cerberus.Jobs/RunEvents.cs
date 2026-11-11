@@ -35,6 +35,9 @@ public static class RunEventTypes
     /// <summary>The tool answered. Data: <c>{ id, name, output, truncated, isError }</c>; <c>id</c> matches the call.</summary>
     public const string ToolResult = "tool_result";
 
+    /// <summary>The operator said something to the running agent. Data: <c>{ text }</c>.</summary>
+    public const string OperatorMessage = "operator_message";
+
     /// <summary>A plain remark from the run. Data: <c>{ message }</c>.</summary>
     public const string Note = "note";
 

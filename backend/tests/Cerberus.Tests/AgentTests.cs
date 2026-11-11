@@ -220,6 +220,46 @@ public class AgentLoopTests
     }
 
     [Fact]
+    public async Task What_the_operator_says_mid_run_reaches_the_model_before_its_next_step()
+    {
+        var model = new PlaybackProvider(
+            Calls(("c1", "echo", """{"say":"one"}""")),
+            Calls(("c2", "echo", """{"say":"two"}""")),
+            [new TextDelta("Done."), new StepFinished("stop")]);
+        var inbox = new Queue<IReadOnlyList<string>>([[], ["Look at auth first.", "Skip the tests."], [], []]);
+        var reporter = new RecordingReporter();
+
+        await new AgentLoop(new SingleProviderResolver(model)).RunAsync(
+            "echo", new ModelCredentials(), "system", "task", [new EchoTool()], 5, reporter, default,
+            () => inbox.Count > 0 ? inbox.Dequeue() : []);
+
+        // Step 1 saw only the task; step 2 got the operator's words after the tool result.
+        Assert.Equal(["user"], model.Requests[0].Turns.Select(t => t.Role).ToArray());
+        var second = model.Requests[1].Turns;
+        Assert.Equal(["user", "assistant", "tool", "user"], second.Select(t => t.Role).ToArray());
+        var said = ChatEvents.TextOf(second[3]);
+        Assert.StartsWith("Message from the operator", said);
+        Assert.Contains("Look at auth first.\n\nSkip the tests.", said);
+        Assert.Equal(6, model.Requests[2].Turns.Count);   // nothing new was said before step 3
+    }
+
+    [Fact]
+    public async Task A_message_that_arrives_as_the_agent_finishes_gets_one_more_step()
+    {
+        var model = new PlaybackProvider(
+            [new TextDelta("Finished."), new StepFinished("stop")],
+            [new TextDelta("Checked that too."), new StepFinished("stop")]);
+        var inbox = new Queue<IReadOnlyList<string>>([[], ["Also check the login."], [], []]);
+
+        var outcome = await new AgentLoop(new SingleProviderResolver(model)).RunAsync(
+            "echo", new ModelCredentials(), "system", "task", [new EchoTool()], 5, new RecordingReporter(), default,
+            () => inbox.Count > 0 ? inbox.Dequeue() : []);
+
+        Assert.Equal(("Checked that too.", 2), (outcome.FinalText, outcome.Steps));
+        Assert.Equal(["user", "assistant", "user"], model.Requests[1].Turns.Select(t => t.Role).ToArray());
+    }
+
+    [Fact]
     public async Task An_agent_that_never_stops_asking_is_stopped_at_its_step_limit()
     {
         var model = new PlaybackProvider(Calls(("c1", "echo", """{"say":"again"}""")));
@@ -342,5 +382,94 @@ public class SastAgentApiTests(ApiHost host)
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/agent-runs/{runId}")).StatusCode);
         Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/agent-runs")).GetArrayLength());
         Assert.Equal(HttpStatusCode.Unauthorized, (await host.CreateClient().GetAsync("/agent-runs")).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_operator_can_steer_a_running_agent_and_only_a_running_one()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var (other, _) = await host.NewUserAsync();
+
+        // Hold the model at its first step so the message is certain to arrive mid-run.
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.Tools.BeforeReply = async _ => { reached.TrySetResult(); await release.Task; };
+        string jobId;
+        try
+        {
+            var submitted = await Json(await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "svc", model = "llama3.1" }));
+            jobId = submitted.GetProperty("id").GetString()!;
+            await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/jobs/{jobId}/messages", new { text = "  " })).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsJsonAsync($"/jobs/{jobId}/messages", new { text = "hi" })).StatusCode);
+            Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsJsonAsync($"/jobs/{jobId}/messages", new { text = "Stop, that is enough." })).StatusCode);
+        }
+        finally
+        {
+            host.Tools.BeforeReply = null;
+            release.TrySetResult();
+        }
+
+        var job = await WaitForEndAsync(client, jobId);
+        Assert.Equal("Succeeded", job.GetProperty("state").GetString());
+
+        // The agent listed the directory, then read the message instead of going on.
+        var run = await client.GetFromJsonAsync<JsonElement>($"/agent-runs/{job.GetProperty("resultId").GetString()}");
+        Assert.StartsWith("The operator said: \"Stop, that is enough.\"", run.GetProperty("summary").GetString());
+        Assert.Equal(1, run.GetProperty("toolCalls").GetInt32());
+
+        var events = (await client.GetFromJsonAsync<JsonElement>($"/jobs/{jobId}/events?after=0")).GetProperty("events").EnumerateArray().ToList();
+        var message = events.Single(e => e.GetProperty("type").GetString() == "operator_message");
+        Assert.Equal("Stop, that is enough.", message.GetProperty("data").GetProperty("text").GetString());
+        Assert.Contains((await client.GetFromJsonAsync<JsonElement>("/audit?limit=50")).EnumerateArray(),
+            e => e.GetProperty("action").GetString() == "job.message");
+
+        // Finished: nobody is listening any more.
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/jobs/{jobId}/messages", new { text = "hello?" })).StatusCode);
+        // A job without an agent never takes messages.
+        var scan = await Json(await client.PostAsJsonAsync("/jobs", new { type = "scan", path = "app", sca = false }));
+        await WaitForEndAsync(client, scan.GetProperty("id").GetString()!);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync($"/jobs/{scan.GetProperty("id").GetString()}/messages", new { text = "hi" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_review_can_dispatch_the_agent_as_one_of_its_steps_and_reports_what_it_found()
+    {
+        var (client, _) = await host.NewUserAsync();
+
+        var submitted = await Json(await client.PostAsJsonAsync("/jobs",
+            new { type = "review", path = "svc", sca = false, exclusions = "honour", catalogs = new[] { "owasp-top10" }, agentModel = "llama3.1", maxSteps = 10 }));
+        var approval = submitted.GetProperty("approval");
+        Assert.Equal("run-plan", approval.GetProperty("kind").GetString());   // a local model: only the plan is asked about
+        Assert.Contains("2. Have llama3.1 read the code", approval.GetProperty("detail").GetString());
+        Assert.Contains("up to 10 steps", approval.GetProperty("detail").GetString());
+
+        await client.PostAsJsonAsync($"/approvals/{approval.GetProperty("id").GetString()}/approve", new { });
+        var job = await WaitForEndAsync(client, submitted.GetProperty("job").GetProperty("id").GetString()!);
+        Assert.Equal("Succeeded", job.GetProperty("state").GetString());
+
+        var events = (await client.GetFromJsonAsync<JsonElement>($"/jobs/{job.GetProperty("id").GetString()}/events?after=0"))
+            .GetProperty("events").EnumerateArray().ToList();
+        var steps = events.Where(e => e.GetProperty("type").GetString() == "step")
+            .Select(e => e.GetProperty("data").GetProperty("id").GetString()!).Distinct().ToArray();
+        Assert.Equal(["scan", "sast", "assess:owasp-top10", "report"], steps);
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "tool_call");
+
+        var review = await client.GetFromJsonAsync<JsonElement>($"/reviews/{job.GetProperty("resultId").GetString()}");
+        var run = await client.GetFromJsonAsync<JsonElement>($"/agent-runs/{review.GetProperty("agentRunId").GetString()}");
+        Assert.Equal(1, run.GetProperty("findingCount").GetInt32());
+        var report = review.GetProperty("report").GetString()!;
+        Assert.Contains("## Reported by the model (`llama3.1`)", report);
+        Assert.Contains("`loader.py:2`", report);
+        Assert.Contains("do not change any compliance result", report);
+
+        // With a cloud agent model, the plan's approval also covers sending code out.
+        var cloud = await Json(await client.PostAsJsonAsync("/jobs",
+            new { type = "review", path = "app", sca = false, catalogs = new[] { "owasp-top10" }, agentModel = "claude-haiku-4-5" }));
+        Assert.Equal(["run-plan", "send-code-to-cloud-model"],
+            cloud.GetProperty("approval").GetProperty("kinds").EnumerateArray().Select(k => k.GetString()!).ToArray());
+        await client.PostAsync($"/approvals/{cloud.GetProperty("approval").GetProperty("id").GetString()}/deny", null);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", agentModel = "nope" })).StatusCode);
     }
 }

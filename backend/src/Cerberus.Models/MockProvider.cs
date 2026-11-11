@@ -120,6 +120,13 @@ public sealed partial class MockProvider : IModelProvider
         var results = request.Turns.SelectMany(t => t.Parts.OfType<ToolResultPart>()).ToList();
         if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
 
+        // The operator spoke while it was working: it stops and says so.
+        if (request.Turns[^1] is { Role: "user" } spoken)
+        {
+            var words = ChatEvents.TextOf(spoken).Split("\n\n", 2);
+            return (null, null, $"The operator said: \"{(words.Length == 2 ? words[1] : words[0]).Trim()}\". Stopping here, as the dev model does for any message.");
+        }
+
         string? PathOf(ToolCallPart call, string property) =>
             call.Input.ValueKind == JsonValueKind.Object && call.Input.TryGetProperty(property, out var v) ? v.GetString() : null;
 

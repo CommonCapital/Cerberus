@@ -50,6 +50,7 @@ public static class ReviewEndpoints
         engagementId = r.EngagementId,
         targetPath = r.TargetPath,
         scanId = r.ScanId,
+        agentRunId = r.AgentRunId,
         assessmentIds = JsonSerializer.Deserialize<List<string>>(r.AssessmentIds) ?? [],
         findingCount = r.FindingCount,
         createdAt = r.CreatedAt,

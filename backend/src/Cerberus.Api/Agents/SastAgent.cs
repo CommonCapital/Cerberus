@@ -64,7 +64,8 @@ public static class SastAgent
 /// the code it reads is untrusted and may try to steer it.
 /// </summary>
 public sealed partial class SastAgentRunner(
-    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills)
+    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
+    OperatorInbox inbox)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -72,6 +73,18 @@ public sealed partial class SastAgentRunner(
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },
     };
+
+    public static IReadOnlyList<AgentFinding> ReadFindings(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<AgentFinding>>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     public async Task<AgentRun> RunAsync(Job job, SastJobParameters parameters, IRunReporter reporter, CancellationToken ct)
     {
@@ -95,6 +108,7 @@ public sealed partial class SastAgentRunner(
         await reporter.StepAsync("review", title, StepStatus.Running);
 
         AgentOutcome? outcome = null;
+        var messages = inbox.Open(job.Id);
         var run = new AgentRun
         {
             UserId = job.UserId,
@@ -108,7 +122,7 @@ public sealed partial class SastAgentRunner(
         {
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, SastAgent.System,
-                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions), tools, maxSteps, reporter, ct);
+                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions), tools, maxSteps, reporter, ct, messages.Take);
             if (outcome.HitStepLimit)
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; the review may be incomplete." });
@@ -117,6 +131,11 @@ public sealed partial class SastAgentRunner(
         }
         finally
         {
+            messages.Dispose();
+            if (messages.Unread.Count > 0)
+            {
+                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent had finished before it could read your last {messages.Unread.Count} message(s)." });
+            }
             // Kept even when stopped part-way: what was found so far is still worth having,
             // and code may already have left this machine.
             run.Summary = outcome?.FinalText ?? "";

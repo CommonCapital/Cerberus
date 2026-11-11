@@ -12,7 +12,9 @@ namespace Cerberus.Api.Jobs;
 public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
     string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs,
-    int? MaxSteps = null, string? Instructions = null);
+    int? MaxSteps = null, string? Instructions = null, string? AgentModel = null);
+
+public sealed record JobMessageRequest(string? Text);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -31,6 +33,33 @@ public static class JobEndpoints
         jobs.MapGet("/{id}", Get);
         jobs.MapPost("/{id}/cancel", Cancel);
         jobs.MapGet("/{id}/events", Events);
+        jobs.MapPost("/{id}/messages", Message);
+    }
+
+    /// <summary>Says something to the agent of a running job; it reads it before its next step.</summary>
+    private static async Task<IResult> Message(
+        string id, JobMessageRequest body, HttpContext http, CerberusDbContext db, Agents.OperatorInbox inbox,
+        RunStream stream, AuditLog audit, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id && j.UserId == userId, ct);
+        if (job is null) return NotFound();
+
+        var text = body.Text?.Trim();
+        if (string.IsNullOrEmpty(text)) return BadRequest("text is required");
+        if (text.Length > Agents.OperatorInbox.MaxMessageLength)
+        {
+            return BadRequest($"text must be at most {Agents.OperatorInbox.MaxMessageLength} characters");
+        }
+
+        if (!inbox.TryPost(job.Id, text))
+        {
+            return Results.Json(new { error = "This run is not taking messages: only a running agent does." }, statusCode: 409);
+        }
+        await stream.EmitAsync(job.Id, userId, RunEventTypes.OperatorMessage, new { text });
+        await audit.AppendAsync(userId, "job.message", AuditOutcome.Ok,
+            $"Operator message to the agent of job {job.Id} ({text.Length} characters).", job.EngagementId, job.TargetPath, ct: ct);
+        return Results.Json(new { jobId = job.Id, queued = true }, statusCode: 202);
     }
 
     private static async Task<IResult> Submit(
@@ -71,20 +100,29 @@ public static class JobEndpoints
             {
                 return BadRequest($"maxFindings must be between 1 and {TriageRunner.MaxFindingsLimit}");
             }
+            if (body.AgentModel is not null && !Cerberus.Core.Models.ModelRegistry.IsSupported(body.AgentModel))
+            {
+                return BadRequest("agentModel must be a supported model id, or be left out for a review without the SAST agent");
+            }
+            if (body.MaxSteps is < 1 or > Agents.SastAgent.MaxSteps)
+            {
+                return BadRequest($"maxSteps must be between 1 and {Agents.SastAgent.MaxSteps}");
+            }
             var reviewExclusions = string.IsNullOrWhiteSpace(body.Exclusions) ? ScanExclusions.Ask : body.Exclusions.Trim().ToLowerInvariant();
             if (!ScanExclusions.IsValid(reviewExclusions, allowAsk: true))
             {
                 return BadRequest("exclusions must be ask, honour or ignore");
             }
 
-            var review = new ReviewJobParameters(wanted, body.Sca ?? true, reviewExclusions, body.Model, body.MaxFindings ?? 15);
+            var review = new ReviewJobParameters(wanted, body.Sca ?? true, reviewExclusions, body.Model, body.MaxFindings ?? 15,
+                body.AgentModel, body.MaxSteps ?? Agents.SastAgent.DefaultSteps);
             parameters = JsonSerializer.Serialize(review, JobTypes.Json);
 
             // Plan first: the operator approves exactly the steps that will run.
             var plan = ReviewPlan.Build(targetPath, review, catalogs);
             planNeed = new ApprovalNeed(ActionKinds.RunPlan, $"Run this review of \"{targetPath}\" ({plan.Count} steps)", ReviewPlan.Describe(plan));
-            sendsCodeOut = body.Model is not null &&
-                !Cerberus.Triage.FindingTriager.IsLocal(Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider);
+            sendsCodeOut = new[] { body.Model, body.AgentModel }.Any(m => m is not null &&
+                !Cerberus.Triage.FindingTriager.IsLocal(Cerberus.Core.Models.ModelRegistry.Find(m)!.Provider));
         }
         else if (type == JobTypes.Sast)
         {

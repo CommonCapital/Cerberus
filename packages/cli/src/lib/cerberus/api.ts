@@ -136,6 +136,8 @@ export type SubmitJob =
       path: string;
       catalogs?: string[];
       model?: string;
+      /** Also have this model read the code itself (the SAST agent) as a step of the review. */
+      agentModel?: string;
       sca?: boolean;
       exclusions?: "ask" | "honour" | "ignore";
       engagementId?: string;
@@ -161,6 +163,8 @@ export const cerberus = {
   },
   job: (id: string) => request<Job>("GET", `/jobs/${id}`),
   jobs: (limit = 30) => request<Job[]>("GET", `/jobs?limit=${limit}`),
+  /** Says something to the running agent of a job; it reads it before its next step. */
+  sendMessage: (jobId: string, text: string) => request<unknown>("POST", `/jobs/${jobId}/messages`, { text }),
   cancelJob: (id: string) => request<unknown>("POST", `/jobs/${id}/cancel`),
   events: (jobId: string, after = 0) => request<EventsPage>("GET", `/jobs/${jobId}/events?after=${after}`),
   /** `remember` also stops the server asking about this kind of action again. */

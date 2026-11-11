@@ -17,7 +17,8 @@ namespace Cerberus.Api.Jobs;
 /// <param name="TriageModel">Model that reviews the findings; null for no model review.</param>
 public sealed record ReviewJobParameters(
     List<string> Catalogs, bool Sca = true, string Exclusions = ScanExclusions.Ask,
-    string? TriageModel = null, int MaxFindings = 15);
+    string? TriageModel = null, int MaxFindings = 15,
+    string? AgentModel = null, int AgentSteps = Agents.SastAgent.DefaultSteps);
 
 public sealed record PlanStep(string Id, string Title, string Detail);
 
@@ -31,6 +32,7 @@ public static class ReviewPlan
 {
     public const string ScanStep = "scan";
     public const string TriageStep = "triage";
+    public const string AgentStep = "sast";
     public const string ReportStep = "report";
 
     public static string AssessStep(string catalogId) => $"assess:{catalogId}";
@@ -52,6 +54,17 @@ public static class ReviewPlan
                 : "The model runs locally; no code leaves this machine.";
             steps.Add(new(TriageStep, $"Review up to {parameters.MaxFindings} findings with {model}",
                 $"The model judges each production-code finding as real, harmless or unsure. Advisory only. {where}"));
+        }
+
+        if (parameters.AgentModel is { } agentModel)
+        {
+            var provider = ModelRegistry.Find(agentModel)?.Provider;
+            var where = provider is { } p && !FindingTriager.IsLocal(p)
+                ? $"Whatever it reads is sent to {p}; credential-shaped values are masked first."
+                : "The model runs locally; no code leaves this machine.";
+            steps.Add(new(AgentStep, $"Have {agentModel} read the code",
+                $"The SAST agent explores the code read-only, in up to {parameters.AgentSteps} steps, and reports vulnerabilities the rules cannot see. " +
+                $"Its findings are a model's candidates and do not change compliance results. {where}"));
         }
 
         foreach (var id in parameters.Catalogs)
@@ -79,8 +92,8 @@ public sealed record ReviewRun(Review Review);
 /// the run's stream. Authorization and approval happened before it starts.
 /// </summary>
 public sealed class ReviewRunner(
-    ScanRunner scans, AssessmentRunner assessments, TriageRunner triage, CatalogLoader catalogs,
-    CerberusDbContext db, AuditLog audit)
+    ScanRunner scans, AssessmentRunner assessments, TriageRunner triage, Agents.SastAgentRunner sast,
+    CatalogLoader catalogs, CerberusDbContext db, AuditLog audit)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -117,7 +130,16 @@ public sealed class ReviewRunner(
             await reporter.StepAsync(ReviewPlan.TriageStep, Step(ReviewPlan.TriageStep).Title, StepStatus.Completed);
         }
 
-        // 3. One assessment per catalog, all from the same scan
+        // 3. The SAST agent (optional): a model reads the code itself
+        AgentRun? agentRun = null;
+        if (parameters.AgentModel is { } agentModel)
+        {
+            await reporter.StepAsync(ReviewPlan.AgentStep, Step(ReviewPlan.AgentStep).Title, StepStatus.Running);
+            agentRun = await sast.RunAsync(job, new Agents.SastJobParameters(agentModel, parameters.AgentSteps), inner, ct);
+            await reporter.StepAsync(ReviewPlan.AgentStep, Step(ReviewPlan.AgentStep).Title, StepStatus.Completed);
+        }
+
+        // 4. One assessment per catalog, all from the same scan
         var results = new List<AssessmentRun>();
         foreach (var id in parameters.Catalogs)
         {
@@ -128,7 +150,7 @@ public sealed class ReviewRunner(
             await reporter.StepAsync(stepId, Step(stepId).Title, StepStatus.Completed);
         }
 
-        // 4. Report
+        // 5. Report
         await reporter.StepAsync(ReviewPlan.ReportStep, Step(ReviewPlan.ReportStep).Title, StepStatus.Running);
         ct.ThrowIfCancellationRequested();
         var review = new Review
@@ -139,13 +161,14 @@ public sealed class ReviewRunner(
             TargetPath = job.TargetPath,
             ScanId = scan.Scan.Id,
             AssessmentIds = JsonSerializer.Serialize(results.Select(r => r.Assessment.Id)),
+            AgentRunId = agentRun?.Id,
             FindingCount = scan.Scan.FindingCount,
-            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow),
+            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow, agentRun),
         };
         db.Reviews.Add(review);
         await db.SaveChangesAsync(ct);
         await audit.AppendAsync(job.UserId, "review.complete", AuditOutcome.Ok,
-            $"Review {review.Id}: scan {scan.Scan.Id} ({scan.Scan.FindingCount} findings), {results.Count} assessment(s), {opinions.Count} model opinion(s).",
+            $"Review {review.Id}: scan {scan.Scan.Id} ({scan.Scan.FindingCount} findings), {results.Count} assessment(s), {opinions.Count} model opinion(s){(agentRun is null ? "" : $", agent run {agentRun.Id} ({agentRun.FindingCount} reported)")}.",
             job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
         await reporter.StepAsync(ReviewPlan.ReportStep, Step(ReviewPlan.ReportStep).Title, StepStatus.Completed);
 
@@ -178,7 +201,7 @@ public static class ReviewReport
 
     public static string Write(
         string targetPath, ScanRun scan, IReadOnlyList<AssessmentRun> assessments,
-        IReadOnlyList<TriageResult> opinions, DateTime now)
+        IReadOnlyList<TriageResult> opinions, DateTime now, AgentRun? agentRun = null)
     {
         var active = scan.Findings.Where(f => !f.Suppressed).ToList();
         var production = active.Where(f => f.Context is null).ToList();
@@ -266,6 +289,38 @@ public static class ReviewReport
             text.AppendLine();
         }
 
+        if (agentRun is not null)
+        {
+            var reported = Agents.SastAgentRunner.ReadFindings(agentRun.Findings);
+            text.AppendLine($"## Reported by the model (`{agentRun.Model}`)");
+            text.AppendLine();
+            text.AppendLine("> A model read the code and reported these. They are candidates for a person to check, are not part of the scan, " +
+                            "and do not change any compliance result above. The code under review can try to mislead a model." +
+                            (agentRun.Complete ? "" : " **This part of the review did not complete.**"));
+            text.AppendLine();
+            if (reported.Count == 0)
+            {
+                text.AppendLine("Nothing reported.");
+            }
+            else
+            {
+                text.AppendLine("| Severity | Finding | Location | Why |");
+                text.AppendLine("|---|---|---|---|");
+                foreach (var f in reported.OrderByDescending(f => f.Severity).Take(MaxFindingsListed))
+                {
+                    text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(f.File)}:{f.Line}` | {Cell(Shorten(f.Description, 240))} |");
+                }
+            }
+            text.AppendLine();
+            if (!string.IsNullOrWhiteSpace(agentRun.Summary))
+            {
+                text.AppendLine("The model's own summary:");
+                text.AppendLine();
+                foreach (var line in Shorten(agentRun.Summary, 2000).Split('\n')) text.AppendLine($"> {Cell(line)}");
+                text.AppendLine();
+            }
+        }
+
         text.AppendLine("## What to do next");
         text.AppendLine();
         text.AppendLine("1. Review the findings above, most severe first; fix or record why each is acceptable.");
@@ -281,6 +336,8 @@ public static class ReviewReport
         findings.Count == 0
             ? "none"
             : string.Join(", ", findings.GroupBy(f => f.Severity).OrderByDescending(g => g.Key).Select(g => $"{g.Key} {g.Count()}"));
+
+    private static string Shorten(string value, int max) => value.Length <= max ? value : value[..max] + "…";
 
     /// <summary>Text from the target goes into a table cell: no pipes, no line breaks, no markup taking over the report.</summary>
     private static string Cell(string value) =>

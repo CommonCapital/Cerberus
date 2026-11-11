@@ -91,6 +91,7 @@ builder.Services.AddSingleton<Cerberus.Triage.FindingTriager>();
 builder.Services.AddScoped<TriageRunner>();
 builder.Services.AddScoped<ReviewRunner>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.AgentLoop>();
+builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
