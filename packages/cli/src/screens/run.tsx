@@ -18,6 +18,7 @@ export function Run() {
   const [view, setView] = useState<RunViewModel>(emptyRun);
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState(0);
+  const [report, setReport] = useState<string | null>(null);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -27,6 +28,24 @@ export function Run() {
       void follower.stop();
     };
   }, [id]);
+
+  // A review that succeeded has a report to show.
+  const reviewId = view.job?.type === "review" && view.job.state === "Succeeded" ? view.job.resultId : null;
+  useEffect(() => {
+    if (!reviewId) return;
+    let current = true;
+    cerberus
+      .review(reviewId)
+      .then((review) => {
+        if (current) setReport(review.report);
+      })
+      .catch((problem: unknown) => {
+        if (current) setError(problem instanceof Error ? problem.message : "Could not load the report");
+      });
+    return () => {
+      current = false;
+    };
+  }, [reviewId]);
 
   // A new question starts with its first option highlighted.
   const questionId = view.question?.id;
@@ -81,7 +100,7 @@ export function Run() {
   return (
     <box flexDirection="column" flexGrow={1} width="100%" height="100%" paddingY={1} paddingX={2} gap={1}>
       <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="bottom">
-        <RunView view={view} selectedOption={selectedOption} error={error} />
+        <RunView view={view} selectedOption={selectedOption} error={error} report={report} />
       </scrollbox>
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
         <text>esc</text>

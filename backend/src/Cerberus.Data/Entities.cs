@@ -297,6 +297,26 @@ public class PermissionSetting
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// The outcome of a review: the scan and assessments it produced, and its
+/// report (Markdown).
+/// </summary>
+public class Review
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+    public string JobId { get; set; } = string.Empty;
+    public string TargetPath { get; set; } = string.Empty;
+    public string ScanId { get; set; } = string.Empty;
+
+    /// <summary>Ids of the compliance assessments (JSON list).</summary>
+    public string AssessmentIds { get; set; } = "[]";
+    public int FindingCount { get; set; }
+    public string Report { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

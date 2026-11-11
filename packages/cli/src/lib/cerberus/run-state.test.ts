@@ -70,6 +70,24 @@ describe("applyEvents", () => {
     expect(isFinished(view)).toBe(true);
   });
 
+  test("planned steps keep their order as they start and finish", () => {
+    sequence = 0;
+    const { view } = applyEvents(emptyRun(), [
+      event("plan", { steps: [{ id: "scan", title: "Scan" }, { id: "report", title: "Write the report" }] }),
+      event("step", { id: "scan", title: "Scan", status: "pending" }),
+      event("step", { id: "report", title: "Write the report", status: "pending" }),
+      event("progress", { done: 0, total: 1, message: "starting" }),
+      event("step", { id: "scan", title: "Scan", status: "running" }),
+      event("step", { id: "scan", title: "Scan", status: "completed" }),
+    ]);
+
+    expect(view.steps).toEqual([
+      { id: "scan", title: "Scan", status: "completed" },
+      { id: "report", title: "Write the report", status: "pending" },
+    ]);
+    expect(view.lastSequence).toBe(6);
+  });
+
   test("progress is cleared when the next step starts", () => {
     sequence = 0;
     const view = applyEvents(emptyRun(), [

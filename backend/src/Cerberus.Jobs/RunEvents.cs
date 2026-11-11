@@ -11,6 +11,9 @@ public static class RunEventTypes
     /// <summary>The job changed state. Data: the job, as <c>GET /jobs/{id}</c> returns it.</summary>
     public const string State = "state";
 
+    /// <summary>The run's plan: every step it intends to take, in order. Data: <c>{ steps: [{ id, title }] }</c>.</summary>
+    public const string Plan = "plan";
+
     /// <summary>A step of the run's task list started or ended. Data: <c>{ id, title, status }</c>.</summary>
     public const string Step = "step";
 
@@ -47,6 +50,8 @@ public static class RunEventTypes
 
 public static class StepStatus
 {
+    /// <summary>Planned, not started yet.</summary>
+    public const string Pending = "pending";
     public const string Running = "running";
     public const string Completed = "completed";
     public const string Skipped = "skipped";

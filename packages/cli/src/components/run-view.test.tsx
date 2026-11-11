@@ -18,10 +18,10 @@ function view(events: [string, unknown][]) {
   return applyEvents(emptyRun(), stream).view;
 }
 
-async function frame(model: ReturnType<typeof view>, selectedOption = 0) {
+async function frame(model: ReturnType<typeof view>, selectedOption = 0, report: string | null = null) {
   const { renderOnce, captureCharFrame, renderer } = await testRender(
     <ThemeProvider>
-      <RunView view={model} selectedOption={selectedOption} />
+      <RunView view={model} selectedOption={selectedOption} report={report} />
     </ThemeProvider>,
     { width: 100, height: 30 },
   );
@@ -148,4 +148,62 @@ test("model output and verdicts are shown during triage", async () => {
 
 test("before the first event arrives it says it is loading", async () => {
   expect(await frame(emptyRun())).toContain("Loading the run…");
+});
+
+const review = (state: Job["state"], extra: Partial<Job> = {}) => job(state, { type: "review", ...extra });
+
+const plan: [string, unknown][] = [
+  ["step", { id: "scan", title: 'Scan "services/api"', status: "pending" }],
+  ["step", { id: "assess:owasp-top10", title: "Assess against OWASP Top 10 (2021)", status: "pending" }],
+  ["step", { id: "report", title: "Write the report", status: "pending" }],
+];
+
+test("a review waiting for approval shows its plan, one step per line", async () => {
+  const text = await frame(
+    view([
+      ["state", review("AwaitingApproval")],
+      ["approval_requested", {
+        id: "a-1", jobId: "job-1", kind: "run-plan", status: "Pending", note: null,
+        title: 'Run this review of "services/api" (3 steps)',
+        detail: '1. Scan "services/api" — static rules.\n2. Assess against OWASP Top 10 (2021) — 10 controls.\n3. Write the report — Markdown.',
+      }],
+    ]),
+  );
+
+  expect(text).toContain("Security review · services/api");
+  expect(text).toContain('Run this review of "services/api" (3 steps)');
+  const lines = text.split("\n");
+  const first = lines.findIndex((line) => line.includes('1. Scan "services/api"'));
+  expect(first).toBeGreaterThan(-1);
+  expect(lines[first + 1]).toContain("2. Assess against OWASP Top 10 (2021)");
+  expect(lines[first + 2]).toContain("3. Write the report");
+});
+
+test("a running review shows what is done, what is running and what is still to come", async () => {
+  const text = await frame(
+    view([
+      ["state", review("Running")],
+      ["plan", { steps: [] }],
+      ...plan,
+      ["step", { id: "scan", title: 'Scan "services/api"', status: "running" }],
+      ["step", { id: "scan", title: 'Scan "services/api"', status: "completed" }],
+      ["step", { id: "assess:owasp-top10", title: "Assess against OWASP Top 10 (2021)", status: "running" }],
+    ]),
+  );
+
+  expect(text).toContain('✔ Scan "services/api"');
+  expect(text).toContain("▶ Assess against OWASP Top 10 (2021)");
+  expect(text).toContain("○ Write the report");
+});
+
+test("a finished review shows its report", async () => {
+  const text = await frame(
+    view([["state", review("Succeeded", { resultId: "rev-7" })]]),
+    0,
+    "# Security review of `services/api`\n\n## Summary\n\n- **Findings:** 2",
+  );
+
+  expect(text).toContain("Result: review rev-7");
+  expect(text).toContain("# Security review of `services/api`");
+  expect(text).toContain("- **Findings:** 2");
 });

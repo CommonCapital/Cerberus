@@ -89,6 +89,7 @@ builder.Services.AddScoped<ScanRunner>();
 builder.Services.AddScoped<AssessmentRunner>();
 builder.Services.AddSingleton<Cerberus.Triage.FindingTriager>();
 builder.Services.AddScoped<TriageRunner>();
+builder.Services.AddScoped<ReviewRunner>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddSingleton<OperatorDesk>();
@@ -132,6 +133,7 @@ using (var scope = app.Services.CreateScope())
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
+app.MapReviewEndpoints();
 app.MapApprovalEndpoints();
 app.MapQuestionEndpoints();
 app.MapSkillEndpoints();

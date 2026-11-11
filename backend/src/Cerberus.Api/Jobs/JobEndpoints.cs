@@ -11,7 +11,7 @@ namespace Cerberus.Api.Jobs;
 
 public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
-    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions);
+    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -47,7 +47,45 @@ public static class JobEndpoints
         var engagementId = string.IsNullOrWhiteSpace(body.EngagementId) ? null : body.EngagementId;
         string parameters;
         ApprovalNeed? approvalNeed = null;
+        ApprovalNeed? planNeed = null;
+        var sendsCodeOut = false;
 
+        if (type == JobTypes.Review)
+        {
+            // Which catalogs: the ones named, or every installed one.
+            var wanted = body.Catalogs is { Count: > 0 }
+                ? body.Catalogs.Select(c => c.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                : catalogs.All.Select(c => c.Id).Order(StringComparer.Ordinal).ToList();
+            if (wanted.FirstOrDefault(id => catalogs.Get(id) is null) is { } unknown)
+            {
+                return BadRequest($"Unknown catalog '{unknown}'");
+            }
+            wanted = wanted.Select(id => catalogs.Get(id)!.Id).ToList();
+
+            if (body.Model is not null && !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model must be a supported model id, or be left out for a review without model triage");
+            }
+            if (body.MaxFindings is < 1 or > TriageRunner.MaxFindingsLimit)
+            {
+                return BadRequest($"maxFindings must be between 1 and {TriageRunner.MaxFindingsLimit}");
+            }
+            var reviewExclusions = string.IsNullOrWhiteSpace(body.Exclusions) ? ScanExclusions.Ask : body.Exclusions.Trim().ToLowerInvariant();
+            if (!ScanExclusions.IsValid(reviewExclusions, allowAsk: true))
+            {
+                return BadRequest("exclusions must be ask, honour or ignore");
+            }
+
+            var review = new ReviewJobParameters(wanted, body.Sca ?? true, reviewExclusions, body.Model, body.MaxFindings ?? 15);
+            parameters = JsonSerializer.Serialize(review, JobTypes.Json);
+
+            // Plan first: the operator approves exactly the steps that will run.
+            var plan = ReviewPlan.Build(targetPath, review, catalogs);
+            planNeed = new ApprovalNeed(ActionKinds.RunPlan, $"Run this review of \"{targetPath}\" ({plan.Count} steps)", ReviewPlan.Describe(plan));
+            sendsCodeOut = body.Model is not null &&
+                !Cerberus.Triage.FindingTriager.IsLocal(Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider);
+        }
+        else
         if (type == JobTypes.Triage)
         {
             if (string.IsNullOrWhiteSpace(body.ScanId)) return BadRequest("scanId is required for a triage job");
@@ -160,19 +198,29 @@ public static class JobEndpoints
         // Permission mode: which of the things this job does must the operator still approve?
         var (permissions, permissionScope) = await PermissionEndpoints.ResolveAsync(db, userId, engagementId, ct);
         var involved = new List<string> { ActionKinds.RunJob };
-        if (approvalNeed is not null) involved.Add(ActionKinds.SendCodeToCloudModel);
+        if (planNeed is not null) involved.Add(ActionKinds.RunPlan);
+        if (approvalNeed is not null || sendsCodeOut) involved.Add(ActionKinds.SendCodeToCloudModel);
         var unapproved = permissions.Unapproved(involved);
 
         if (unapproved.Count == 0)
         {
-            if (approvalNeed is not null)
+            // Would have asked about some of this, but the operator said "always allow". Say so in the log.
+            var skipped = involved.Where(k => k != ActionKinds.RunJob).ToList();
+            if (skipped.Count > 0)
             {
-                // Would have asked, but the operator said "always allow" for this kind. Say so in the log.
                 await audit.AppendAsync(userId, "approval.auto", AuditOutcome.Allowed,
-                    $"Not asked: \"{approvalNeed.Title}\" is always allowed by the {permissionScope} permissions.",
+                    $"Not asked: \"{(planNeed ?? approvalNeed)!.Title}\" is always allowed by the {permissionScope} permissions ({string.Join(", ", skipped)}).",
                     engagementId, targetPath, tier, ct);
             }
             approvalNeed = null;
+        }
+        else if (planNeed is not null)
+        {
+            // A review is approved as a whole, plan in hand — whichever of its parts needed approval.
+            approvalNeed = planNeed with
+            {
+                Kind = unapproved.Contains(ActionKinds.SendCodeToCloudModel) ? ActionKinds.SendCodeToCloudModel : unapproved[^1],
+            };
         }
         else if (!unapproved.Contains(ActionKinds.SendCodeToCloudModel))
         {

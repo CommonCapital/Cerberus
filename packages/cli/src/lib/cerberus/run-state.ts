@@ -4,7 +4,7 @@ import type { Approval, Job, JobState, Question, RunEvent } from "./api";
 // order-tolerant: events are applied by sequence number, duplicates are
 // ignored, and a gap is reported so the caller can fetch what it missed.
 
-export type Step = { id: string; title: string; status: "running" | "completed" | "skipped" };
+export type Step = { id: string; title: string; status: "pending" | "running" | "completed" | "skipped" };
 
 export type Finding = {
   id: string;

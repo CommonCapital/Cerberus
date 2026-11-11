@@ -83,7 +83,8 @@ public class PermissionApiTests(ApiHost host)
             .ToDictionary(k => k.GetProperty("kind").GetString()!, k => k.GetProperty("asks").GetBoolean());
         Assert.False(asks["run-job"]);
         Assert.True(asks["run-commands"]);
-        Assert.Equal(5, asks.Count);
+        Assert.True(asks["run-plan"]);
+        Assert.Equal(6, asks.Count);
     }
 
     [Fact]

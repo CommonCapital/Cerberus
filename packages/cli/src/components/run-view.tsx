@@ -21,6 +21,8 @@ type Props = {
   /** Highlighted option of the pending question. */
   selectedOption: number;
   error?: string | null;
+  /** The finished review's report (Markdown), once loaded. */
+  report?: string | null;
 };
 
 const STATE_LABEL: Record<JobState, string> = {
@@ -34,11 +36,15 @@ const STATE_LABEL: Record<JobState, string> = {
   TimedOut: "Timed out",
 };
 
-const STEP_MARK: Record<Step["status"], string> = { running: "▶", completed: "✔", skipped: "–" };
+const STEP_MARK: Record<Step["status"], string> = { pending: "○", running: "▶", completed: "✔", skipped: "–" };
 
-const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assessment", triage: "Finding triage" };
+const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assessment", triage: "Finding triage",
+  review: "Security review",
+};
 
-export function RunView({ view, selectedOption, error }: Props) {
+const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review" };
+
+export function RunView({ view, selectedOption, error, report }: Props) {
   const { colors } = useTheme();
   const { job } = view;
 
@@ -187,7 +193,11 @@ export function RunView({ view, selectedOption, error }: Props) {
             Approval needed
           </text>
           <text>{view.approval.title}</text>
-          <text attributes={TextAttributes.DIM}>{view.approval.detail}</text>
+          {view.approval.detail.split("\n").map((line, index) => (
+            <text key={index} attributes={TextAttributes.DIM}>
+              {line}
+            </text>
+          ))}
           <box flexDirection="row" gap={1} marginTop={1}>
             <text fg={colors.success}>a</text>
             <text attributes={TextAttributes.DIM}>approve</text>
@@ -234,8 +244,19 @@ export function RunView({ view, selectedOption, error }: Props) {
 
       {isFinished(view) && job.state === "Succeeded" && job.resultId ? (
         <text attributes={TextAttributes.DIM}>
-          Result: {job.type === "assess" ? "assessment" : "scan"} {job.resultId}
+          Result: {RESULT[job.type] ?? job.type} {job.resultId}
         </text>
+      ) : null}
+
+      {/* A review ends in a report: show it as written */}
+      {report ? (
+        <box flexDirection="column" border={["top"]} borderColor={colors.dimSeparator}>
+          {report.split("\n").map((line, index) => (
+            <text key={index} attributes={line.startsWith("#") ? TextAttributes.BOLD : 0}>
+              {line.length > 0 ? line : " "}
+            </text>
+          ))}
+        </box>
       ) : null}
     </box>
   );
