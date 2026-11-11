@@ -36,7 +36,7 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 |---|---|
 | De-clouded TypeScript baseline (CLI + server) | ✅ local SQLite, own auth, Ollama + user API keys — no Clerk / Polar / Neon |
 | .NET backend (ASP.NET Core + EF Core + SignalR) | 🚧 auth, sessions, AI-SDK-compatible streaming chat — see [`backend/README.md`](backend/README.md) |
-| Sandbox, agent fleet, compliance engine, Azure deploy | 📋 planned — see [PLAN.md](PLAN.md) |
+| Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
 
 ## Repository layout
 

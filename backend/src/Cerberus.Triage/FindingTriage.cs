@@ -31,7 +31,12 @@ public sealed record TriageResult(
     string Model,
     DateTime At,
     /// <summary>False when the model's reply was unusable and the verdict is a fallback.</summary>
-    bool ModelAnswered = true);
+    bool ModelAnswered = true,
+    /// <summary>Skills from the library the reviewer was pointed at for this finding.</summary>
+    IReadOnlyList<string>? Skills = null);
+
+/// <summary>A skill offered to the reviewer as a reference: its name and one-paragraph summary.</summary>
+public sealed record SkillReference(string Name, string Description);
 
 /// <summary>Builds what the model sees for one finding.</summary>
 public static class TriagePrompt
@@ -60,7 +65,9 @@ public static class TriagePrompt
 
     /// <param name="lines">The whole file, or null if it could not be read.</param>
     /// <param name="redactSecrets">Mask credential-shaped values — required before code leaves this machine.</param>
-    public static string BuildUser(Finding finding, IReadOnlyList<string>? lines, bool redactSecrets)
+    public static string BuildUser(
+        Finding finding, IReadOnlyList<string>? lines, bool redactSecrets,
+        IReadOnlyList<SkillReference>? skills = null)
     {
         var text = new StringBuilder();
         text.Append("Rule: ").Append(finding.Id.Split(':')[0]).Append(" — ").AppendLine(finding.Title);
@@ -92,6 +99,17 @@ public static class TriagePrompt
                     .AppendLine(Prepare(lines[n - 1], redactSecrets));
             }
             text.AppendLine("SOURCE>>>");
+        }
+
+        if (skills is { Count: > 0 })
+        {
+            text.AppendLine();
+            text.AppendLine("Reference procedures from the platform's skills library that apply to this kind of finding:");
+            foreach (var skill in skills)
+            {
+                var summary = skill.Description.Length <= 400 ? skill.Description : skill.Description[..400] + "…";
+                text.Append("- ").Append(skill.Name).Append(": ").AppendLine(summary);
+            }
         }
 
         if (redactSecrets)
@@ -234,12 +252,14 @@ public sealed class FindingTriager(IModelProviderResolver resolver)
 
     public async Task<TriageResult> TriageAsync(
         Finding finding, IReadOnlyList<string>? fileLines, string modelId, ModelCredentials credentials,
-        DateTime now, CancellationToken ct, Func<string, Task>? onDelta = null)
+        DateTime now, CancellationToken ct, Func<string, Task>? onDelta = null,
+        IReadOnlyList<SkillReference>? skills = null)
     {
+        var skillNames = skills is { Count: > 0 } ? skills.Select(s => s.Name).ToList() : null;
         var provider = resolver.Resolve(modelId);
         var request = new ChatCompletionRequest(
             modelId,
-            [new ChatMessage("user", TriagePrompt.BuildUser(finding, fileLines, redactSecrets: !IsLocal(provider.Provider)))],
+            [new ChatMessage("user", TriagePrompt.BuildUser(finding, fileLines, redactSecrets: !IsLocal(provider.Provider), skills))],
             TriagePrompt.System,
             credentials);
 
@@ -256,13 +276,13 @@ public sealed class FindingTriager(IModelProviderResolver resolver)
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new TriageResult(finding.Id, TriageVerdict.NeedsReview,
-                $"The model call failed: {ex.Message}", null, modelId, now, ModelAnswered: false);
+                $"The model call failed: {ex.Message}", null, modelId, now, ModelAnswered: false, Skills: skillNames);
         }
 
         return TriageParser.Parse(reply.ToString()) is { } parsed
-            ? new TriageResult(finding.Id, parsed.Verdict, parsed.Reasoning, parsed.Remediation, modelId, now)
+            ? new TriageResult(finding.Id, parsed.Verdict, parsed.Reasoning, parsed.Remediation, modelId, now, Skills: skillNames)
             : new TriageResult(finding.Id, TriageVerdict.NeedsReview,
-                "The model's reply was not the requested JSON verdict.", null, modelId, now, ModelAnswered: false);
+                "The model's reply was not the requested JSON verdict.", null, modelId, now, ModelAnswered: false, Skills: skillNames);
     }
 
     /// <summary>
