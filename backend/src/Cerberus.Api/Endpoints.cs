@@ -369,10 +369,17 @@ public static class Endpoints
             return denied;
         }
 
+        // A synchronous request has nobody to ask, so it takes the choice up front.
+        var exclusions = string.IsNullOrWhiteSpace(body.Exclusions) ? ScanExclusions.Honour : body.Exclusions.Trim().ToLowerInvariant();
+        if (!ScanExclusions.IsValid(exclusions, allowAsk: false))
+        {
+            return Results.Json(new { error = "exclusions must be honour or ignore (use a scan job to be asked)" }, statusCode: 400);
+        }
+
         ScanRun run;
         try
         {
-            run = await runner.RunAsync(userId, engagementId, targetPath, body.Sca ?? true, ct);
+            run = await runner.RunAsync(userId, engagementId, targetPath, body.Sca ?? true, ct, exclusions: exclusions);
         }
         catch (UnauthorizedAccessException ex)
         {

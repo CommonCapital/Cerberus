@@ -75,13 +75,15 @@ builder.Services.AddSingleton(new JobOptions(
     Concurrency: Math.Clamp(EnvInt("CERBERUS_JOB_CONCURRENCY", 2), 1, 16),
     Timeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_TIMEOUT_SECONDS", 600)),
     Grace: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_GRACE_SECONDS", 10)),
-    MaxQueuedPerUser: 50));
+    MaxQueuedPerUser: 50,
+    QuestionTimeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_QUESTION_TIMEOUT_SECONDS", 3600))));
 builder.Services.AddScoped<ScanRunner>();
 builder.Services.AddScoped<AssessmentRunner>();
 builder.Services.AddSingleton<Cerberus.Triage.FindingTriager>();
 builder.Services.AddScoped<TriageRunner>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
+builder.Services.AddSingleton<OperatorDesk>();
 builder.Services.AddScoped<JobControl>();
 builder.Services.AddHostedService<JobWorker>();
 
@@ -102,6 +104,7 @@ app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapApprovalEndpoints();
+app.MapQuestionEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");
 

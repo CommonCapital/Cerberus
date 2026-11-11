@@ -7,7 +7,9 @@ namespace Cerberus.Api.Jobs;
 
 public sealed record CancelSummary(int Queued, int Running);
 
-public sealed record JobOptions(int Concurrency, TimeSpan Timeout, TimeSpan Grace, int MaxQueuedPerUser);
+/// <param name="QuestionTimeout">How long a job waits for the operator to answer a question before falling back.</param>
+public sealed record JobOptions(
+    int Concurrency, TimeSpan Timeout, TimeSpan Grace, int MaxQueuedPerUser, TimeSpan QuestionTimeout);
 
 /// <summary>
 /// The operator's controls over jobs: cancel one, or stop everything an
@@ -66,7 +68,8 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
                 .SetProperty(j => j.FinishedAt, now), ct);
 
         var runningIds = await db.Jobs.AsNoTracking()
-            .Where(j => j.UserId == userId && j.EngagementId == engagementId && j.State == nameof(JobState.Running))
+            .Where(j => j.UserId == userId && j.EngagementId == engagementId &&
+                        (j.State == nameof(JobState.Running) || j.State == nameof(JobState.AwaitingInput)))
             .Select(j => j.Id)
             .ToListAsync(ct);
         var running = runningIds.Count(registry.Cancel);

@@ -54,6 +54,8 @@ Environment:
 | WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
+| GET | `/questions` · `/questions/{id}` | Bearer | Questions running jobs have put to the operator (`?status=pending&jobId=`) |
+| POST | `/questions/{id}/answer` | Bearer | Answer a pending question: `{ "selected": ["…"], "text"?: "…" }` |
 | GET | `/jobs/{id}/events` | Bearer | The run's event stream from storage, in order (`?after=<sequence>&limit=`) |
 | GET | `/approvals` · `/approvals/{id}` | Bearer | Requests waiting for (or already given) the operator's decision (`?status=pending&engagementId=`) |
 | POST | `/approvals/{id}/approve` · `/deny` | Bearer | Decide a pending request, optionally with `{ "note": "…" }` |
@@ -106,6 +108,7 @@ A domain target proven at its apex covers its subdomains. An IP address or `host
 | `text` | `{ channel, text }` | model output as it is written, in chunks; concatenate per channel (for triage, the channel is the finding id) |
 | `triage` | the triage result | a model's verdict on one finding |
 | `approval_requested`, `approval_resolved` | the approval request | the run waits for, or gets, the operator's decision |
+| `question`, `question_resolved` | the question (with its answer once resolved) | the run asks the operator something; it was answered, expired or withdrawn |
 | `note`, `truncated` | `{ message }` | a remark; or the run exceeded 5,000 events and only state changes follow |
 
 Events are numbered per job from 1 without gaps, **stored before they are pushed**, and pushed in that order. A client that connects late or drops out reads `GET /jobs/{id}/events?after=<last sequence it has>` (pages of up to 2,000, with `more` and `lastSequence`) and then carries on with live events — so nothing has to be polled and nothing is lost. A failed push or write is logged and never affects the job. The older `jobUpdated`, `approvalRequested` and `approvalResolved` messages are still sent for existing clients. A step that was running when a job failed or was cancelled gets no closing event; the final `state` event says how the run ended.
@@ -123,6 +126,16 @@ Some jobs must not run on a submit alone. Such a job is stored in state `Awaitin
 - **Durable:** the wait is in the database, so it survives a restart and can be answered later from any client. There is no expiry yet.
 - **Withdrawn automatically:** cancelling the job, or aborting its engagement, closes the request as `Cancelled`.
 - **What needs approval today:** a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party. Local-model triage, scans and assessments do not. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls (PLAN.md §6.5).
+
+### `/questions` — the run asks, the operator answers
+
+A running job that needs a decision it should not make alone puts a **question** to the operator and waits. The job moves to `AwaitingInput`, its time limit is paused (waiting for a person does not time a job out), and the run's stream carries a `question` event with the text and the options. `POST /questions/{id}/answer` with `{ "selected": ["<option label>"] }` (and `text` where the question allows free text) wakes the job, which carries on in `Running`; the stream shows `question_resolved` with the answer. Asking and answering are audited (`question.ask`, `question.answer`).
+
+- **Validation:** the answer must use the question's options (matched case-insensitively), exactly one unless the question is multi-select; anything else is a 400 and the job keeps waiting. A question is answered once (409 afterwards).
+- **No answer:** after `CERBERUS_QUESTION_TIMEOUT_SECONDS` (default 3600) the question becomes `Expired` and the job continues with its stated safe default, recorded as a `note` on the stream.
+- **Stopped while waiting:** cancelling the job or aborting its engagement ends it as `Cancelled` and closes the question as `Cancelled`.
+- **Restart:** a job waiting for an answer is in memory; after a server restart it is marked `Failed` and its question `Cancelled` (unlike approvals, which wait in the database before a job starts).
+- **What asks today:** a `scan` job whose target excludes files with `.cerberusignore` or suppresses findings with `cerberus:ignore` asks whether to honour that — *"Honour them"* (default) or *"Scan everything"*. Decide up front with `"exclusions": "honour" | "ignore"` on the job to skip the question; the synchronous `POST /scan` has nobody to ask and takes `honour` (default) or `ignore`. A target that excludes nothing is not asked about.
 
 ### `/compliance` — Phase 2 (Compliance), deterministic engine
 
@@ -151,7 +164,7 @@ Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: curr
 
 **What is not scanned**, and how it is reported: dependency and build directories (`node_modules`, `.git`, `bin`, `obj`, `dist`, `vendor`, …); binary, media, archive, lock and minified files, files over 1 MB and lines over 2,000 characters (`filesSkipped`); and paths listed in a `.cerberusignore` at the scan root or in the scanned directory (`filesIgnored`). Ignore patterns follow `.gitignore` conventions: `dir/`, `*.ext` at any depth, `a/b.py` anchored, `**` across directories. A scan stops at 5,000 findings and sets `truncated`.
 
-Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. Check `suppressedCount` and `filesIgnored` when assessing code you do not control.
+Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. For code you do not control, scan with `"exclusions": "ignore"`: every file is scanned and nothing is suppressed. A scan *job* asks you about this when the target actually excludes something (see `/questions`).
 
 **Measured** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
 
@@ -185,4 +198,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).

@@ -11,7 +11,7 @@ namespace Cerberus.Api.Jobs;
 
 public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
-    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs);
+    string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions);
 
 /// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
 public static class JobEndpoints
@@ -117,7 +117,13 @@ public static class JobEndpoints
         }
         else
         {
-            parameters = JsonSerializer.Serialize(new ScanJobParameters(body.Sca ?? true), JobTypes.Json);
+            // By default a scan job asks the operator if the target hides anything through its own markers.
+            var exclusions = string.IsNullOrWhiteSpace(body.Exclusions) ? ScanExclusions.Ask : body.Exclusions.Trim().ToLowerInvariant();
+            if (!ScanExclusions.IsValid(exclusions, allowAsk: true))
+            {
+                return BadRequest("exclusions must be ask, honour or ignore");
+            }
+            parameters = JsonSerializer.Serialize(new ScanJobParameters(body.Sca ?? true, exclusions), JobTypes.Json);
         }
 
         // Reject paths that cannot be valid up front instead of failing later in the worker.

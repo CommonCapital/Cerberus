@@ -84,7 +84,9 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
     /// <summary>Stops tracking a finished job's sequence (it is re-read from the database if ever needed).</summary>
     public void Forget(string jobId) => _lastSequence.TryRemove(jobId, out _);
 
-    public IRunReporter For(Job job) => new Reporter(this, job.Id, job.UserId);
+    /// <param name="ask">How this run reaches the operator; null if it cannot ask.</param>
+    public IRunReporter For(Job job, Func<OperatorQuestionSpec, CancellationToken, Task<OperatorAnswer?>>? ask = null) =>
+        new Reporter(this, job.Id, job.UserId, ask);
 
     internal static object Describe(JobEvent e) => new
     {
@@ -95,7 +97,9 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
         e.CreatedAt,
     };
 
-    private sealed class Reporter(RunStream stream, string jobId, string userId) : IRunReporter
+    private sealed class Reporter(
+        RunStream stream, string jobId, string userId,
+        Func<OperatorQuestionSpec, CancellationToken, Task<OperatorAnswer?>>? ask) : IRunReporter
     {
         /// <summary>Findings pushed one by one per run; the rest are summarized (all are in the stored result).</summary>
         private const int MaxFindingEvents = 300;
@@ -139,6 +143,12 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
             {
                 await stream.EmitAsync(jobId, userId, RunEventTypes.Text, new { channel = chunk.Channel, text = chunk.Text });
             }
+        }
+
+        public async Task<OperatorAnswer?> AskAsync(OperatorQuestionSpec question, CancellationToken ct)
+        {
+            await FlushTextAsync();
+            return ask is null ? null : await ask(question, ct);
         }
 
         public async Task EventAsync(string type, object data)

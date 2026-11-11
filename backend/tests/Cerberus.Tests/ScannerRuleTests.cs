@@ -246,6 +246,23 @@ public class ScannerBehaviourTests
     }
 
     [Fact]
+    public void Exclusions_can_be_disregarded_for_code_that_is_not_trusted()
+    {
+        using var sandbox = new ScanSandbox()
+            .File(".cerberusignore", "hidden/\n")
+            .File("hidden/a.py", Weak)
+            .File("app.py", "a = hashlib.md5(x)  # cerberus:ignore\n");
+        var scanner = new ScanService(new ScanOptions(sandbox.Root));
+
+        var honoured = scanner.Scan(".");
+        Assert.Equal((0, 1, 1), (honoured.ActiveCount, honoured.SuppressedCount, honoured.FilesIgnored));
+
+        var everything = scanner.Scan(".", honourExclusions: false);
+        Assert.Equal((2, 0, 0), (everything.ActiveCount, everything.SuppressedCount, everything.FilesIgnored));
+        Assert.Equal(["app.py", "hidden/a.py"], everything.Findings.Select(f => f.File).Order().ToArray());
+    }
+
+    [Fact]
     public void Marker_on_a_comment_line_applies_to_the_next_line_only()
     {
         using var sandbox = new ScanSandbox().File("app.py",
