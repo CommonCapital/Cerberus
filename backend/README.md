@@ -1,15 +1,21 @@
 # Cerberus backend (.NET)
 
-The .NET port of the Cerberus server (milestone **M2**). Fully local: ASP.NET Core + EF Core (SQLite) + SignalR, with no hosted services. This runs alongside the TypeScript baseline during the transition and will eventually replace `packages/server`.
+**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite) + SignalR, with no hosted services. It has every capability of the original TypeScript server (`packages/server`) — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The TypeScript server is superseded and kept only for reference; the CLI talks to this one. See "Parity with the TypeScript server" below.
 
 ## Projects
 
 | Project | Role |
 |---|---|
-| `Cerberus.Api` | ASP.NET Core minimal API + SignalR hub; auth, sessions, chat endpoints |
-| `Cerberus.Core` | Domain abstractions: model registry, `IModelProvider`, password hashing |
-| `Cerberus.Data` | EF Core `DbContext` + entities (`User`, `AuthSession`, `Session`), SQLite |
-| `Cerberus.Models` | `IModelProvider` implementations: Anthropic, OpenAI, Ollama (+ resolver) |
+| `Cerberus.Api` | ASP.NET Core minimal API + SignalR hubs: every endpoint, the job worker, the chat runner |
+| `Cerberus.Core` | Domain abstractions: model registry, `IModelProvider`, the chat model (turns, tools, events), password hashing |
+| `Cerberus.Data` | EF Core `DbContext`, entities, additive schema upgrades; SQLite |
+| `Cerberus.Models` | Model providers: Anthropic (official SDK), OpenAI and Ollama (Chat Completions), the `echo` stand-in |
+| `Cerberus.Scanning` | Deterministic scanner rules and the dependency (SCA) check |
+| `Cerberus.Compliance` | Control catalogs, compliance engine, spreadsheet export/import, operator answers |
+| `Cerberus.Authorization` | Capability tiers, engagement scope policy, proof of control, audit hash chain |
+| `Cerberus.Jobs` | Message bus, job states and executor, run events, operator questions |
+| `Cerberus.Triage` | LLM review of findings: prompt, redaction, reply parsing |
+| `Cerberus.Skills` | The skills library: index, search, tier-based access |
 
 ## Run
 
@@ -24,6 +30,14 @@ Environment:
 - `CERBERUS_DB` — SQLite file path (default `cerberus.db` under the API content root). The schema is created automatically on first run.
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — user-supplied keys for cloud models (optional).
 - `OLLAMA_BASE_URL` — local Ollama endpoint (default `http://localhost:11434/v1`). Use Ollama for fully offline operation.
+- `CERBERUS_BIND` — address to listen on (default `localhost`; the container image sets `0.0.0.0`).
+- `CERBERUS_SKILLS_ROOT` / `CERBERUS_CATALOG_ROOT` — where the skills library and control catalogs are (default: the repository's `security-skills/skills` and `catalogs`).
+
+Or in a container, from the repository root (see `docker-compose.yml`; written but not yet run):
+
+```bash
+docker compose up -d
+```
 
 ## Endpoints
 
@@ -36,10 +50,12 @@ Environment:
 | GET | `/sessions` | Bearer | List sessions |
 | GET | `/sessions/{id}` | Bearer | Session + parsed messages |
 | POST | `/sessions` | Bearer | `{ title }` → created session |
+| GET | `/skills` | Bearer | The skills library catalog (`?q=&subdomain=&limit=`), with the tier each skill needs |
+| GET | `/skills/{name}` | Bearer | One skill's text (403 for skills reserved for a tier that cannot be granted) |
 | GET | `/settings/keys` | Bearer | Which providers have a key set (never returns the key) |
 | PUT | `/settings/keys` | Bearer | `{ provider, apiKey }` — store a key (encrypted at rest) |
 | DELETE | `/settings/keys/{provider}` | Bearer | Remove a stored key |
-| POST | `/chat` | Bearer | AI-SDK UI-message stream; CLI-compatible body `{ id, messages, mode, model }`; persists UIMessages |
+| POST | `/chat` | Bearer | The chat agent: AI-SDK UI-message stream with tool calls; body `{ id, messages, mode, model }` |
 | GET, POST | `/engagements` | Bearer | List / create an engagement `{ name, maxTier?, startsAt?, endsAt? }` |
 | GET | `/engagements/{id}` | Bearer | An engagement with its in-scope targets |
 | POST | `/engagements/{id}/targets` | Bearer | Add a target `{ type?, locator, ownershipAttested }` to the scope |
@@ -182,15 +198,50 @@ Because markers and ignore files live in the target, a target can hide findings 
 
 Each user stores their own Anthropic/OpenAI keys via `/settings/keys`. Keys are **encrypted at rest** with ASP.NET Core Data Protection (keyring under `dp-keys/`, or `CERBERUS_KEYRING`), never returned by the API, and decrypted in-memory only to authorize a `/chat` request — taking precedence over the `*_API_KEY` env vars. Ollama models need no key.
 
-### `/chat` protocol
+### `/chat` — the chat agent
 
-The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/react`'s `DefaultChatTransport` consumes it unchanged: `text/event-stream` with `x-vercel-ai-ui-message-stream: v1`, chunks framed as `data: {json}\n\n` in the sequence `start` → `start-step` → `text-start` → `text-delta*` → `text-end` → `finish-step` → `finish` → `[DONE]`, with `messageMetadata` carrying mode/model/durationMs. Sessions store and return UIMessages (`{ id, role, parts }`). A dev model id `echo` streams a canned reply with no API key for headless verification.
+`POST /chat` with `{ id, messages, mode, model }` produces one reply of the agent, streamed in the **AI-SDK UI-message stream** format (`text/event-stream`, `x-vercel-ai-ui-message-stream: v1`, chunks as `data: {json}\n\n`, ending with `data: [DONE]`), so `@ai-sdk/react`'s chat client — the one the CLI uses — consumes it unchanged.
+
+- **Request:** `id` is the session; `messages` are UI messages (`{ id, role, parts }`), at least one; `mode` is `BUILD` or `PLAN`; `model` is a supported model id. Anything else is a 400 `Invalid request body`; an unknown session is a 404. An incoming message replaces a stored one with the same id, otherwise it is appended.
+- **Stream:** `start` → per model step `start-step` … `finish-step` → `finish`. Within a step: `text-start/-delta/-end`, `reasoning-start/-delta/-end`, and for each tool call `tool-input-start`, `tool-input-delta*`, `tool-input-available` (or `tool-input-error`). The final `finish` carries `messageMetadata` with `mode`, `model`, `durationMs` and `usage` (`inputTokens`, `outputTokens`, `totalTokens`) when the provider reports it. A model failure is an `error` chunk.
+- **Client tools** — `readFile`, `listDirectory`, `glob`, `grep`, and in BUILD mode also `writeFile`, `editFile`, `bash` (the same contracts as the TypeScript server). The server only describes them and relays the call; the reply ends, the CLI runs the tool in the project it was started in, and resubmits the same assistant message with the result. The server then **continues that message** (same `messageId`). Nothing is stored while calls are pending — the client holds the message.
+- **Server tools** — `searchSkills` and `loadSkill` run in the backend within the same reply, marked `providerExecuted` so the client neither runs nor waits for them; their result arrives as `tool-output-available` / `tool-output-error` and the model is called again (at most 8 steps per reply).
+- **Providers:** Anthropic through the official C# SDK (streaming, tool use, adaptive thinking with summaries; thinking blocks go back unchanged with their signatures after a tool call), OpenAI and Ollama through Chat Completions (tools, usage, and the reasoning fields some servers stream). The `echo` model is a rule-following stand-in for development, not a language model.
+
+### Skills library
+
+The vendored library under `security-skills/skills` (818 skills) is indexed at startup from each skill's front matter. Agents reach it in two ways: the chat agent calls `searchSkills` / `loadSkill`, and the triage reviewer is pointed at the skills matching each finding (the result records which). Access follows the capability tier: skills in the library's offensive subdomains need tier T2, which cannot be granted yet, so an agent at the passive tier neither finds nor loads them. `GET /skills` lists the whole catalog with the tier each skill needs; `GET /skills/{name}` returns the text only for skills a grantable tier may load.
+
+### Parity with the TypeScript server
+
+Checked feature by feature against `packages/server`:
+
+| TypeScript server | .NET backend |
+|---|---|
+| `POST /auth/register`, `/login`, `/logout` — same bodies, status codes and messages; 30-day session tokens | ✅ same (tested) |
+| `GET/POST /sessions`, `GET /sessions/:id` — same shapes; 400 on a missing title; 404 for another user's session | ✅ same (tested) |
+| `POST /chat` request validation (id, ≥1 message, mode enum, supported model) | ✅ same; `mode` is also accepted in lower case |
+| Stored messages merged with incoming ones by id | ✅ |
+| Tools by mode (4 read-only in PLAN, 7 in BUILD), executed by the CLI | ✅ same names, descriptions and input schemas |
+| Reply continues the resubmitted assistant message; not stored while tool calls are pending | ✅ |
+| System prompt with modes, tool list and rules | ✅ ported, plus the security framing and skills tools |
+| `messageMetadata`: mode, model, durationMs, usage | ✅ usage has `inputTokens`, `outputTokens`, `totalTokens` (the AI SDK's extra usage fields are not filled) |
+| Model list (Anthropic, OpenAI, Ollama) | ✅ same ids, plus `echo` and `codestral` |
+| Anthropic thinking on Opus/Sonnet (fixed 10,000-token budget) | 🟡 adaptive thinking with summaries instead — the fixed budget is deprecated on those models. **Not yet run against the real API.** |
+| OpenAI reasoning summaries on `gpt-5.4` (via the Responses API) | ⬜ not ported: the backend uses Chat Completions, which does not return them. Replies and tool calls work; the reasoning text is not shown. |
+| Model keys from the environment | ✅ plus per-user encrypted keys |
+| JSON error bodies (`{ "error": … }`) for bad input and unexpected failures | ✅ |
+| Strict validation of every message part against the tool schemas | 🟡 lighter: messages need an id, a role and parts; tool inputs are checked to be JSON objects for a known tool |
+
+Beyond parity: server-run tools, per-user keys, and everything under scans, compliance, jobs, approvals, questions, engagements, audit and skills.
+
+Accounts are not shared between the two servers (each has its own database); the CLI simply registers on whichever it talks to.
 
 ## Status & follow-ups
 
-- Auth, sessions, the streaming chat pipeline (provider resolver → Anthropic/OpenAI/Ollama → UI-message stream → persistence), and AI-SDK protocol compatibility are implemented and verified (raw SSE checked against the `ai` package format; UIMessage persistence round-trips).
-- Per-user **encrypted** API-key storage is implemented (`/settings/keys`, Data Protection) and used by `/chat`.
-- **Follow-ups:** retarget the TS CLI at this server (swap the hono client base URL / calls); SignalR hub auth; tool-calling (tool-input/tool-output UI chunks + client execution).
+- The CLI's login, sessions, chat with tool calls, `/scan` and `/runs` all work against this backend. Chat was verified by driving the running backend with the CLI's own AI SDK chat client and local tools, using the `echo` stand-in.
+- **Not verified against real models** (no model may be run on the development machine): tool calling and thinking with Anthropic, tool calling with OpenAI and Ollama, and LLM triage. The provider code is tested against canned streams in the providers' documented formats. See PLAN.md §17 "Pending verification".
+- **Follow-ups:** OpenAI reasoning summaries (Responses API); authentication on the `/hub/chat` SignalR skeleton (unused by the CLI); moving the model list to current Claude models.
 
 ## Tests
 
@@ -198,4 +249,4 @@ The endpoint speaks the **AI-SDK UI-message stream** wire format, so `@ai-sdk/re
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`: jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`, `ChatTests.cs`: the chat agent with client and server tools, auth and sessions as the TypeScript server answered them; jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).

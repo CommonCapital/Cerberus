@@ -523,4 +523,88 @@ public class ChatApiTests(ApiHost host)
         Assert.Equal("not used", chunks[^1].GetProperty("errorText").GetString());
         Assert.Empty(await StoredAsync(client, session));
     }
+
+    [Theory]
+    [InlineData("not-an-email")]
+    [InlineData("a@")]
+    [InlineData("a@b")]
+    [InlineData("a b@c.de")]
+    [InlineData("@c.de")]
+    public async Task Registration_needs_a_real_looking_email(string email)
+    {
+        var response = await host.CreateClient().PostAsJsonAsync("/auth/register", new { email, password = "secret123" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("A valid email and a password (min 6 characters) are required", (await Json(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Auth_answers_like_the_typescript_server()
+    {
+        var client = host.CreateClient();
+        var email = $"{Guid.NewGuid():n}@test.dev";
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/auth/register", new { email, password = "short" })).StatusCode);
+        var registered = await client.PostAsJsonAsync("/auth/register", new { email, password = "secret123" });
+        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+        var token = (await Json(registered)).GetProperty("token").GetString();
+
+        var duplicate = await client.PostAsJsonAsync("/auth/register", new { email, password = "secret123" });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal("A user with this email already exists", (await Json(duplicate)).GetProperty("error").GetString());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/auth/login", new { email, password = "wrong-password" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/auth/login", new { email, password = "secret123" })).StatusCode);
+
+        // Logging out revokes that token, and is harmless without one.
+        var request = new HttpRequestMessage(HttpMethod.Post, "/auth/logout");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        Assert.True((await Json(await client.SendAsync(request))).GetProperty("success").GetBoolean());
+        var after = new HttpRequestMessage(HttpMethod.Get, "/sessions");
+        after.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var rejected = await client.SendAsync(after);
+        Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+        Assert.Equal("Unauthorized. Run /login to continue.", (await Json(rejected)).GetProperty("error").GetString());
+        Assert.True((await Json(await client.PostAsync("/auth/logout", null))).GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Sessions_answer_like_the_typescript_server()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var (other, _) = await host.NewUserAsync();
+
+        var created = await client.PostAsJsonAsync("/sessions", new { title = "First" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var session = await Json(created);
+        foreach (var field in new[] { "id", "userId", "title", "createdAt", "updatedAt", "messages" })
+        {
+            Assert.True(session.TryGetProperty(field, out _), $"missing {field}");
+        }
+        Assert.Equal(0, session.GetProperty("messages").GetArrayLength());
+        var id = session.GetProperty("id").GetString();
+
+        var missingTitle = await client.PostAsJsonAsync("/sessions", new { });
+        Assert.Equal(HttpStatusCode.BadRequest, missingTitle.StatusCode);
+        Assert.Equal("Invalid request body", (await Json(missingTitle)).GetProperty("error").GetString());
+
+        var list = await client.GetFromJsonAsync<JsonElement>("/sessions");
+        var listed = list.EnumerateArray().Single();
+        Assert.Equal(["id", "title", "createdAt"], listed.EnumerateObject().Select(p => p.Name).ToArray());
+
+        Assert.Equal("First", (await client.GetFromJsonAsync<JsonElement>($"/sessions/{id}")).GetProperty("title").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/sessions/{id}")).StatusCode);
+        Assert.Equal("Session not found", (await Json(await client.GetAsync("/sessions/missing"))).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task A_body_that_is_not_json_gets_a_json_error()
+    {
+        var (client, _) = await host.NewUserAsync();
+
+        var response = await client.PostAsync("/sessions", new StringContent("{not json", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Invalid request body", (await Json(response)).GetProperty("error").GetString());
+    }
 }

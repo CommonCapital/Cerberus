@@ -510,9 +510,16 @@ public static class Endpoints
     }
 
     private static bool IsValid(CredentialsRequest body) =>
-        !string.IsNullOrWhiteSpace(body.Email)
-        && body.Email.Contains('@')
-        && body.Password?.Length >= 6;
+        IsEmail(body.Email) && body.Password?.Length >= 6;
+
+    /// <summary>A plain address of the form local@domain.tld — what the TypeScript server's schema accepted.</summary>
+    private static bool IsEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 254 || value.Any(char.IsWhiteSpace)) return false;
+        if (!System.Net.Mail.MailAddress.TryCreate(value, out var address) || address.Address != value) return false;
+        var host = address.Host;
+        return host.Contains('.') && !host.StartsWith('.') && !host.EndsWith('.') && !host.Contains("..");
+    }
 
     // --- sessions -----------------------------------------------------------
 
@@ -547,6 +554,10 @@ public static class Endpoints
     private static async Task<IResult> CreateSession(CreateSessionRequest body, HttpContext http, CerberusDbContext db, CancellationToken ct)
     {
         var userId = UserId(http);
+        if (body.Title is null)
+        {
+            return Results.Json(new { error = "Invalid request body" }, statusCode: 400);
+        }
         var session = new Session { UserId = userId, Title = body.Title };
         db.Sessions.Add(session);
         await db.SaveChangesAsync(ct);

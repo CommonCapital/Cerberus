@@ -101,6 +101,27 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 
 var app = builder.Build();
 
+// Errors are JSON, as clients of this API expect: a request that cannot be read is a
+// 400 "Invalid request body", and anything unexpected is a 500 without internals.
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next(context);
+    }
+    catch (BadHttpRequestException) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = "Invalid request body" });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException && !context.Response.HasStarted)
+    {
+        app.Logger.LogError(ex, "Unhandled server error");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
+    }
+});
+
 // Create the schema on first run, and additively upgrade an existing local database.
 using (var scope = app.Services.CreateScope())
 {

@@ -34,8 +34,9 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 
 | Area | Status |
 |---|---|
-| De-clouded TypeScript baseline (CLI + server) | ✅ local SQLite, own auth, Ollama + user API keys — no Clerk / Polar / Neon |
-| .NET backend (ASP.NET Core + EF Core + SignalR) | 🚧 auth, sessions, AI-SDK-compatible streaming chat — see [`backend/README.md`](backend/README.md) |
+| TypeScript CLI | ✅ chat, plus `/scan` and `/runs` against the .NET backend |
+| TypeScript server (`packages/server`) | 🗄 superseded by the .NET backend, which has all of its features; kept for reference |
+| .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
 | Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
 
 ## Repository layout
@@ -68,46 +69,48 @@ cp .env.example .env
 
 Everything defaults to local. `DATABASE_URL` points at a local SQLite file; add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` only if you want cloud models (otherwise use Ollama).
 
-### 2. TypeScript app (CLI + server)
+### 2. The backend (.NET)
+
+```bash
+cd backend && dotnet run --project src/Cerberus.Api
+```
+
+It listens on `http://localhost:3000` and creates its SQLite database on first run. This is the one backend: the CLI needs nothing else.
+
+### 3. The CLI
 
 ```bash
 bun install
 ```
 
 ```bash
-bun run --cwd packages/database db:push
-```
-
-```bash
-bun run dev:server
-```
-
-```bash
 bun run dev:cli
 ```
 
-The CLI signs in to the local server automatically (a local account is created on first `/login`).
+The CLI signs in to the backend automatically (a local account is created on first `/login`). Chat runs its file and shell tools on your machine, in the directory the CLI was started in.
 
-### 3. .NET backend
+> **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). The original TypeScript server in `packages/server` speaks the same auth, session and chat API and still runs (`bun run --cwd packages/database db:push`, then `bun run dev:server`), but it is superseded: the .NET backend has every one of its features (see the parity table in [`backend/README.md`](backend/README.md)) and all the security features exist only there. Do not run both on port 3000.
+
+### Or: everything in containers
 
 ```bash
-cd backend && dotnet run --project src/Cerberus.Api
+docker compose up -d
 ```
+
+```bash
+docker compose run --rm cli
+```
+
+`docker-compose.yml` runs the backend, with the CLI, Ollama, RabbitMQ and Redis as opt-in profiles. **These files were written without starting Docker** — expect small fixes on the first run (PLAN.md §15).
 
 ### 4. Security runs from the CLI
 
-The CLI's `/scan` and `/runs` commands talk to the **.NET backend**, which listens on the same default address as the TypeScript server (`http://localhost:3000`). Run one or the other on that port, or point the CLI at the backend explicitly:
-
-```bash
-API_URL=http://localhost:3000 bun run dev:cli
-```
-
-Then `/login`, and:
+With the backend and the CLI running, `/login`, and:
 
 - **`/scan`** — type a path under the backend's scan root; the scan starts as a background job and its run opens.
 - **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
 
-On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on). Against the TypeScript server these commands report that the feature needs the backend.
+On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on).
 
 ```bash
 bun run --cwd packages/cli test
