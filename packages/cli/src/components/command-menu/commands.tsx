@@ -2,6 +2,7 @@ import { SUPPORTED_CHAT_MODELS } from "@nightcode/shared";
 import { 
   AgentsDialogContent,
   ModelsDialogContent,
+  PermissionsDialogContent,
   RunsDialogContent,
   ScanDialogContent,
   SessionsDialogContent,
@@ -67,6 +68,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: "Runs",
         children: <RunsDialogContent />,
+      })
+    },
+  },
+  {
+    name: "permissions",
+    description: "Choose what runs without asking you first",
+    value: "/permissions",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Permissions",
+        children: <PermissionsDialogContent />,
       })
     },
   },

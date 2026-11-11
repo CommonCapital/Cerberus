@@ -50,6 +50,7 @@ docker compose up -d
 | GET | `/sessions` | Bearer | List sessions |
 | GET | `/sessions/{id}` | Bearer | Session + parsed messages |
 | POST | `/sessions` | Bearer | `{ title }` → created session |
+| GET, PUT, DELETE | `/settings/permissions` | Bearer | The permission policy (`?engagementId=` for one engagement's override): `{ mode?, allowedKinds? }` |
 | GET | `/skills` | Bearer | The skills library catalog (`?q=&subdomain=&limit=`), with the tier each skill needs |
 | GET | `/skills/{name}` | Bearer | One skill's text (403 for skills reserved for a tier that cannot be granted) |
 | GET | `/settings/keys` | Bearer | Which providers have a key set (never returns the key) |
@@ -141,7 +142,25 @@ Some jobs must not run on a submit alone. Such a job is stored in state `Awaitin
 - **Live:** the hub pushes `approvalRequested` when a job starts waiting and `approvalResolved` when it is approved, denied or withdrawn, alongside the usual `jobUpdated`.
 - **Durable:** the wait is in the database, so it survives a restart and can be answered later from any client. There is no expiry yet.
 - **Withdrawn automatically:** cancelling the job, or aborting its engagement, closes the request as `Cancelled`.
-- **What needs approval today:** a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party. Local-model triage, scans and assessments do not. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls (PLAN.md §6.5).
+- **What needs approval:** decided by the permission policy (see `/settings/permissions`). With the standard policy that is a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party; local-model triage, scans and assessments do not. In `ask` mode every job does. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls (PLAN.md §6.5).
+
+### `/settings/permissions` — how much runs without asking
+
+A **permission policy** says which kinds of action wait for the operator. It has a mode and a list of kinds that are always allowed:
+
+| Kind | What it covers | `default` mode | `ask` mode |
+|---|---|---|---|
+| `read-files` | chat tools that read the project | runs | asks |
+| `run-job` | starting a scan, assessment or triage | runs | asks |
+| `edit-files` | chat tools that create or change files | asks | asks |
+| `run-commands` | the chat `bash` tool | asks | asks |
+| `send-code-to-cloud-model` | sending source code to a cloud model provider | asks | asks |
+
+A kind in `allowedKinds` never asks, in either mode — that is "always allow", an explicit decision that is recorded in the audit log and can be withdrawn by removing the kind.
+
+- **Scopes:** each user has a policy (the standard one — `default`, nothing always allowed — until they change it). An engagement can have its own (`engagementId` on the request), which then replaces the user's for runs under that engagement; `DELETE` removes it.
+- **Jobs:** the backend applies the policy when a job is submitted. If anything the job does still needs approval, it waits in `AwaitingApproval` with one request covering all of it (`kinds`). `POST /approvals/{id}/approve` with `{ "remember": true }` approves and adds those kinds to "always allow" for the job's engagement, or for the user if it has none. When a question is skipped because of "always allow", the audit log says so (`approval.auto`).
+- **Chat:** the tools run on the operator's machine, so the CLI enforces the same policy there: it reads `GET /settings/permissions`, asks before a tool call that needs it, and stores an "always" answer with `PUT`. `GET` also returns every kind with whether it currently asks, for display.
 
 ### `/questions` — the run asks, the operator answers
 
@@ -249,4 +268,4 @@ Accounts are not shared between the two servers (each has its own database); the
 dotnet test Cerberus.slnx
 ```
 
-`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`, `ChatTests.cs`: the chat agent with client and server tools, auth and sessions as the TypeScript server answered them; jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
+`tests/Cerberus.Tests` hosts the real API in-process (`ApiIntegrationTests.cs`, `ChatTests.cs`: the chat agent with client and server tools, auth and sessions as the TypeScript server answered them; jobs end to end, the jobs hub, the run event stream (order, replay, live delivery, model text), approvals, permission modes, operator questions (answer, expiry, cancel, paused time limit), engagement scope and abort, audit, cross-user isolation; every model provider is replaced by a scripted stand-in, so tests never call a real model) and unit-tests the compliance engine's verdict rules, the shipped catalogs (they load, ids are unique, mappings use known scanner categories), operator-answer validation, the spreadsheet export/import round trip, the engagement scope policy, the audit hash chain, the job executor (cancel, time limit, hard stop), message bus and state rules, and proof-of-control verification (with DNS and HTTP faked; one test uses a real local listener to check the loopback guard). Every scanner rule has positive and negative cases (`ScannerRuleTests.cs`), alongside tests for suppression, ignore files, file filtering and symlinks. Not covered yet: the chat and API-key endpoints, the compliance response/import endpoints over HTTP, and SCA (it needs OSV.dev).
