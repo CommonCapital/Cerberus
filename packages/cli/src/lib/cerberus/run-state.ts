@@ -23,6 +23,15 @@ export type TriageOpinion = {
   model: string;
 };
 
+/** A model's suggested answer for one compliance control. Advisory until the operator accepts it. */
+export type ControlSuggestion = {
+  controlId: string;
+  suggestion: string;
+  reasoning: string;
+  evidence: { file: string; line: number; text: string }[];
+  model: string;
+};
+
 /** One tool call of an agent, with its result once it has answered. */
 export type ToolActivity = {
   id: string;
@@ -43,6 +52,8 @@ export type RunView = {
   /** Model output per channel, in arrival order of the channels. */
   text: { channel: string; text: string }[];
   triage: TriageOpinion[];
+  /** Suggested answers per control; a later one for the same control replaces the earlier. */
+  suggestions: ControlSuggestion[];
   /** What the agent did, in order. */
   tools: ToolActivity[];
   notes: string[];
@@ -62,6 +73,7 @@ export const emptyRun = (): RunView => ({
   findings: [],
   text: [],
   triage: [],
+  suggestions: [],
   tools: [],
   notes: [],
   approval: null,
@@ -77,7 +89,7 @@ export const isFinished = (view: RunView) => view.job !== null && TERMINAL.inclu
 export const canBeSteered = (view: RunView) =>
   view.job !== null &&
   view.job.state === "Running" &&
-  (view.job.type === "sast" || view.tools.length > 0);
+  (view.job.type === "sast" || view.job.type === "evidence" || view.tools.length > 0);
 
 export const isWaitingForOperator = (view: RunView) => view.approval !== null || view.question !== null;
 
@@ -139,6 +151,13 @@ function applyOne(view: RunView, event: RunEvent): RunView {
     case "triage":
       next.triage = [...view.triage, data as unknown as TriageOpinion];
       break;
+    case "suggestion": {
+      const suggestion = data as unknown as ControlSuggestion;
+      const index = view.suggestions.findIndex((s) => s.controlId === suggestion.controlId);
+      next.suggestions =
+        index === -1 ? [...view.suggestions, suggestion] : view.suggestions.map((s, i) => (i === index ? suggestion : s));
+      break;
+    }
     case "tool_call":
       next.tools = [...view.tools, data as unknown as ToolActivity];
       break;

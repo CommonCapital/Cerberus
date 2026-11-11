@@ -192,6 +192,12 @@ public sealed class JobWorker(
                     ?? throw new InvalidOperationException("The job has no parameters.");
                 return (await services.GetRequiredService<Agents.SastAgentRunner>().RunAsync(job, sast, reporter, ct)).Id;
 
+            case JobTypes.Evidence:
+                var evidence = JsonSerializer.Deserialize<Agents.EvidenceJobParameters>(job.Parameters, JobTypes.Json)
+                    ?? throw new InvalidOperationException("The job has no parameters.");
+                await services.GetRequiredService<Agents.EvidenceAgentRunner>().RunAsync(job, evidence, reporter, ct);
+                return evidence.AssessmentId;
+
             case JobTypes.Review:
                 var review = JsonSerializer.Deserialize<ReviewJobParameters>(job.Parameters, JobTypes.Json)
                     ?? throw new InvalidOperationException("The job has no parameters.");
@@ -253,7 +259,10 @@ public static class JobTypes
     /// <summary>The SAST agent: a model reads the code and reports vulnerabilities. The result id is the agent run.</summary>
     public const string Sast = "sast";
 
-    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review, Sast];
+    /// <summary>The evidence agent: a model suggests answers for controls the engine could not judge. The result id is the assessment.</summary>
+    public const string Evidence = "evidence";
+
+    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review, Sast, Evidence];
 
     public static readonly JsonSerializerOptions Json = new()
     {

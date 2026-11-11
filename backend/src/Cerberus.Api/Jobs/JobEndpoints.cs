@@ -12,7 +12,8 @@ namespace Cerberus.Api.Jobs;
 public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
     string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs,
-    int? MaxSteps = null, string? Instructions = null, string? AgentModel = null);
+    int? MaxSteps = null, string? Instructions = null, string? AgentModel = null,
+    string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null);
 
 public sealed record JobMessageRequest(string? Text);
 
@@ -152,6 +153,55 @@ public static class JobEndpoints
                     $"The SAST agent decides for itself which files under \"{targetPath}\" to read, in up to {sast.MaxSteps} steps; " +
                     $"whatever it reads is sent to {provider}. Credential-shaped values are masked before sending; other code is sent as is. " +
                     "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
+            }
+        }
+        else if (type == JobTypes.Evidence)
+        {
+            if (string.IsNullOrWhiteSpace(body.AssessmentId)) return BadRequest("assessmentId is required for an evidence job");
+            if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+            }
+            if (body.MaxControls is < 1 or > Agents.EvidenceAgent.MaxControls)
+            {
+                return BadRequest($"maxControls must be between 1 and {Agents.EvidenceAgent.MaxControls}");
+            }
+            if (body.MaxSteps is < 1 or > Agents.EvidenceAgent.MaxSteps)
+            {
+                return BadRequest($"maxSteps must be between 1 and {Agents.EvidenceAgent.MaxSteps}");
+            }
+
+            var assessment = await db.ComplianceAssessments.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == body.AssessmentId && a.UserId == userId, ct);
+            if (assessment is null) return Results.Json(new { error = "Assessment not found" }, statusCode: 404);
+            if (engagementId is not null && engagementId != assessment.EngagementId)
+            {
+                return BadRequest("That assessment was not run under this engagement");
+            }
+            engagementId = assessment.EngagementId;
+            targetPath = assessment.TargetPath;
+
+            var evidence = new Agents.EvidenceJobParameters(
+                assessment.Id, body.Model, body.MaxControls ?? Agents.EvidenceAgent.DefaultControls,
+                body.MaxSteps ?? Agents.EvidenceAgent.DefaultSteps,
+                body.ControlIds is { Count: > 0 } ? body.ControlIds.Select(c => c.Trim()).ToList() : null);
+            var matrix = Agents.EvidenceAgent.ReadMatrix(assessment);
+            if (evidence.ControlIds?.FirstOrDefault(id => !matrix.Any(c => string.Equals(c.ControlId, id, StringComparison.OrdinalIgnoreCase))) is { } unknownControl)
+            {
+                return BadRequest($"Control '{unknownControl}' is not part of that assessment");
+            }
+            parameters = JsonSerializer.Serialize(evidence, JobTypes.Json);
+
+            var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
+            if (!Cerberus.Triage.FindingTriager.IsLocal(provider))
+            {
+                var count = Agents.EvidenceAgent.Select(matrix, Agents.EvidenceAgent.AnsweredControls(assessment), evidence).Count;
+                approvalNeed = new ApprovalNeed(
+                    ApprovalKinds.SendCodeToCloudModel,
+                    $"Let {body.Model} ({provider}) read the code under \"{targetPath}\" for compliance evidence",
+                    $"The evidence agent looks for evidence for {count} control(s) of assessment {assessment.Id}. It decides for itself which files under " +
+                    $"\"{targetPath}\" to read, in up to {evidence.MaxSteps} steps; whatever it reads is sent to {provider}. " +
+                    "Credential-shaped values are masked before sending; other code is sent as is. It can only read. Nothing is sent until you approve.");
             }
         }
         else if (type == JobTypes.Triage)
