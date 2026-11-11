@@ -317,6 +317,31 @@ public class Review
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// What a model-driven agent produced in one job: its closing summary and
+/// the findings it reported (JSON). Kept apart from scans — a model's
+/// findings are candidates and never feed a compliance verdict.
+/// </summary>
+public class AgentRun
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+    public string JobId { get; set; } = string.Empty;
+    public string Agent { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string TargetPath { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string Findings { get; set; } = "[]";
+    public int FindingCount { get; set; }
+    public int Steps { get; set; }
+    public int ToolCalls { get; set; }
+
+    /// <summary>False when the run was stopped early: cancelled, failed, timed out or at its step limit.</summary>
+    public bool Complete { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

@@ -43,6 +43,26 @@ public sealed partial class MockProvider : IModelProvider
             .SelectMany(t => t.Parts.OfType<ToolResultPart>())
             .ToList();
 
+        // Offered the review agent's tools: act out a small review by fixed rules.
+        if (request.Tools.Any(t => t.Name == "reportFinding"))
+        {
+            var (tool, input, closing) = NextReviewAction(request);
+            if (tool is not null)
+            {
+                await foreach (var word in Words($"Calling {tool}.", cancellationToken)) yield return new TextDelta(word);
+                foreach (var e in ToolCall(tool, input!)) yield return e;
+                yield return new UsageReport(InputTokens: 12, OutputTokens: 8);
+                yield return new StepFinished("tool_calls");
+            }
+            else
+            {
+                await foreach (var word in Words(closing!, cancellationToken)) yield return new TextDelta(word);
+                yield return new UsageReport(InputTokens: 20, OutputTokens: 10);
+                yield return new StepFinished("stop");
+            }
+            yield break;
+        }
+
         // After the tools have answered: report what they said, and stop.
         if (results.Count > 0)
         {
@@ -66,12 +86,7 @@ public sealed partial class MockProvider : IModelProvider
         {
             await foreach (var word in Words($"Calling {c.Tool}.", cancellationToken)) yield return new TextDelta(word);
 
-            var id = $"call_{Guid.NewGuid():n}";
-            var json = JsonSerializer.Serialize(c.Input);
-            yield return new ToolCallStart(id, c.Tool);
-            yield return new ToolCallInputDelta(id, json[..(json.Length / 2)]);
-            yield return new ToolCallInputDelta(id, json[(json.Length / 2)..]);
-            yield return new ToolCallComplete(id, c.Tool, json);
+            foreach (var e in ToolCall(c.Tool, c.Input)) yield return e;
             yield return new UsageReport(InputTokens: 12, OutputTokens: 8);
             yield return new StepFinished("tool_calls");
             yield break;
@@ -81,6 +96,78 @@ public sealed partial class MockProvider : IModelProvider
         yield return new UsageReport(InputTokens: 5, OutputTokens: 5);
         yield return new StepFinished("stop");
     }
+
+    private static IEnumerable<ChatEvent> ToolCall(string tool, object input)
+    {
+        var id = $"call_{Guid.NewGuid():n}";
+        var json = JsonSerializer.Serialize(input);
+        yield return new ToolCallStart(id, tool);
+        yield return new ToolCallInputDelta(id, json[..(json.Length / 2)]);
+        yield return new ToolCallInputDelta(id, json[(json.Length / 2)..]);
+        yield return new ToolCallComplete(id, tool, json);
+    }
+
+    /// <summary>
+    /// The review agent, acted out without a model: list the top directory,
+    /// read its first few files, report the first line of each that calls one
+    /// of a few well-known risky functions, then sum up. Enough to exercise
+    /// the agent pipeline end to end; not a review.
+    /// </summary>
+    private static (string? Tool, object? Input, string? Closing) NextReviewAction(ChatRequest request)
+    {
+        const int maxFiles = 5;
+        var calls = request.Turns.SelectMany(t => t.Parts.OfType<ToolCallPart>()).ToList();
+        var results = request.Turns.SelectMany(t => t.Parts.OfType<ToolResultPart>()).ToList();
+        if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
+
+        string? PathOf(ToolCallPart call, string property) =>
+            call.Input.ValueKind == JsonValueKind.Object && call.Input.TryGetProperty(property, out var v) ? v.GetString() : null;
+
+        var read = calls.Where(c => c.Name == "readFile").Select(c => PathOf(c, "path")).ToList();
+        var reported = calls.Where(c => c.Name == "reportFinding").Select(c => PathOf(c, "file")).ToList();
+
+        // The file just read: report its first risky line, once.
+        if (results.Count > 0 && results[^1] is { Name: "readFile", IsError: false } last &&
+            calls.FirstOrDefault(c => c.Id == last.ToolCallId) is { } readCall && PathOf(readCall, "path") is { } file &&
+            !reported.Contains(file) && RiskyLine().Match(last.Content) is { Success: true } risky)
+        {
+            return ("reportFinding", new
+            {
+                title = $"Call to {risky.Groups[2].Value.TrimEnd('(')} (flagged by the dev model)",
+                severity = "Medium",
+                category = "other",
+                file,
+                line = int.Parse(risky.Groups[1].Value),
+                description = "The dev model flags this call by a fixed rule. It is not a language model and has not reviewed the code.",
+                remediation = "Have a person or a real model review this call.",
+            }, null);
+        }
+
+        // Otherwise the next unread file of the listing, if any.
+        var listing = results.FirstOrDefault(r => r is { Name: "listDirectory", IsError: false });
+        if (listing is not null && read.Count < maxFiles)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(listing.Content);
+                var next = doc.RootElement.GetProperty("entries").EnumerateArray()
+                    .Where(e => e.GetProperty("type").GetString() == "file")
+                    .Select(e => e.GetProperty("name").GetString())
+                    .FirstOrDefault(name => name is not null && !read.Contains(name));
+                if (next is not null) return ("readFile", new { path = next }, null);
+            }
+            catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+                // Not the listing this script expects: stop here.
+            }
+        }
+
+        return (null, null,
+            $"Read {read.Count} file(s) and reported {reported.Count} finding(s). This was the dev model following fixed rules, not a review.");
+    }
+
+    [GeneratedRegex(@"^(\d+)\t.*?\b(pickle\.loads\(|eval\(|md5\(|os\.system\()", RegexOptions.Multiline)]
+    private static partial Regex RiskyLine();
 
     private static async IAsyncEnumerable<string> Words(string text, [EnumeratorCancellation] CancellationToken ct)
     {

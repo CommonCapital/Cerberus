@@ -9,6 +9,8 @@ export type CommandContext = {
   navigate: (path: string) => void;
   mode: ModeType;
   setMode: (mode: ModeType) => void;
+  /** The model chosen with /models; agents started from a command use it too. */
+  model: SupportedChatModelId;
   setModel: (model: SupportedChatModelId) => void;
 };
 

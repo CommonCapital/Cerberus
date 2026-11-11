@@ -128,6 +128,8 @@ export type SubmitJob =
   | { type: "scan"; path: string; sca?: boolean; exclusions?: "ask" | "honour" | "ignore"; engagementId?: string }
   | { type: "assess"; catalogId: string; path?: string; scanId?: string; sca?: boolean; engagementId?: string }
   | { type: "triage"; scanId: string; model: string; maxFindings?: number }
+  /** The SAST agent: a model reads the code under `path` and reports vulnerabilities. */
+  | { type: "sast"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string }
   /** A planned review: scan, optional model triage, one assessment per catalog (all if none named), a report. */
   | {
       type: "review";
