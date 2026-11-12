@@ -11,9 +11,10 @@ import { type ModeType, type SupportedChatModelId, type ToolContracts } from "@n
 import { apiClient } from "../lib/api-client";
 import { getAuth } from "../lib/auth";
 import { executeLocalTool } from "../lib/local-tools";
+import { projectContext } from "../lib/project-context";
 import { cerberus } from "../lib/cerberus/api";
 import {
-  DENIED_MESSAGE,
+  deniedMessage,
   gateToolCall,
   STANDARD_POLICY,
   type Policy,
@@ -84,6 +85,8 @@ export function useChat(
             messages: requestMessages,
             mode: message.metadata?.mode ?? metadata?.mode,
             model: message.metadata?.model ?? metadata?.model,
+            // Where the tools run, and the project's instructions file — read fresh each time.
+            context: projectContext(),
           },
         }
       }
@@ -105,7 +108,7 @@ export function useChat(
         policyRef.current ??= loadPolicy();
         const gate = await gateToolCall(await policyRef.current, toolCall.toolName, toolCall.input, askOperator);
         if (!gate.run) {
-          fail(DENIED_MESSAGE);
+          fail(deniedMessage(gate.feedback));
           return;
         }
         if (gate.remembered) {

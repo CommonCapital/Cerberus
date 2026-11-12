@@ -89,6 +89,14 @@ bun run dev:cli
 
 The CLI signs in to the backend automatically (a local account is created on first `/login`). Chat runs its file and shell tools on your machine, in the directory the CLI was started in — and **asks first** before a tool that edits files or runs a command: `y` allows it once, `a` always allows that kind of action, `n` refuses (the model is told). `/permissions` shows the current policy, switches between *default* and *ask* (everything asks, including reads), and withdraws an "always allow".
 
+**What the chat agent knows and how its tools behave** (several of these follow a comparison with opencode — PLAN.md §19):
+
+- **Your project.** With every message the CLI tells the agent the working directory, platform, date and git branch, and sends the nearest `AGENTS.md` (or `CERBERUS.md`, `CLAUDE.md`) — from the directory the CLI runs in, else from a parent up to the repository root. Put how to build, test and behave in your project there. Do not start the CLI inside a repository you do not trust: its instructions file would be read too.
+- **Reading.** Files come back with line numbers, 2000 lines at a time; the agent reads on with an offset. Reading a file that probably holds secrets (`.env`, key files) asks you every time, and searches skip `.env` files.
+- **Editing.** An edit must match the file, but near-misses a model commonly makes — other line endings, "tidied" quotes and dashes, trailing spaces — still match, and the file keeps its own line endings. The conversation shows what changed as a diff.
+- **Commands.** A command is stopped after 2 minutes unless the agent asks for longer. Long output is shown as its beginning and end; all of it is saved to a temporary file the agent can read.
+- **Saying no.** In the permission prompt, `t` denies and lets you tell the agent what to do instead.
+
 > **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). The original TypeScript server in `packages/server` speaks the same auth, session and chat API and still runs (`bun run --cwd packages/database db:push`, then `bun run dev:server`), but it is superseded: the .NET backend has every one of its features (see the parity table in [`backend/README.md`](backend/README.md)) and all the security features exist only there. Do not run both on port 3000.
 
 ### Or: everything in containers

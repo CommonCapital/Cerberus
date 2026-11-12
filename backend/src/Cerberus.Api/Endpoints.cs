@@ -742,7 +742,7 @@ public static class Endpoints
 
         UiMessageStreamWriter.ApplyHeaders(http.Response);
         var result = await runner.RunAsync(
-            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials, memory), ct);
+            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection()), ct);
 
         // Stored only once the reply is whole. While tool calls are waiting for the
         // client, the client holds the message and sends it back with the results.
