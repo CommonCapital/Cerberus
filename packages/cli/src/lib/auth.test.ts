@@ -5,18 +5,18 @@ import { join } from "node:path";
 import { clearAuth, getAuth, saveAuth } from "./auth";
 
 let home = "";
-const before = { home: process.env.NIGHTCODE_HOME, token: process.env.CERBERUS_TOKEN };
+const before = { home: process.env.CERBERUS_HOME, token: process.env.CERBERUS_TOKEN };
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "nightcode-auth-"));
-  process.env.NIGHTCODE_HOME = home;
+  home = mkdtempSync(join(tmpdir(), "cerberus-auth-"));
+  process.env.CERBERUS_HOME = home;
   delete process.env.CERBERUS_TOKEN;
 });
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
-  if (before.home === undefined) delete process.env.NIGHTCODE_HOME;
-  else process.env.NIGHTCODE_HOME = before.home;
+  if (before.home === undefined) delete process.env.CERBERUS_HOME;
+  else process.env.CERBERUS_HOME = before.home;
   if (before.token === undefined) delete process.env.CERBERUS_TOKEN;
   else process.env.CERBERUS_TOKEN = before.token;
 });

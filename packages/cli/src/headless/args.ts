@@ -1,6 +1,6 @@
 import type { SubmitJob } from "../lib/cerberus/api";
 
-// The command line of `nightcode run`: one job, started and followed without
+// The command line of `cerberus run`: one job, started and followed without
 // a screen, for pipelines and scripts. Parsing is strict on purpose — an
 // option that would silently do nothing is worse than a refusal, in a job
 // whose exit code decides whether a build passes.
@@ -30,7 +30,7 @@ export type RunOptions = {
 
 export type Parsed = { kind: "help" } | { kind: "run"; options: RunOptions } | { kind: "usage"; message: string };
 
-export const USAGE = `Usage: nightcode run <scan|review|sast|threat-model|index> [path] [options]
+export const USAGE = `Usage: cerberus run <scan|review|sast|threat-model|index> [path] [options]
 
 Runs one job on the Cerberus server without the interactive screen, waits for
 it, and exits with a code a pipeline can act on. The path is the target as the

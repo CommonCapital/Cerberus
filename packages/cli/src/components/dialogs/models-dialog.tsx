@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useDialog } from "../../providers/dialog";
 import { DialogSearchList } from "../dialog-search-list";
-import type { SupportedChatModelId } from "@nightcode/shared";
+import type { SupportedChatModelId } from "@cerberus/shared";
 
 type ModelsDialogContentProps = {
   models: SupportedChatModelId[];

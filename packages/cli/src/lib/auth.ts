@@ -1,13 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+import { cerberusHome } from "./home";
 import { join } from "node:path";
 
 type AuthData = {
   token: string;
 };
 
-// Where the CLI keeps its own files; NIGHTCODE_HOME moves it (tests, scripts), as for the other files kept there.
-const authDir = () => process.env.NIGHTCODE_HOME ?? join(homedir(), ".nightcode");
+const authDir = () => cerberusHome();
 const authFile = () => join(authDir(), "auth.json");
 
 

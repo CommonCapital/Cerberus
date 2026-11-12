@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeOutcome, UndoJournal } from "./undo-journal";
 
-const root = mkdtempSync(join(tmpdir(), "nightcode-undo-"));
+const root = mkdtempSync(join(tmpdir(), "cerberus-undo-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** A project directory and a journal, with a helper that makes a change as the agent's tools would. */

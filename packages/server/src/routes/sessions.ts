@@ -2,7 +2,7 @@ import { Hono } from "hono";
 // import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db } from "@nightcode/database/client";
+import { db } from "@cerberus/database/client";
 
 import type { AuthenticatedEnv } from "../middleware/require-auth";
 

@@ -3,7 +3,7 @@ import { useParams, useLocation, useNavigate } from "react-router";
 import { z } from "zod";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import { type ModeType, type SupportedChatModelId } from "@nightcode/shared";
+import { type ModeType, type SupportedChatModelId } from "@cerberus/shared";
 import type { InferResponseType } from "hono/client";
 import { SessionShell } from "../components/session-shell";
 import { 

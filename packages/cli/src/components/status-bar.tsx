@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../providers/theme";
 import { usePromptConfig } from "../providers/prompt-config";
-import { Mode } from "@nightcode/shared";
+import { Mode } from "@cerberus/shared";
 import { useCurrentEngagement } from "../lib/cerberus/engagement";
 import { useWaitingCount } from "../lib/cerberus/waiting";
 

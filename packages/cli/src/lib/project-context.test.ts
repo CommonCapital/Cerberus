@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { currentBranch, findGitRoot, findInstructions, MAX_INSTRUCTIONS, projectContext } from "./project-context";
 
-const root = mkdtempSync(join(tmpdir(), "nightcode-context-"));
+const root = mkdtempSync(join(tmpdir(), "cerberus-context-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** A directory tree: a repository on branch `feature/login` with a nested package, and a plain directory beside it. */

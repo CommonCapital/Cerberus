@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { cerberusHome } from "./home";
 import { dirname, join } from "node:path";
 import { findGitRoot } from "./project-context";
 
@@ -70,7 +70,7 @@ function readDirectory(directory: string, source: CustomCommand["source"]): Cust
  */
 export function loadCustomCommands(
   cwd: string = process.cwd(),
-  userDirectory: string = join(process.env.NIGHTCODE_HOME ?? join(homedir(), ".nightcode"), "commands"),
+  userDirectory: string = join(cerberusHome(), "commands"),
   reserved: ReadonlySet<string> = new Set(),
 ): CustomCommand[] {
   const found: CustomCommand[] = [];

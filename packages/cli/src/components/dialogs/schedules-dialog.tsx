@@ -32,7 +32,7 @@ export function describeSchedule(schedule: ScheduleInfo): string {
 /**
  * "/schedules": the recurring runs. Enter pauses the highlighted one, or sets
  * it running again. They are made from the command line
- * (`nightcode schedule add …`), where a job is written as for `nightcode run`.
+ * (`cerberus schedule add …`), where a job is written as for `cerberus run`.
  */
 export const SchedulesDialogContent = ({ io = realIo }: { io?: SchedulesIo }) => {
   const [schedules, setSchedules] = useState<ScheduleInfo[] | null>(null);
@@ -50,7 +50,7 @@ export const SchedulesDialogContent = ({ io = realIo }: { io?: SchedulesIo }) =>
 
   if (!schedules) return <text attributes={TextAttributes.DIM}>Loading schedules...</text>;
   if (schedules.length === 0) {
-    return <text attributes={TextAttributes.DIM}>Nothing is scheduled. Add one from a terminal: nightcode schedule add scan . --every 1d</text>;
+    return <text attributes={TextAttributes.DIM}>Nothing is scheduled. Add one from a terminal: cerberus schedule add scan . --every 1d</text>;
   }
 
   return (

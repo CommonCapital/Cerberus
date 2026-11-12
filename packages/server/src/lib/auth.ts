@@ -1,7 +1,7 @@
-import { db } from "@nightcode/database/client";
+import { db } from "@cerberus/database/client";
 
 // Local, self-hosted authentication (replaces Clerk). Sessions are stored in
-// the local database; the CLI keeps the opaque token in ~/.nightcode/auth.json.
+// the local database; the CLI keeps the opaque token in ~/.cerberus/auth.json.
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 
