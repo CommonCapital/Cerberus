@@ -36,6 +36,7 @@ public static class Endpoints
         sessions.MapGet("/", ListSessions);
         sessions.MapGet("/{id}", GetSession);
         sessions.MapPost("/", CreateSession);
+        sessions.MapPost("/{id}/compact", CompactSession);
 
         var settings = app.MapGroup("/settings/keys").AddEndpointFilter<RequireAuthFilter>();
         settings.MapGet("/", ListApiKeys);
@@ -667,7 +668,50 @@ public static class Endpoints
             session.CreatedAt,
             session.UpdatedAt,
             messages = ParseStoredMessages(session.Messages),
+            // Set once the chat was compacted: the model gets a summary in place of the messages up to this one.
+            summarizedThrough = session.SummarizedThrough,
         });
+    }
+
+    /// <summary>
+    /// Summarises the earlier part of a session now, whatever its size — the operator's "/compact".
+    /// The messages stay; the model gets the summary in their place from the next reply on.
+    /// </summary>
+    private static async Task<IResult> CompactSession(
+        string id, CompactRequest? body, HttpContext http, CerberusDbContext db, ApiKeyService keys, ChatCompactor compactor, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
+        if (session is null) return Results.Json(new { error = "Session not found" }, statusCode: 404);
+
+        var messages = ParseStoredMessages(session.Messages)
+            .Select(m => System.Text.Json.Nodes.JsonNode.Parse(m.GetRawText()) as System.Text.Json.Nodes.JsonObject)
+            .Where(m => m is not null).Select(m => m!).ToList();
+        // The model that wrote the last reply, unless another is named.
+        var model = body?.Model ?? messages.Select(m => m["metadata"]?["model"]?.GetValue<string>()).LastOrDefault(m => m is not null);
+        if (model is null || !ModelRegistry.IsSupported(model))
+        {
+            return Results.Json(new { error = "model is required and must be a supported model id" }, statusCode: 400);
+        }
+
+        Compaction? compaction;
+        try
+        {
+            compaction = await compactor.CompactAsync(messages, session.Summary, session.SummarizedThrough, model, await keys.ResolveCredentialsAsync(userId, ct), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Results.Json(new { error = $"The summary could not be written: {ex.Message}" }, statusCode: 502);
+        }
+        if (compaction is null)
+        {
+            return Results.Json(new { error = "There is nothing to compact yet: the last exchange is always kept as it is." }, statusCode: 409);
+        }
+
+        session.Summary = compaction.Summary;
+        session.SummarizedThrough = compaction.Through;
+        await db.SaveChangesAsync(ct);
+        return Results.Json(new { messages = compaction.Messages, summary = compaction.Summary, model });
     }
 
     private static async Task<IResult> CreateSession(CreateSessionRequest body, HttpContext http, CerberusDbContext db, CancellationToken ct)
@@ -696,7 +740,7 @@ public static class Endpoints
 
     private static async Task StreamChat(
         UiChatRequest body, HttpContext http, CerberusDbContext db, ChatRunner runner,
-        ApiKeyService keys, CancellationToken ct)
+        ApiKeyService keys, ChatCompactor compactor, ChatLimits limits, CancellationToken ct)
     {
         var userId = UserId(http);
 
@@ -740,9 +784,34 @@ public static class Endpoints
         // What the operator asked to be remembered: their instructions and their notes about no target in particular.
         var memory = await Memory.PromptSectionAsync(db, userId, engagementId: null, targetPath: null, ct);
 
+        // Compaction: a new user message on a conversation that is about to outgrow the model's window
+        // has its earlier part summarised first. A reply in progress (tool results coming back) is never interrupted for it.
+        var notices = new List<(string Kind, object Data)>();
+        if (UiMessages.RoleOf(messages[^1]) == "user" &&
+            ChatCompactor.IsDue(messages, session.Summary, session.SummarizedThrough, body.Model, limits))
+        {
+            try
+            {
+                if (await compactor.CompactAsync(messages, session.Summary, session.SummarizedThrough, body.Model, credentials, ct) is { } compaction)
+                {
+                    session.Summary = compaction.Summary;
+                    session.SummarizedThrough = compaction.Through;
+                    await db.SaveChangesAsync(ct);
+                    notices.Add(("compaction", new { messages = compaction.Messages }));
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The reply is attempted anyway; if the conversation really is too long, the provider will say so.
+                http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Chat").LogWarning(ex, "Could not compact session {SessionId}.", session.Id);
+            }
+        }
+
         UiMessageStreamWriter.ApplyHeaders(http.Response);
         var result = await runner.RunAsync(
-            new UiMessageStreamWriter(http.Response), new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection()), ct);
+            new UiMessageStreamWriter(http.Response),
+            new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection(),
+                session.Summary, session.SummarizedThrough, notices), ct);
 
         // Stored only once the reply is whole. While tool calls are waiting for the
         // client, the client holds the message and sends it back with the results.

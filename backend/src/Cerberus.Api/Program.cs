@@ -41,6 +41,8 @@ builder.Services.AddSingleton<IModelProvider, AnthropicProvider>();
 builder.Services.AddSingleton<IModelProvider, OpenAiProvider>();
 builder.Services.AddSingleton<IModelProvider, OllamaProvider>();
 builder.Services.AddSingleton<IModelProvider, MockProvider>();
+// A passing provider failure (overloaded, rate-limited, network) is retried with backoff before it ends a reply.
+builder.Services.AddSingleton(RetryPolicy.Standard);
 builder.Services.AddSingleton<IModelProviderResolver, ModelProviderResolver>();
 
 builder.Services.AddSignalR();
@@ -67,6 +69,11 @@ builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatCompactor>();
+builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatLimits
+{
+    ContextTokens = int.TryParse(Environment.GetEnvironmentVariable("CERBERUS_CONTEXT_TOKENS"), out var contextTokens) && contextTokens >= 1000 ? contextTokens : null,
+});
 
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();

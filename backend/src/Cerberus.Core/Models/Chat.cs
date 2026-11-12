@@ -58,6 +58,12 @@ public sealed record UsageReport(int? InputTokens, int? OutputTokens) : ChatEven
 /// <summary>The step ended. Reason is the provider's own word for why ("stop", "tool_use", "length", …).</summary>
 public sealed record StepFinished(string? Reason) : ChatEvent;
 
+/// <summary>
+/// The call to the provider failed for a passing reason and will be tried
+/// again after <paramref name="Delay"/>. Nothing of the reply has been produced yet.
+/// </summary>
+public sealed record RetryScheduled(int Attempt, int MaxAttempts, TimeSpan Delay, string Reason) : ChatEvent;
+
 public static class ChatEvents
 {
     /// <summary>A text-only provider seen through the full chat interface.</summary>

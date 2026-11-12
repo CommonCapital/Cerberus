@@ -79,6 +79,12 @@ public sealed class AgentLoop(IModelProviderResolver providers)
                     case ToolCallComplete call:
                         calls.Add(call);
                         break;
+                    case RetryScheduled retry:
+                        await reporter.EventAsync(RunEventTypes.Note, new
+                        {
+                            message = $"The model provider is busy ({retry.Reason}); trying again in {Math.Ceiling(retry.Delay.TotalSeconds)} s (attempt {retry.Attempt} of {retry.MaxAttempts}).",
+                        });
+                        break;
                     case UsageReport usage:
                         if (usage.InputTokens is { } i) inputTokens = (inputTokens ?? 0) + i;
                         if (usage.OutputTokens is { } o) outputTokens = (outputTokens ?? 0) + o;

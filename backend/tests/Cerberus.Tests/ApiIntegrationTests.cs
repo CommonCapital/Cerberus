@@ -65,6 +65,10 @@ public sealed class ApiHost : IDisposable
             {
                 services.AddSingleton<Cerberus.Authorization.IOwnershipProbe>(Probe);
 
+                // Retries happen as in production, without the waiting.
+                services.AddSingleton(new Cerberus.Models.RetryPolicy(
+                    5, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(30), (_, _) => Task.CompletedTask));
+
                 // Swap the built-in "echo" model for one that answers triage requests from a script.
                 var echo = services.Single(d => d.ImplementationType == typeof(Cerberus.Models.MockProvider));
                 services.Remove(echo);

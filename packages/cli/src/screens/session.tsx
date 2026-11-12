@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router";
 import { z } from "zod";
+import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { type ModeType, type SupportedChatModelId } from "@nightcode/shared";
 import type { InferResponseType } from "hono/client";
@@ -11,7 +12,7 @@ import {
   ErrorMessage
 } from "../components/messages";
 import { useToast } from "../providers/toast";
-import { useChat } from "../hooks/use-chat";
+import { describeCompaction, describeRetry, useChat } from "../hooks/use-chat";
 import { usePromptConfig } from "../providers/prompt-config";
 import type { Message } from "../hooks/use-chat";
 import { apiClient } from "../lib/api-client";
@@ -68,7 +69,7 @@ function SessionChat({
   const { mode, model } = usePromptConfig();
   const { isTopLayer } = useKeyboardLayer();
   const { ask, denyAll } = useToolPermission();
-  const { messages, status, submit, abort, interrupt, error } = useChat(
+  const { messages, status, submit, abort, interrupt, error, retry, compacted } = useChat(
     session.id,
     initialMessages,
     ask,
@@ -110,6 +111,8 @@ function SessionChat({
       {messages.map((msg) => (
         <ChatMessage key={msg.id} msg={msg} />
       ))}
+      {compacted ? <text attributes={TextAttributes.DIM}>{describeCompaction(compacted)}</text> : null}
+      {retry ? <text attributes={TextAttributes.DIM}>{describeRetry(retry)}</text> : null}
       {error && <ErrorMessage message={error.message} />}
       <ToolPermissionPrompt />
     </SessionShell>

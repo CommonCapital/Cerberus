@@ -21,6 +21,7 @@ import {
 import type { Command } from "./types";
 
 import { performLogin } from "../../lib/oauth";
+import { cerberus } from "../../lib/cerberus/api";
 import { clearAuth } from "../../lib/auth";
 
 export const COMMANDS: Command[] = [
@@ -30,6 +31,27 @@ export const COMMANDS: Command[] = [
     value: "/new",
     action: (ctx) => {
       ctx.navigate("/");
+    },
+  },
+  {
+    name: "compact",
+    description: "Summarise the earlier part of this conversation to make room",
+    value: "/compact",
+    action: async (ctx) => {
+      if (!ctx.sessionId) {
+        ctx.toast.show({ variant: "error", message: "Open a conversation first; /compact works on the one you are in." });
+        return;
+      }
+      ctx.toast.show({ variant: "info", message: "Summarising the earlier part of the conversation…" });
+      try {
+        const result = await cerberus.compactSession(ctx.sessionId, ctx.model);
+        ctx.toast.show({
+          variant: "info",
+          message: `Summarised ${result.messages} earlier message${result.messages === 1 ? "" : "s"}. They stay on screen; the model now works from the summary.`,
+        });
+      } catch (problem) {
+        ctx.toast.show({ variant: "error", message: problem instanceof Error ? problem.message : "Could not compact the conversation" });
+      }
     },
   },
   {

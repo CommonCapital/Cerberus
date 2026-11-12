@@ -8,8 +8,11 @@ namespace Cerberus.Api.Chat;
 
 /// <param name="Memory">The operator's standing instructions and notes, as a prompt section; empty for none.</param>
 /// <param name="Context">The client's environment and project instructions, as a prompt section; empty for none.</param>
+/// <param name="Summary">A summary standing in for the messages up to <paramref name="SummarizedThrough"/>; null if the chat was never compacted.</param>
+/// <param name="Notices">Transient notices to send the client as the reply starts (kind, data).</param>
 public sealed record ChatRun(
-    string Mode, string Model, List<JsonObject> Messages, ModelCredentials Credentials, string Memory = "", string Context = "");
+    string Mode, string Model, List<JsonObject> Messages, ModelCredentials Credentials, string Memory = "", string Context = "",
+    string? Summary = null, string? SummarizedThrough = null, IReadOnlyList<(string Kind, object Data)>? Notices = null);
 
 /// <param name="Messages">The conversation including the reply.</param>
 /// <param name="Complete">
@@ -46,15 +49,21 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
         var messageId = (continuing ? UiMessages.IdOf(last) : null) ?? Guid.NewGuid().ToString("n");
         var parts = continuing ? (JsonArray)UiMessages.PartsOf(last).DeepClone() : [];
 
-        var turns = UiMessages.ToTurns(messages);
+        // The model gets the summary of the compacted part and, in full, only what came after it.
+        var turns = UiMessages.ToTurns(ChatCompactor.After(messages, run.Summary is null ? null : run.SummarizedThrough));
         var tools = ChatTools.For(run.Mode);
-        var system = string.Join("\n\n", new[] { SystemPrompt.Build(run.Mode), run.Context, run.Memory }.Where(part => part.Length > 0));
+        var system = string.Join("\n\n", new[]
+        {
+            SystemPrompt.Build(run.Mode), run.Context, run.Memory,
+            run.Summary is null ? "" : ChatCompactor.PromptSection(run.Summary),
+        }.Where(part => part.Length > 0));
         var provider = resolver.Resolve(run.Model);
 
         int? inputTokens = null, outputTokens = null;
         var blockCounter = parts.Count;
 
         await writer.StartAsync(messageId, new { mode = run.Mode, model = run.Model }, ct);
+        foreach (var (kind, data) in run.Notices ?? []) await writer.NoticeAsync(kind, data, ct);
 
         try
         {
@@ -126,6 +135,17 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
                         case UsageReport usage:
                             if (usage.InputTokens is { } i) inputTokens = (inputTokens ?? 0) + i;
                             if (usage.OutputTokens is { } o) outputTokens = (outputTokens ?? 0) + o;
+                            break;
+
+                        case RetryScheduled retry:
+                            // The provider is busy: tell the client why nothing is arriving, and for how long.
+                            await writer.NoticeAsync("retry", new
+                            {
+                                attempt = retry.Attempt,
+                                maxAttempts = retry.MaxAttempts,
+                                seconds = (int)Math.Ceiling(retry.Delay.TotalSeconds),
+                                reason = retry.Reason,
+                            }, ct);
                             break;
                     }
                 }

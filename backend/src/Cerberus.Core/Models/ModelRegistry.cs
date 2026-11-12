@@ -38,4 +38,16 @@ public static class ModelRegistry
         Models.FirstOrDefault(m => m.Id == modelId);
 
     public static bool IsSupported(string modelId) => Find(modelId) is not null;
+
+    /// <summary>
+    /// A conservative size of the context window, in tokens, by provider. Local
+    /// models are counted small: Ollama runs a model with a short window unless
+    /// it is configured otherwise, and silently drops what does not fit.
+    /// </summary>
+    public static int ContextWindowOf(string modelId) => Find(modelId)?.Provider switch
+    {
+        ModelProvider.Anthropic => 200_000,
+        ModelProvider.OpenAI => 128_000,
+        _ => 8_000,
+    };
 }

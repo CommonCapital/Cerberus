@@ -8,7 +8,7 @@ import { TextAttributes } from "@opentui/core";
 import type { TextareaRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import type { KeyBinding } from "@opentui/core";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { EmptyBorder } from "./border";
 import { StatusBar } from "./status-bar";
 import { CommandMenu } from "./command-menu";
@@ -278,6 +278,8 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
 
   const renderer = useRenderer();
   const navigate = useNavigate();
+  // The chat the operator is in, if any: commands that act on "this conversation" need it.
+  const sessionId = useLocation().pathname.match(/^\/sessions\/([^/]+)$/)?.[1];
   const toast = useToast();
   const dialog = useDialog();
   const { colors } = useTheme();
@@ -400,11 +402,12 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
         setMode,
         model,
         setModel,
+        sessionId: sessionId === "new" ? undefined : sessionId,
       });
     } else {
       textarea.insertText(command.value + " ");
     }
-  }, [renderer, toast, dialog, navigate, mode, setMode, model, setModel]);
+  }, [renderer, toast, dialog, navigate, mode, setMode, model, setModel, sessionId]);
 
   const handleCommandExecute = useCallback(
     (index: number) => {
