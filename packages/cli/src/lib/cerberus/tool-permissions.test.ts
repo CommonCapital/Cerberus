@@ -153,3 +153,39 @@ describe("denying with a reason", () => {
     expect(deniedMessage(result.feedback)).toContain("Do not retry it; ask what they would like instead.");
   });
 });
+
+describe("command rules", () => {
+  const withRules = (allowedCommands: string[]): Policy => ({ mode: "Default", allowedKinds: [], allowedCommands });
+
+  test("a command the rules cover runs without asking, in either mode; any other still asks", () => {
+    expect(toolNeedsApproval(withRules(["git status"]), "bash", { command: "git status -s" })).toBe(false);
+    expect(toolNeedsApproval({ ...withRules(["git status"]), mode: "Ask" }, "bash", { command: "git status" })).toBe(false);
+    expect(toolNeedsApproval(withRules(["git status"]), "bash", { command: "git push" })).toBe(true);
+    expect(toolNeedsApproval(withRules(["git status"]), "bash", { command: "git status && rm -rf ." })).toBe(true);
+    expect(toolNeedsApproval(STANDARD_POLICY, "bash", { command: "git status" })).toBe(true);
+    // Rules are about commands: they do not allow edits.
+    expect(toolNeedsApproval(withRules(["git status"]), "writeFile", { path: "a", content: "" })).toBe(true);
+  });
+
+  test("always remembers the command, not every command", async () => {
+    const result = await gateToolCall(withRules(["ls"]), "bash", { command: "cd app && npm test" }, async () => "always");
+
+    expect(result.run).toBe(true);
+    expect(result.remembered).toBeNull();                       // not the whole kind
+    expect(result.rememberedCommands).toEqual(["cd", "npm test"]);
+    expect(result.policy.allowedCommands).toEqual(["ls", "cd", "npm test"]);
+    expect(result.policy.allowedKinds).toEqual([]);
+    expect(toolNeedsApproval(result.policy, "bash", { command: "npm test -- --watch" })).toBe(false);
+  });
+
+  test("a command that must always be looked at is allowed once and nothing is remembered", async () => {
+    const result = await gateToolCall(STANDARD_POLICY, "bash", { command: "rm -rf build" }, async () => "always");
+    expect(result).toEqual({ run: true, policy: STANDARD_POLICY, remembered: null });
+  });
+
+  test("with every command always allowed, nothing asks — except what names a secrets file", () => {
+    const all: Policy = { mode: "Default", allowedKinds: ["run-commands"] };
+    expect(toolNeedsApproval(all, "bash", { command: "rm -rf build" })).toBe(false);
+    expect(toolNeedsApproval(withRules(["cat"]), "bash", { command: "cat .env" })).toBe(true);
+  });
+});

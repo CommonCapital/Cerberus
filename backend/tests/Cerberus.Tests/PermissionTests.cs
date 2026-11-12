@@ -204,4 +204,57 @@ public class PermissionApiTests(ApiHost host)
         await client.PutAsJsonAsync("/settings/permissions", new { mode = "ask", allowedKinds = new[] { "edit-files" } });
         Assert.Equal("Default", (await other.GetFromJsonAsync<JsonElement>("/settings/permissions")).GetProperty("mode").GetString());
     }
+
+    [Fact]
+    public async Task Command_rules_are_stored_normalised_and_returned_with_the_policy()
+    {
+        var (client, _) = await host.NewUserAsync();
+        var (other, _) = await host.NewUserAsync();
+
+        var before = await client.GetFromJsonAsync<JsonElement>("/settings/permissions");
+        Assert.Equal(0, before.GetProperty("allowedCommands").GetArrayLength());
+
+        var saved = await client.PutAsJsonAsync("/settings/permissions", new { allowedCommands = new[] { "  npm   test ", "git status", "git status" } });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var after = await client.GetFromJsonAsync<JsonElement>("/settings/permissions");
+        Assert.Equal(["git status", "npm test"], after.GetProperty("allowedCommands").EnumerateArray().Select(r => r.GetString()!).ToArray());
+        Assert.Equal("Default", after.GetProperty("mode").GetString());            // the rest of the policy is untouched
+        Assert.Empty(Allowed(after));
+
+        // Changing something else leaves the rules alone; they are the user's own.
+        await client.PutAsJsonAsync("/settings/permissions", new { mode = "ask" });
+        Assert.Equal(2, (await client.GetFromJsonAsync<JsonElement>("/settings/permissions")).GetProperty("allowedCommands").GetArrayLength());
+        Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/settings/permissions")).GetProperty("allowedCommands").GetArrayLength());
+
+        // Withdrawing: send the list without it.
+        await client.PutAsJsonAsync("/settings/permissions", new { allowedCommands = new[] { "npm test" } });
+        var left = await client.GetFromJsonAsync<JsonElement>("/settings/permissions");
+        Assert.Equal(["npm test"], left.GetProperty("allowedCommands").EnumerateArray().Select(r => r.GetString()!).ToArray());
+
+        var audit = (await client.GetFromJsonAsync<JsonElement>("/audit?limit=20")).EnumerateArray()
+            .First(e => e.GetProperty("action").GetString() == "permissions.update");
+        Assert.Contains("commands run without asking: npm test", audit.GetProperty("detail").GetString());
+    }
+
+    [Theory]
+    [InlineData("rm")]
+    [InlineData("rm -rf")]
+    [InlineData("sudo ls")]
+    [InlineData("/bin/bash")]
+    [InlineData("python3 manage.py")]
+    [InlineData("curl")]
+    [InlineData("git status; rm -rf .")]
+    [InlineData("echo $(whoami)")]
+    [InlineData("ls > out")]
+    [InlineData("FOO=1 npm")]
+    [InlineData("   ")]
+    public async Task A_rule_that_could_run_anything_or_is_not_a_plain_prefix_is_refused(string rule)
+    {
+        var (client, _) = await host.NewUserAsync();
+
+        var response = await client.PutAsJsonAsync("/settings/permissions", new { allowedCommands = new[] { "git status", rule } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/settings/permissions")).GetProperty("allowedCommands").GetArrayLength());   // nothing was saved
+    }
 }

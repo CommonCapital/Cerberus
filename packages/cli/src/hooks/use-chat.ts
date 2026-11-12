@@ -28,8 +28,8 @@ import type { ToolDecision, ToolRequest } from "../providers/tool-permission";
  */
 async function loadPolicy(): Promise<Policy> {
   try {
-    const { mode, allowedKinds } = await cerberus.permissions();
-    return { mode, allowedKinds };
+    const { mode, allowedKinds, allowedCommands } = await cerberus.permissions();
+    return { mode, allowedKinds, allowedCommands: allowedCommands ?? [] };
   } catch {
     return STANDARD_POLICY;
   }
@@ -141,10 +141,12 @@ export function useChat(
           fail(deniedMessage(gate.feedback));
           return;
         }
-        if (gate.remembered) {
+        if (gate.remembered || gate.rememberedCommands) {
           policyRef.current = Promise.resolve(gate.policy);
           // Remembered on the server too, so it holds in later chats. If that fails it still holds for this one.
-          void cerberus.setPermissions({ allowedKinds: gate.policy.allowedKinds }).catch(() => {});
+          void cerberus
+            .setPermissions(gate.rememberedCommands ? { allowedCommands: gate.policy.allowedCommands } : { allowedKinds: gate.policy.allowedKinds })
+            .catch(() => {});
         }
 
         try {

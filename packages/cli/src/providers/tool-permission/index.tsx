@@ -4,7 +4,8 @@ import { TextAttributes, type InputRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useKeyboardLayer } from "../keyboard-layer";
 import { useTheme } from "../theme";
-import { describeToolCall, isSensitiveRead, KIND_LABEL, kindOfTool } from "../../lib/cerberus/tool-permissions";
+import { describeToolCall, KIND_LABEL, kindOfTool, whatAlwaysRemembers } from "../../lib/cerberus/tool-permissions";
+import { isCovered } from "../../lib/cerberus/shell-commands";
 
 // Human in the loop for chat: before the CLI runs a tool that needs it, the
 // operator is shown what will happen and decides — once, always, or no.
@@ -49,11 +50,17 @@ export function ToolPermissionProvider({ children }: { children: ReactNode }) {
     if (!first) return;
     first.resolve(decision);
 
-    // "Always" answers every waiting request of the same kind too — that is what it means.
-    if (decision === "always") {
-      const kind = kindOfTool(first.toolName);
+    // "Always" also answers the waiting requests it now covers — that is what it means:
+    // the same kind of action, or for a shell command the commands its new rules cover.
+    const remember = decision === "always" ? whatAlwaysRemembers(first.toolName, first.input) : null;
+    if (remember) {
+      const covers = (pending: Pending) => {
+        if ("kind" in remember) return kindOfTool(pending.toolName) === remember.kind && whatAlwaysRemembers(pending.toolName, pending.input) !== null;
+        const command = (pending.input as { command?: unknown } | null)?.command;
+        return pending.toolName === "bash" && typeof command === "string" && isCovered(command, remember.commands);
+      };
       const remaining = rest.filter((pending) => {
-        if (kindOfTool(pending.toolName) !== kind) return true;
+        if (!covers(pending)) return true;
         pending.resolve("allow");
         return false;
       });
@@ -117,7 +124,8 @@ export function ToolPermissionPrompt() {
   // A new request starts at the choices, not in the middle of an explanation for the previous one.
   useEffect(() => setExplaining(false), [current]);
 
-  const sensitive = current ? isSensitiveRead(current.toolName, current.input) : false;
+  // What "always" would remember here; null when this call is one that is asked about every time.
+  const remember = current ? whatAlwaysRemembers(current.toolName, current.input) : null;
 
   useKeyboard((key) => {
     if (!current || !isTopLayer(LAYER)) return;
@@ -132,7 +140,7 @@ export function ToolPermissionPrompt() {
     }
 
     if (key.name === "y") decide("allow");
-    else if (key.name === "a" && !sensitive) decide("always");
+    else if (key.name === "a" && remember) decide("always");
     else if (key.name === "n" || key.name === "escape") decide("deny");
     else if (key.name === "t") setExplaining(true);
   });
@@ -179,12 +187,14 @@ export function ToolPermissionPrompt() {
       <box flexDirection="row" gap={1} marginTop={1}>
         <text fg={colors.success}>y</text>
         <text attributes={TextAttributes.DIM}>yes, once</text>
-        {sensitive ? null : (
+        {remember ? (
           <>
             <text fg={colors.success}>a</text>
-            <text attributes={TextAttributes.DIM}>always allow {kind}</text>
+            <text attributes={TextAttributes.DIM}>
+              always allow {"commands" in remember ? remember.commands.map((rule) => `\`${rule}\``).join(", ") : kind}
+            </text>
           </>
-        )}
+        ) : null}
         <text fg={colors.error}>n</text>
         <text attributes={TextAttributes.DIM}>no</text>
         <text fg={colors.error}>t</text>

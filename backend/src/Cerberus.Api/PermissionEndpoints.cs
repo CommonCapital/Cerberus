@@ -8,7 +8,64 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Api;
 
-public sealed record PermissionsRequest(string? Mode, List<string>? AllowedKinds, string? EngagementId);
+public sealed record PermissionsRequest(string? Mode, List<string>? AllowedKinds, string? EngagementId, List<string>? AllowedCommands = null);
+
+/// <summary>
+/// Command rules: prefixes of shell commands ("git status", "npm test") that the
+/// chat agent may run without asking. The CLI decides whether a command line is
+/// covered — it is the one that runs it; the server stores the rules and refuses
+/// ones that could never be a safe blanket permission.
+/// </summary>
+public static class CommandRules
+{
+    public const int MaxRules = 200;
+    public const int MaxLength = 200;
+
+    /// <summary>
+    /// Commands that run other commands or code, reach the network, or destroy
+    /// things: "always allow" for one of these would be "always allow anything".
+    /// The CLI has the same list and never offers them; this is the second lock.
+    /// </summary>
+    public static readonly IReadOnlySet<string> NeverRemembered = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "rm", "rmdir", "sudo", "su", "doas", "dd", "mkfs", "shred", "truncate", "shutdown", "reboot", "halt",
+        "kill", "killall", "pkill", "eval", "exec", "source", ".", "sh", "bash", "zsh", "fish", "dash", "ksh",
+        "python", "python2", "python3", "node", "ruby", "perl", "php", "deno", "npx", "bunx", "osascript", "pwsh", "powershell",
+        "curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet", "ftp",
+        "find", "xargs", "env", "nohup", "watch", "awk", "gawk", "sed", "tee",
+        "chmod", "chown", "chgrp", "ln", "crontab", "launchctl", "systemctl", "service", "mount", "umount", "diskutil",
+    };
+
+    /// <summary>The rule in its stored form (single spaces), or why it cannot be one.</summary>
+    public static (string? Rule, string? Error) Normalize(string? rule)
+    {
+        var tokens = (rule ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0) return (null, "A command rule cannot be empty.");
+        var text = string.Join(' ', tokens);
+        if (text.Length > MaxLength) return (null, $"A command rule is at most {MaxLength} characters.");
+        // A rule is plain words: anything the shell would interpret has no place in it.
+        if (text.IndexOfAny(['|', '&', ';', '<', '>', '$', '`', '(', ')', '{', '}', '"', '\'', '\\', '\n', '*', '?', '~', '!', '=']) >= 0)
+        {
+            return (null, $"\"{text}\" is not a plain command prefix.");
+        }
+        var name = tokens[0].Contains('/') ? tokens[0][(tokens[0].LastIndexOf('/') + 1)..] : tokens[0];
+        if (NeverRemembered.Contains(name)) return (null, $"\"{tokens[0]}\" can run or destroy anything; it is always asked about.");
+        return (text, null);
+    }
+
+    public static List<string> Read(string? json)
+    {
+        try
+        {
+            return (JsonSerializer.Deserialize<List<string>>(string.IsNullOrWhiteSpace(json) ? "[]" : json) ?? [])
+                .Select(r => Normalize(r).Rule).Where(r => r is not null).Select(r => r!).Distinct().ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+}
 
 /// <summary>
 /// Permission modes (PLAN.md §6.5): how much runs without asking. A user has a
@@ -80,7 +137,18 @@ public static class PermissionEndpoints
         if (await CheckEngagementAsync(db, userId, engagementId, ct) is { } problem) return problem;
 
         var (policy, scope) = await ResolveAsync(db, userId, Normalize(engagementId), ct);
-        return Results.Json(Describe(policy, scope), JsonOptions);
+        return Results.Json(Describe(policy, scope, await CommandsAsync(db, userId, Normalize(engagementId), ct)), JsonOptions);
+    }
+
+    /// <summary>The command rules that apply: the engagement's own setting if it has one, else the user's.</summary>
+    private static async Task<List<string>> CommandsAsync(CerberusDbContext db, string userId, string? engagementId, CancellationToken ct)
+    {
+        var settings = await db.PermissionSettings.AsNoTracking()
+            .Where(p => p.UserId == userId && (p.EngagementId == null || p.EngagementId == engagementId))
+            .ToListAsync(ct);
+        var chosen = (engagementId is null ? null : settings.FirstOrDefault(p => p.EngagementId == engagementId))
+                     ?? settings.FirstOrDefault(p => p.EngagementId == null);
+        return CommandRules.Read(chosen?.AllowedCommands);
     }
 
     private static async Task<IResult> Put(
@@ -103,7 +171,19 @@ public static class PermissionEndpoints
         {
             return BadRequest($"Unknown action kind \"{unknown}\". Known: {string.Join(", ", ActionKinds.All.Select(k => k.Kind))}");
         }
-        if (mode is null && body.AllowedKinds is null) return BadRequest("Give mode, allowedKinds, or both");
+        List<string>? commands = null;
+        if (body.AllowedCommands is not null)
+        {
+            if (body.AllowedCommands.Count > CommandRules.MaxRules) return BadRequest($"At most {CommandRules.MaxRules} command rules.");
+            commands = [];
+            foreach (var given in body.AllowedCommands)
+            {
+                var (rule, error) = CommandRules.Normalize(given);
+                if (rule is null) return BadRequest(error!);
+                if (!commands.Contains(rule)) commands.Add(rule);
+            }
+        }
+        if (mode is null && body.AllowedKinds is null && commands is null) return BadRequest("Give mode, allowedKinds, allowedCommands, or several of them");
 
         var setting = await db.PermissionSettings
             .FirstOrDefaultAsync(p => p.UserId == userId && p.EngagementId == engagementId, ct);
@@ -116,21 +196,24 @@ public static class PermissionEndpoints
                 EngagementId = engagementId,
                 Mode = inherited.Mode.ToString(),
                 AllowedKinds = JsonSerializer.Serialize(inherited.AllowedKinds.Order()),
+                AllowedCommands = JsonSerializer.Serialize(await CommandsAsync(db, userId, engagementId, ct)),
             };
             db.PermissionSettings.Add(setting);
         }
         if (mode is { } m) setting.Mode = m.ToString();
         if (body.AllowedKinds is not null) setting.AllowedKinds = JsonSerializer.Serialize(body.AllowedKinds.Distinct().Order());
+        if (commands is not null) setting.AllowedCommands = JsonSerializer.Serialize(commands.Order(StringComparer.Ordinal));
         setting.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
         var policy = ToPolicy(setting);
         await audit.AppendAsync(userId, "permissions.update", AuditOutcome.Ok,
             $"Permissions for {(engagementId is null ? "the user" : "the engagement")}: mode {policy.Mode.ToString().ToLowerInvariant()}, " +
-            $"always allowed: {(policy.AllowedKinds.Count == 0 ? "nothing" : string.Join(", ", policy.AllowedKinds.Order()))}.",
+            $"always allowed: {(policy.AllowedKinds.Count == 0 ? "nothing" : string.Join(", ", policy.AllowedKinds.Order()))}; " +
+            $"commands run without asking: {(CommandRules.Read(setting.AllowedCommands) is { Count: > 0 } rules ? string.Join(", ", rules) : "none")}.",
             engagementId, ct: ct);
 
-        return Results.Json(Describe(policy, engagementId is null ? "user" : "engagement"), JsonOptions);
+        return Results.Json(Describe(policy, engagementId is null ? "user" : "engagement", CommandRules.Read(setting.AllowedCommands)), JsonOptions);
     }
 
     /// <summary>Removes an override, falling back to the user's policy (or the standard one).</summary>
@@ -149,7 +232,7 @@ public static class PermissionEndpoints
         }
 
         var (policy, scope) = await ResolveAsync(db, userId, id, ct);
-        return Results.Json(Describe(policy, scope), JsonOptions);
+        return Results.Json(Describe(policy, scope, await CommandsAsync(db, userId, id, ct)), JsonOptions);
     }
 
     private static async Task<IResult?> CheckEngagementAsync(
@@ -162,10 +245,12 @@ public static class PermissionEndpoints
             : Results.Json(new { error = "Engagement not found" }, statusCode: 404);
     }
 
-    private static object Describe(PermissionPolicy policy, string scope) => new
+    private static object Describe(PermissionPolicy policy, string scope, IReadOnlyList<string> commands) => new
     {
         mode = policy.Mode,
         allowedKinds = policy.AllowedKinds.Order(),
+        // Shell commands the chat agent may run without asking, as prefixes ("git status").
+        allowedCommands = commands,
         // "standard" = nothing stored; "user" = the user's default; "engagement" = this engagement's own.
         scope,
         kinds = ActionKinds.All.Select(k => new

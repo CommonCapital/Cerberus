@@ -60,7 +60,7 @@ test("the prompt shows what will run, and y allows it once", async () => {
   expect(frame).toContain("Allow this?");
   expect(frame).toContain("Run a shell command");
   expect(frame).toContain("npm test");
-  expect(frame).toContain("y yes, once a always allow running commands n no");
+  expect(frame).toContain("y yes, once a always allow `npm test` n no");   // a rule for this command, not for every command
 
   ui.mockInput.pressKey("y");
   await ui.settle();
@@ -105,23 +105,58 @@ test("requests are answered one at a time, in order", async () => {
   expect(await second).toBe("deny");
 });
 
-test("always also answers the waiting requests of the same kind, and only those", async () => {
+test("always for an edit also answers the waiting edits, and only those", async () => {
   const ui = (current = await screen());
-  const first = ask(bash("one"));
-  const sameKind = ask(bash("two"));
-  const otherKind = ask({ toolName: "writeFile", input: { path: "c.txt", content: "" } });
+  const first = ask({ toolName: "editFile", input: { path: "a.txt", oldString: "x", newString: "y" } });
+  const sameKind = ask({ toolName: "writeFile", input: { path: "b.txt", content: "" } });
+  const otherKind = ask(bash("npm test"));
   await ui.settle();
+  expect(ui.captureCharFrame()).toContain("always allow editing files");
 
   ui.mockInput.pressKey("a");
   await ui.settle();
 
   expect(await first).toBe("always");
   expect(await sameKind).toBe("allow");
-  expect(ui.captureCharFrame()).toContain("Write c.txt");   // still asked: a different kind of action
+  expect(ui.captureCharFrame()).toContain("npm test");   // still asked: a different kind of action
 
   ui.mockInput.pressKey("n");
   await ui.settle();
   expect(await otherKind).toBe("deny");
+});
+
+test("always for a command covers that command, not every command", async () => {
+  const ui = (current = await screen());
+  const first = ask(bash("git status"));
+  const covered = ask(bash("git status --short"));
+  const other = ask(bash("git push --force"));
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("always allow `git status`");
+
+  ui.mockInput.pressKey("a");
+  await ui.settle();
+
+  expect(await first).toBe("always");
+  expect(await covered).toBe("allow");
+  expect(ui.captureCharFrame()).toContain("git push --force");   // a different command: still asked
+  ui.mockInput.pressKey("n");
+  await ui.settle();
+  expect(await other).toBe("deny");
+});
+
+test("a command line that must be looked at every time has no always", async () => {
+  const ui = (current = await screen());
+  const answers: ToolDecision[] = [];
+  void ask(bash("rm -rf build && npm test")).then((d) => { answers.push(d); });
+  await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("always allow");
+
+  ui.mockInput.pressKey("a");   // not an answer here
+  await ui.settle();
+  expect(answers).toEqual([]);
+  ui.mockInput.pressKey("y");
+  await ui.settle();
+  expect(answers).toEqual(["allow"]);
 });
 
 test("leaving denies whatever is still waiting", async () => {

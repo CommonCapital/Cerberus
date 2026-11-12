@@ -66,6 +66,16 @@ export const PermissionsDialogContent = () => {
             cerberus.setPermissions({ allowedKinds: current.allowedKinds.filter((kind) => kind !== entry.kind) }),
         }),
       ),
+    // Command rules: each can be withdrawn on its own.
+    ...(permissions.allowedCommands ?? []).map(
+      (rule): Row => ({
+        key: `command:${rule}`,
+        label: `Runs without asking: ${rule}`,
+        hint: "ask again",
+        apply: (current) =>
+          cerberus.setPermissions({ allowedCommands: (current.allowedCommands ?? []).filter((other) => other !== rule) }),
+      }),
+    ),
   ];
 
   return (
