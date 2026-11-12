@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Cerberus.Core.Models;
 using Cerberus.Jobs;
+using Cerberus.Scanning;
 
 namespace Cerberus.Api.Agents;
 
@@ -147,7 +148,13 @@ public sealed class AgentLoop(IModelProviderResolver providers)
         var tool = tools.FirstOrDefault(t => t.Definition.Name == call.Name);
         if (problem is null && tool is null) problem = $"There is no tool named \"{call.Name}\".";
 
-        await reporter.EventAsync(RunEventTypes.ToolCall, new { id = call.Id, name = call.Name, input });
+        // The stream is stored and pushed to clients; the model gets the real thing, the record a masked copy.
+        await reporter.EventAsync(RunEventTypes.ToolCall, new
+        {
+            id = call.Id,
+            name = call.Name,
+            input = JsonSerializer.Deserialize<JsonElement>(SecretMasker.MaskText(input.GetRawText())),
+        });
 
         string output;
         var failed = problem is not null;
@@ -173,7 +180,7 @@ public sealed class AgentLoop(IModelProviderResolver providers)
         {
             id = call.Id,
             name = call.Name,
-            output = output.Length <= MaxResultShown ? output : output[..MaxResultShown],
+            output = SecretMasker.MaskText(output.Length <= MaxResultShown ? output : output[..MaxResultShown]),
             truncated = output.Length > MaxResultShown,
             isError = failed,
         });

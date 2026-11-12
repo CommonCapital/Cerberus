@@ -25,6 +25,7 @@ builder.Services.AddDbContext<CerberusDbContext>(options =>
 
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSingleton<LoginThrottle>();
 
 // --- Per-user API keys (encrypted at rest via Data Protection) -------------
 var keyRingPath = Environment.GetEnvironmentVariable("CERBERUS_KEYRING")

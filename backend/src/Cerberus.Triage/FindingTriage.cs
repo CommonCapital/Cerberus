@@ -127,24 +127,8 @@ public static class TriagePrompt
         return line.Length <= MaxLineLength ? line : line[..MaxLineLength] + "…";
     }
 
-    private static readonly IReadOnlyList<Rule> SecretRules = Rules.All.Where(r => r.Category == "secret").ToList();
-
     /// <summary>Masks everything the secret rules match, keeping only its length as a hint.</summary>
-    public static string Redact(string line)
-    {
-        foreach (var rule in SecretRules)
-        {
-            try
-            {
-                line = rule.Pattern.Replace(line, m => $"[REDACTED len={m.Length}]");
-            }
-            catch (RegexMatchTimeoutException)
-            {
-                return "[REDACTED line]";   // could not be checked, so nothing of it is sent
-            }
-        }
-        return line;
-    }
+    public static string Redact(string line) => SecretMasker.Mask(line);
 }
 
 /// <summary>Reads a model's reply. Tolerant of prose or code fences around the JSON.</summary>

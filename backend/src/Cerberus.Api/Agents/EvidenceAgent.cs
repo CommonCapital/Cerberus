@@ -272,7 +272,7 @@ public sealed class EvidenceAgentRunner(
                     var lines = workspace.ReadLines(file);
                     var line = CodeTools.Number(item, "line") ?? 0;
                     if (line < 1 || line > lines.Length) throw new AgentToolException($"line must be between 1 and {lines.Length} for {file}.");
-                    var text = lines[line - 1].Trim();
+                    var text = SecretMasker.Mask(lines[line - 1].Trim());
                     evidence.Add(new EvidenceReference(workspace.Relative(workspace.Resolve(file)), line, text.Length <= 300 ? text : text[..300]));
                 }
             }

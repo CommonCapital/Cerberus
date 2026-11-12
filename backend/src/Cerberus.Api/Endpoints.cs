@@ -495,11 +495,27 @@ public static class Endpoints
             scan.FindingCount,
             scan.ScaCompleted,
             scan.CreatedAt,
-            findings = ParseStoredMessages(scan.Findings),
+            // Evidence is masked when a scan is stored; scans stored before that are masked on the way out.
+            findings = MaskEvidence(ParseStoredMessages(scan.Findings)),
             // Advisory LLM opinions, keyed to findings by findingId. They never alter findings or compliance.
             triage = ParseStoredMessages(scan.Triage),
         });
     }
+
+    private static List<System.Text.Json.Nodes.JsonNode?> MaskEvidence(List<JsonElement> findings) =>
+        findings.Select(element =>
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(element.GetRawText());
+            if (node is System.Text.Json.Nodes.JsonObject finding)
+            {
+                var key = finding.ContainsKey("evidence") ? "evidence" : finding.ContainsKey("Evidence") ? "Evidence" : null;
+                if (key is not null && finding[key] is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text))
+                {
+                    finding[key] = Cerberus.Scanning.SecretMasker.Mask(text);
+                }
+            }
+            return node;
+        }).ToList();
 
     // --- settings: per-user model API keys ----------------------------------
 
@@ -554,16 +570,40 @@ public static class Endpoints
         }
     }
 
-    private static async Task<IResult> Login(CredentialsRequest body, AuthService auth, CancellationToken ct)
+    private static async Task<IResult> Login(
+        CredentialsRequest body, HttpContext http, AuthService auth, LoginThrottle throttle, CerberusDbContext db,
+        Audit.AuditLog audit, CancellationToken ct)
     {
         if (!IsValid(body))
         {
             return Results.Json(new { error = "A valid email and a password (min 6 characters) are required" }, statusCode: 400);
         }
+
+        // Too many wrong passwords in a row: refused for a while, whatever the password.
+        if (throttle.LockedFor(body.Email) is { } wait)
+        {
+            http.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
+            return Results.Json(new { error = $"Too many failed sign-ins. Try again in {Math.Ceiling(wait.TotalMinutes)} minute(s)." }, statusCode: 429);
+        }
+
         var token = await auth.LoginAsync(body.Email, body.Password, ct);
-        return token is null
-            ? Results.Json(new { error = "Invalid email or password" }, statusCode: 401)
-            : Results.Json(new { token });
+        if (token is not null)
+        {
+            throttle.Succeeded(body.Email);
+            return Results.Json(new { token });
+        }
+
+        if (throttle.Failed(body.Email))
+        {
+            // For an account that exists, its owner should be able to see that someone was guessing.
+            var userId = await db.Users.Where(u => u.Email == body.Email).Select(u => u.Id).FirstOrDefaultAsync(ct);
+            if (userId is not null)
+            {
+                await audit.AppendAsync(userId, "auth.lockout", Audit.AuditOutcome.Denied,
+                    $"Sign-in locked for {LoginThrottle.Lock.TotalMinutes} minutes after {LoginThrottle.MaxFailures} failed attempts in a row.", ct: ct);
+            }
+        }
+        return Results.Json(new { error = "Invalid email or password" }, statusCode: 401);
     }
 
     private static async Task<IResult> Logout(HttpContext http, AuthService auth, CancellationToken ct)
