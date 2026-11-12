@@ -141,7 +141,7 @@ public static class CodeTools
     public const int MaxEntries = 500;
 
     public static IReadOnlyList<IAgentTool> For(CodeWorkspace workspace) =>
-        [new ListTool(workspace), new ReadTool(workspace), new GrepTool(workspace)];
+        [new ListTool(workspace), new ReadTool(workspace), new GrepTool(workspace), .. CodeMapTools.For(workspace)];
 
     internal static ToolDefinition Define(string name, string description, string schema) =>
         new(name, description, JsonDocument.Parse(schema).RootElement.Clone());
