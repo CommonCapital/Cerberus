@@ -15,6 +15,8 @@ import { useToast } from "../providers/toast";
 import { describeCompaction, describeRetry, useChat } from "../hooks/use-chat";
 import { TaskStrip } from "../components/task-strip";
 import { latestTasks } from "../lib/task-list";
+import { isIdle, shellCommandOf } from "../lib/chat-flow";
+import { ShellMessage } from "../components/messages/shell-message";
 import { usePromptConfig } from "../providers/prompt-config";
 import type { Message } from "../hooks/use-chat";
 import { apiClient } from "../lib/api-client";
@@ -40,6 +42,10 @@ function ChatMessage(
     msg: Message
   }
 ) {
+  if (msg.role === "user" && msg.metadata?.shell) {
+    return <ShellMessage record={msg.metadata.shell} />;
+  }
+
   if (msg.role === "user") {
     const text = msg.parts
       .filter((p) => p.type === "text")
@@ -71,11 +77,48 @@ function SessionChat({
   const { mode, model } = usePromptConfig();
   const { isTopLayer } = useKeyboardLayer();
   const { ask, denyAll } = useToolPermission();
-  const { messages, status, submit, abort, interrupt, error, retry, compacted } = useChat(
+  const { messages, status, submit, abort, interrupt, error, retry, compacted, runShell } = useChat(
     session.id,
     initialMessages,
     ask,
   );
+  const toast = useToast();
+  // Prompts typed while the agent was busy; each is sent when the conversation comes to rest.
+  const [queued, setQueued] = useState<string[]>([]);
+  // The operator's own command, while it runs.
+  const [running, setRunning] = useState<string | null>(null);
+  const idle = isIdle(messages, status) && running === null;
+
+  // One queued prompt at a time: the next is held back until the one just sent has visibly started.
+  const dispatching = useRef(false);
+  useEffect(() => {
+    if (status !== "ready") dispatching.current = false;
+  }, [status]);
+
+  useEffect(() => {
+    if (!idle || queued.length === 0 || error || dispatching.current) return;
+    const [next, ...rest] = queued;
+    dispatching.current = true;
+    setQueued(rest);
+    void submit({ userText: next!, mode, model });
+  }, [idle, queued, error, submit, mode, model]);
+
+  const handleSubmit = (text: string) => {
+    const command = shellCommandOf(text);
+    if (command !== null) {
+      if (!idle) {
+        toast.show({ variant: "error", message: "Wait for the reply to end before running a command of your own." });
+        return;
+      }
+      setRunning(command);
+      runShell(command, mode, model)
+        .catch((problem: unknown) => toast.show({ variant: "error", message: problem instanceof Error ? problem.message : "The command could not be run" }))
+        .finally(() => setRunning(null));
+      return;
+    }
+    if (idle) void submit({ userText: text, mode, model });
+    else setQueued((current) => [...current, text]);
+  };
   const hasSubmittedInitialPromptRef = useRef(false);
 
   // Stop the pending reply when the user leaves this session.
@@ -91,6 +134,7 @@ function SessionChat({
     if (key.name === "escape" && isTopLayer("base") && status === "streaming") {
       key.preventDefault();
       interrupt();
+      setQueued([]);   // the operator took the wheel: what was lined up no longer follows
     }
   });
 
@@ -106,14 +150,21 @@ function SessionChat({
 
   return (
     <SessionShell
-      onSubmit={(text) => submit({ userText: text, mode, model })}
+      onSubmit={handleSubmit}
       loading={status === "submitted" || status === "streaming"}
       interruptible={status === "submitted" || status === "streaming"}
     >
       {messages.map((msg) => (
         <ChatMessage key={msg.id} msg={msg} />
       ))}
+      {running !== null ? <text attributes={TextAttributes.DIM}>$ {running} …</text> : null}
       <TaskStrip tasks={latestTasks(messages)} />
+      {queued.map((text, index) => (
+        <text key={index} attributes={TextAttributes.DIM}>
+          queued: {text.length > 100 ? `${text.slice(0, 100)}…` : text}
+          {index === 0 ? "  (sent when the reply ends; esc drops it)" : ""}
+        </text>
+      ))}
       {compacted ? <text attributes={TextAttributes.DIM}>{describeCompaction(compacted)}</text> : null}
       {retry ? <text attributes={TextAttributes.DIM}>{describeRetry(retry)}</text> : null}
       {error && <ErrorMessage message={error.message} />}

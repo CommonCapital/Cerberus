@@ -10,7 +10,8 @@ import {
 import { type ModeType, type SupportedChatModelId, type ToolContracts } from "@nightcode/shared";
 import { apiClient } from "../lib/api-client";
 import { getAuth } from "../lib/auth";
-import { executeLocalTool } from "../lib/local-tools";
+import { executeLocalTool, runCommand } from "../lib/local-tools";
+import { shellMessageText, shellRecord, withUnsent, type ShellRecord } from "../lib/chat-flow";
 import { projectContext } from "../lib/project-context";
 import { cerberus } from "../lib/cerberus/api";
 import {
@@ -40,6 +41,8 @@ export type ChatMessageMetadata = {
   model?: SupportedChatModelId | string;
   durationMs?: number;
   usage?: LanguageModelUsage;
+  /** Set on a message that records a command the operator ran themself with "!". */
+  shell?: ShellRecord;
 };
 
 type ChatTools = {
@@ -75,6 +78,8 @@ export function useChat(
 ) {
   // Read once per chat, then kept current as the operator chooses "always allow".
   const policyRef = useRef<Promise<Policy> | null>(null);
+  // Messages added on this side only (commands the operator ran); they go to the server with the next prompt.
+  const unsentRef = useRef<Set<string>>(new Set());
   const [retry, setRetry] = useState<RetryNotice | null>(null);
   // How many messages the server summarised before the latest reply; shown with that reply.
   const [compacted, setCompacted] = useState<number | null>(null);
@@ -97,7 +102,8 @@ export function useChat(
         const requestMessages =
           message.role === "assistant" && previousMessage?.role === "user"
             ? [previousMessage, message]
-            : [message];
+            // A new prompt takes along what the operator ran themself since the last one.
+            : withUnsent(messages, messages.length - 1, unsentRef.current);
 
         return {
           body: {
@@ -123,6 +129,7 @@ export function useChat(
     },
     onFinish() {
       setRetry(null);
+      unsentRef.current.clear();   // the server has them now
     },
     onError() {
       setRetry(null);
@@ -177,6 +184,20 @@ export function useChat(
           model: params.model,
         },
       })
+    },
+    /**
+     * Runs a command of the operator's own and records it in the conversation,
+     * so the agent sees what was run and what came of it with the next prompt.
+     */
+    runShell: async (command: string, mode: ModeType, model: SupportedChatModelId) => {
+      const record = shellRecord(command, await runCommand(command, { byAgent: false }));
+      const id = crypto.randomUUID();
+      unsentRef.current.add(id);
+      chat.setMessages((current) => [
+        ...current,
+        { id, role: "user", parts: [{ type: "text", text: shellMessageText(record) }], metadata: { mode, model, shell: record } },
+      ]);
+      return record;
     },
     abort: chat.stop,
     interrupt: chat.stop,
