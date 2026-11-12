@@ -422,4 +422,7 @@ public class Session
 
     /// <summary>Id of the last message the summary covers.</summary>
     public string? SummarizedThrough { get; set; }
+
+    /// <summary>The chat agent's task list (JSON list of tasks), as it last set it. Null until it made one.</summary>
+    public string? Tasks { get; set; }
 }

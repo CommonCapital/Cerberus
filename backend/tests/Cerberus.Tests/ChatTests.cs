@@ -167,11 +167,12 @@ public class UiMessagesTests
 public class ChatToolsTests
 {
     [Fact]
-    public void Plan_mode_offers_only_read_only_file_tools_plus_the_skills_library()
+    public void Plan_mode_offers_only_read_only_file_tools_plus_the_server_tools()
     {
-        Assert.Equal(["readFile", "listDirectory", "glob", "grep", "searchSkills", "loadSkill"],
+        // The server tools — the skills library and the agent's own task list — change nothing on the user's machine.
+        Assert.Equal(["readFile", "listDirectory", "glob", "grep", "searchSkills", "loadSkill", "updateTasks"],
             ChatTools.For("PLAN").Select(t => t.Name).ToArray());
-        Assert.Equal(["readFile", "listDirectory", "glob", "grep", "writeFile", "editFile", "bash", "searchSkills", "loadSkill"],
+        Assert.Equal(["readFile", "listDirectory", "glob", "grep", "writeFile", "editFile", "bash", "searchSkills", "loadSkill", "updateTasks"],
             ChatTools.For("BUILD").Select(t => t.Name).ToArray());
     }
 

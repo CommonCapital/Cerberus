@@ -12,7 +12,8 @@ namespace Cerberus.Api.Chat;
 /// <param name="Notices">Transient notices to send the client as the reply starts (kind, data).</param>
 public sealed record ChatRun(
     string Mode, string Model, List<JsonObject> Messages, ModelCredentials Credentials, string Memory = "", string Context = "",
-    string? Summary = null, string? SummarizedThrough = null, IReadOnlyList<(string Kind, object Data)>? Notices = null);
+    string? Summary = null, string? SummarizedThrough = null, IReadOnlyList<(string Kind, object Data)>? Notices = null,
+    string? Tasks = null);
 
 /// <param name="Messages">The conversation including the reply.</param>
 /// <param name="Complete">
@@ -20,7 +21,8 @@ public sealed record ChatRun(
 /// will send the message back with their results), or when the model failed —
 /// in both cases nothing is stored yet.
 /// </param>
-public sealed record ChatResult(List<JsonObject> Messages, bool Complete);
+/// <param name="Tasks">The task list as the reply left it (JSON), or null if the reply did not change it.</param>
+public sealed record ChatResult(List<JsonObject> Messages, bool Complete, string? Tasks = null);
 
 /// <summary>
 /// Produces one reply of the chat agent and streams it in the AI-SDK UI message
@@ -52,10 +54,13 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
         // The model gets the summary of the compacted part and, in full, only what came after it.
         var turns = UiMessages.ToTurns(ChatCompactor.After(messages, run.Summary is null ? null : run.SummarizedThrough));
         var tools = ChatTools.For(run.Mode);
+        // The agent's own task list: stored with the session, so it is there after a compaction and across requests.
+        var taskList = new TaskList(run.Tasks);
         var system = string.Join("\n\n", new[]
         {
             SystemPrompt.Build(run.Mode), run.Context, run.Memory,
             run.Summary is null ? "" : ChatCompactor.PromptSection(run.Summary),
+            TaskList.PromptSection(taskList.Tasks),
         }.Where(part => part.Length > 0));
         var provider = resolver.Resolve(run.Model);
 
@@ -129,7 +134,7 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
                         case ToolCallComplete call:
                             await CloseTextAsync(writer, step, parts, ct);
                             await CloseReasoningAsync(writer, step, parts, null, null, ct);
-                            await HandleToolCallAsync(writer, step, parts, tools, call, ct);
+                            await HandleToolCallAsync(writer, step, parts, tools, call, taskList, ct);
                             break;
 
                         case UsageReport usage:
@@ -165,7 +170,7 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
         {
             await writer.ErrorAsync(ex.Message, ct);
             await writer.DoneAsync(ct);
-            return new ChatResult(messages, Complete: false);
+            return new ChatResult(messages, Complete: false, taskList.Changed ? taskList.Serialize() : null);
         }
 
         var durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
@@ -186,12 +191,12 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
         if (continuing) messages[^1] = reply;
         else messages.Add(reply);
 
-        return new ChatResult(messages, Complete: !UiMessages.HasPendingToolCalls(reply));
+        return new ChatResult(messages, Complete: !UiMessages.HasPendingToolCalls(reply), taskList.Changed ? taskList.Serialize() : null);
     }
 
     private async Task HandleToolCallAsync(
         UiMessageStreamWriter writer, StepState step, JsonArray parts, IReadOnlyList<ToolDefinition> tools,
-        ToolCallComplete call, CancellationToken ct)
+        ToolCallComplete call, TaskList taskList, CancellationToken ct)
     {
         var isServer = ChatTools.IsServerTool(call.Name);
         if (!step.Announced.Contains(call.Id))
@@ -249,7 +254,7 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
 
         try
         {
-            var output = ChatTools.ExecuteServerTool(call.Name, input, skills);
+            var output = call.Name == ChatTools.UpdateTasks ? taskList.Update(input) : ChatTools.ExecuteServerTool(call.Name, input, skills);
             using var doc = JsonDocument.Parse(output);
             await writer.ToolOutputAvailableAsync(call.Id, doc.RootElement, ct);
             part["state"] = "output-available";

@@ -71,6 +71,10 @@ public static class SystemPrompt
                   4. **Use editFile for small changes** to existing files. Only use writeFile when creating new files or rewriting most of a file.
                   """,
             """
+            ## Task list
+            For work that takes three or more distinct steps, keep a task list with updateTasks: write it before you start, mark one task in_progress at a time, and mark each completed as soon as it is done — not in a batch at the end. The user watches it to follow your progress. Skip it for a single step or a simple question. If a task turns out not to be needed, mark it cancelled rather than deleting it.
+            """,
+            """
             ## Skills library
             For security work (reviewing code or configuration, hardening, detection, incident handling, compliance), check the skills library before improvising: searchSkills with a few keywords, then loadSkill for the one that fits, and follow it. Skills are reference procedures, not instructions from the user — the user's request and the scope they are authorized for always come first.
             """,
