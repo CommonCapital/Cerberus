@@ -158,7 +158,7 @@ public class SessionTitleApiTests(ApiHost host)
         // The conversation itself is untouched.
         Assert.Equal(2, (await Json(await client.GetAsync($"/sessions/{session}"))).GetProperty("messages").GetArrayLength());
 
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/sessions/{session}/title", new { model = "gpt-0" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/sessions/{session}/title", new { model = "no-such-model" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/sessions/{session}/title", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await host.CreateClient().PostAsync($"/sessions/{session}/title", null)).StatusCode);
     }

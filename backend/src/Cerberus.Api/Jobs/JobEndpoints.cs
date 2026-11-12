@@ -105,7 +105,7 @@ public static class JobEndpoints
 
             if (body.Model is not null && !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
             {
-                return BadRequest("model must be a supported model id, or be left out for a review without model triage");
+                return BadRequest("model must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:), or be left out for a review without model triage");
             }
             if (body.MaxFindings is < 1 or > TriageRunner.MaxFindingsLimit)
             {
@@ -113,7 +113,7 @@ public static class JobEndpoints
             }
             if (body.AgentModel is not null && !Cerberus.Core.Models.ModelRegistry.IsSupported(body.AgentModel))
             {
-                return BadRequest("agentModel must be a supported model id, or be left out for a review without the SAST agent");
+                return BadRequest("agentModel must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:), or be left out for a review without the SAST agent");
             }
             if (body.MaxSteps is < 1 or > Agents.SastAgent.MaxSteps)
             {
@@ -152,7 +152,7 @@ public static class JobEndpoints
             // No default model: the caller decides where the code under review is sent.
             if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
             {
-                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+                return BadRequest("model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:) (a local Ollama model keeps the code on this machine)");
             }
             if (body.MaxSteps is < 1 or > Agents.SastAgent.MaxSteps)
             {
@@ -186,7 +186,7 @@ public static class JobEndpoints
         {
             if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
             {
-                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+                return BadRequest("model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:) (a local Ollama model keeps the code on this machine)");
             }
             if (body.MaxSteps is < 1 or > Agents.ThreatModelAgent.MaxSteps)
             {
@@ -216,7 +216,7 @@ public static class JobEndpoints
             if (string.IsNullOrWhiteSpace(body.AssessmentId)) return BadRequest("assessmentId is required for an evidence job");
             if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
             {
-                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+                return BadRequest("model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:) (a local Ollama model keeps the code on this machine)");
             }
             if (body.MaxControls is < 1 or > Agents.EvidenceAgent.MaxControls)
             {
@@ -266,7 +266,7 @@ public static class JobEndpoints
             // No default model: the caller decides where the code under review is sent.
             if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
             {
-                return BadRequest("model is required and must be a supported model id (a local Ollama model keeps the code on this machine)");
+                return BadRequest("model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:) (a local Ollama model keeps the code on this machine)");
             }
             if (body.MaxFindings is < 1 or > TriageRunner.MaxFindingsLimit)
             {

@@ -1,41 +1,16 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { cerberusHome } from "../../lib/home";
-import { join } from "node:path";
+import { readPreferences, savePreference } from "../../lib/preferences";
 import { createContext, useContext, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { ThemeColors, Theme } from "../../theme";
 import { DEFAULT_THEME, THEMES } from "../../theme";
 
-const configDir = () => cerberusHome();
-const preferencesPath = () => join(configDir(), "preferences.json");
-
-type ThemePreferences = {
-  themeName: string;
-};
 
 function getInitialTheme(): Theme {
-  try {
-    const preferences = JSON.parse(
-      readFileSync(preferencesPath(), "utf8"),
-    ) as Partial<ThemePreferences>;
-    const savedTheme = THEMES.find((theme) => theme.name === preferences.themeName);
-    return savedTheme ?? DEFAULT_THEME;
-  } catch {
-    return DEFAULT_THEME;
-  }
+  return THEMES.find((theme) => theme.name === readPreferences().themeName) ?? DEFAULT_THEME;
 };
 
 function persistTheme(theme: Theme) {
-  try {
-    mkdirSync(configDir(), { recursive: true });
-    writeFileSync(
-      preferencesPath(),
-      JSON.stringify({ themeName: theme.name } satisfies ThemePreferences, null, 2),
-      "utf8",
-    );
-  } catch {
-    // Ignore preference write failures so theme switching still works for this session.
-  }
+  savePreference("themeName", theme.name);
 };
 
 type ThemeContextValue = {

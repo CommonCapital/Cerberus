@@ -296,7 +296,7 @@ public sealed class OpenAiProvider(HttpClient httpClient) : OpenAiCompatibleProv
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException(
-                "No OpenAI API key. Set OPENAI_API_KEY or use a local Ollama model.");
+                "No OpenAI API key. Add one (/keys in the CLI), set OPENAI_API_KEY, or use a local Ollama model.");
         }
         return ("https://api.openai.com/v1", apiKey);
     }
@@ -312,5 +312,27 @@ public sealed class OllamaProvider(HttpClient httpClient) : OpenAiCompatibleProv
             ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
             ?? "http://localhost:11434/v1";
         return (baseUrl, "ollama");
+    }
+}
+
+/// <summary>
+/// DeepSeek's API (<c>deepseek-chat</c>, <c>deepseek-reasoner</c>, and whatever it serves later): it speaks
+/// Chat Completions, so it is the same provider code with another address and another key.
+/// </summary>
+public sealed class DeepSeekProvider(HttpClient httpClient) : OpenAiCompatibleProvider(httpClient)
+{
+    public const string DefaultBaseUrl = "https://api.deepseek.com/v1";
+
+    public override ModelProvider Provider => ModelProvider.DeepSeek;
+
+    protected override (string BaseUrl, string ApiKey) ResolveEndpoint(ModelCredentials credentials)
+    {
+        var apiKey = credentials.DeepSeekApiKey ?? Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException(
+                "No DeepSeek API key. Add one (/keys in the CLI), set DEEPSEEK_API_KEY, or use a local Ollama model.");
+        }
+        return (Environment.GetEnvironmentVariable("DEEPSEEK_BASE_URL") ?? DefaultBaseUrl, apiKey);
     }
 }

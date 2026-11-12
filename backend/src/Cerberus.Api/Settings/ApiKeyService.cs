@@ -12,7 +12,7 @@ namespace Cerberus.Api.Settings;
 /// </summary>
 public sealed class ApiKeyService
 {
-    public static readonly string[] SupportedProviders = ["anthropic", "openai"];
+    public static readonly string[] SupportedProviders = ["anthropic", "openai", "deepseek"];
 
     private readonly CerberusDbContext _db;
     private readonly IDataProtector _protector;
@@ -67,6 +67,7 @@ public sealed class ApiKeyService
 
         string? anthropic = null;
         string? openai = null;
+        string? deepseek = null;
         foreach (var key in keys)
         {
             string decrypted;
@@ -81,8 +82,9 @@ public sealed class ApiKeyService
 
             if (key.Provider == "anthropic") anthropic = decrypted;
             else if (key.Provider == "openai") openai = decrypted;
+            else if (key.Provider == "deepseek") deepseek = decrypted;
         }
 
-        return new ModelCredentials(anthropic, openai, null);
+        return new ModelCredentials(anthropic, openai, null, deepseek);
     }
 }

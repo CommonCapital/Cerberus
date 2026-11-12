@@ -261,13 +261,13 @@ public class ServiceCommandTests
     public async Task A_model_that_cannot_be_reached_fails_with_the_reason_and_an_unknown_one_is_a_usage_error()
     {
         var unreachable = await Smoke(new ScriptedProvider(ModelProvider.Mock, _ => throw new HttpRequestException("Connection refused (localhost:11434)")));
-        var unknown = await Smoke(new MockProvider(), "gpt-0");
+        var unknown = await Smoke(new MockProvider(), "no-such-model");
         var unnamed = await Smoke(new MockProvider(), null);
 
         Assert.Equal(ServiceCommands.Failed, unreachable.Code);
         Assert.Contains("the model could not be called: Connection refused", unreachable.Said);
         Assert.Equal(ServiceCommands.Usage, unknown.Code);
-        Assert.Contains("\"gpt-0\" is not a model this server knows.", unknown.Said);
+        Assert.Contains("\"no-such-model\" is not a model this server knows.", unknown.Said);
         Assert.Contains("Known models:", unknown.Said);
         Assert.Equal(ServiceCommands.Usage, unnamed.Code);
     }
