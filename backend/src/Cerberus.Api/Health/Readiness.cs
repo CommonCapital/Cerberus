@@ -198,6 +198,29 @@ public sealed class EmbeddingsCheck(IEmbedder embedder) : IReadinessCheck
             : (true, $"{embedder.Model} available");
 }
 
+/// <summary>
+/// The configured MCP servers: optional. Reports what is already known and never reaches out itself —
+/// a readiness probe must not become traffic to other people's servers. Names and counts only.
+/// </summary>
+public sealed class McpCheck(Web.IMcpServers servers) : IReadinessCheck
+{
+    public string Name => "mcp";
+    public bool Required => false;
+
+    public Task<(bool, string)> CheckAsync(CancellationToken ct)
+    {
+        if (servers.Problems.Count > 0)
+        {
+            return Task.FromResult((false, $"{servers.Problems.Count} problem(s) in the MCP configuration (run mcp-check to see them); {servers.Names.Count} server(s) usable"));
+        }
+        if (servers.Names.Count == 0) return Task.FromResult((true, "no servers configured"));
+        var down = servers.Known.Where(s => !s.Reachable).Select(s => s.Name).ToList();
+        return Task.FromResult(down.Count > 0
+            ? (false, $"{servers.Names.Count} configured; not reachable when last tried: {string.Join(", ", down)}")
+            : (true, $"{servers.Names.Count} configured"));
+    }
+}
+
 public static class HealthEndpoints
 {
     public static void MapHealthEndpoints(this WebApplication app)

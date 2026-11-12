@@ -66,7 +66,9 @@ Job options
   --research              sast, threat-model: let the agent ask questions on the public internet.
                           Each question is checked before it leaves and answered by a separate
                           researcher that never sees the code. Needs approval (use-the-internet)
-                          and a server with web access switched on.
+                          and a server with web access switched on. Where outside servers are
+                          configured (see: cerberus mcp), the researcher may use their tools too;
+                          that needs its own approval (use-mcp-servers).
   --engagement <id>       run under this engagement
 
 Running unattended

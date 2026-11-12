@@ -6,6 +6,7 @@ import { followRun } from "../lib/cerberus/follow";
 import { parseArgs, USAGE } from "./args";
 import { parseSchedule, runSchedule, SCHEDULE_EXIT, SCHEDULE_USAGE } from "./schedule";
 import { KEY_EXIT, KEY_USAGE, parseKey, readSecretFromTerminal, runKey } from "./keys";
+import { MCP_EXIT, MCP_USAGE, parseMcp, runMcp } from "./mcp";
 import { EXIT, runHeadless, type HeadlessDeps } from "./run";
 
 // `cerberus run …`: the real network, disk and clock behind run.ts.
@@ -66,6 +67,7 @@ const deps: HeadlessDeps = {
 export async function main(argv: string[]): Promise<number> {
   if (argv[0] === "schedule") return scheduleMain(argv);
   if (argv[0] === "key" || argv[0] === "models") return keyMain(argv);
+  if (argv[0] === "mcp") return mcpMain(argv);
   const parsed = parseArgs(argv);
   if (parsed.kind === "help") {
     process.stdout.write(`${USAGE}\n`);
@@ -106,6 +108,29 @@ async function scheduleMain(argv: string[]): Promise<number> {
     update: cerberus.updateSchedule,
     remove: cerberus.deleteSchedule,
     runNow: cerberus.runSchedule,
+    out: (line) => process.stdout.write(`${line}\n`),
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
+}
+
+/** `cerberus mcp` */
+async function mcpMain(argv: string[]): Promise<number> {
+  const command = parseMcp(argv);
+  if (command.kind === "help") {
+    process.stdout.write(`${MCP_USAGE}\n`);
+    return MCP_EXIT.ok;
+  }
+  if (command.kind === "usage") {
+    process.stderr.write(`${command.message}\nSee: cerberus mcp --help\n`);
+    return MCP_EXIT.usage;
+  }
+  if (command.server) process.env.API_URL = command.server;
+  if (!getAuth()) {
+    process.stderr.write(`Not signed in to ${baseUrl()}. Put a token in CERBERUS_TOKEN, or sign in with /login in the interactive CLI.\n`);
+    return MCP_EXIT.failed;
+  }
+  return runMcp(command, {
+    servers: cerberus.mcpServers,
     out: (line) => process.stdout.write(`${line}\n`),
     log: (line) => process.stderr.write(`${line}\n`),
   });

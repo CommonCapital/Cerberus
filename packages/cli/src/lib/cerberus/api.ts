@@ -1,5 +1,6 @@
 import { clearAuth, getAuth } from "../auth";
 import type { ModelListing } from "../model-choices";
+import type { McpListing } from "../../headless/mcp";
 import { explainSubmitError, getCurrentEngagement, setCurrentEngagement, underEngagement } from "./engagement";
 
 // Client for the Cerberus (.NET) backend's job, approval and question
@@ -385,6 +386,8 @@ export const cerberus = {
   },
   /** What can be chosen as a model: every provider, its models, and whether it is ready to use. */
   models: () => request<ModelListing>("GET", "/models"),
+  /** The outside (MCP) servers configured on the server, and which of their tools agents are given. */
+  mcpServers: (refresh = false) => request<McpListing>("GET", `/mcp/servers${refresh ? "?refresh=true" : ""}`),
   /** Which API providers have a key stored for this operator. A key itself is never returned. */
   apiKeys: () => request<{ provider: string; hasKey: boolean }[]>("GET", "/settings/keys"),
   setApiKey: (provider: string, apiKey: string) => request<unknown>("PUT", "/settings/keys", { provider, apiKey }),

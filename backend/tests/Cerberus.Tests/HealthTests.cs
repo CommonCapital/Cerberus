@@ -153,7 +153,7 @@ public class HealthApiTests(ApiHost host)
         var report = JsonDocument.Parse(body).RootElement;
         Assert.Equal("healthy", report.GetProperty("status").GetString());
         var checks = report.GetProperty("checks").EnumerateArray().ToDictionary(c => c.GetProperty("name").GetString()!, c => c);
-        Assert.Equal(["catalogs", "database", "embeddings", "job-worker", "key-ring", "scan-root", "skills"], checks.Keys.Order().ToArray());
+        Assert.Equal(["catalogs", "database", "embeddings", "job-worker", "key-ring", "mcp", "scan-root", "skills"], checks.Keys.Order().ToArray());
         Assert.All(checks.Values, c => Assert.Equal("healthy", c.GetProperty("status").GetString()));
         Assert.Equal("running", checks["job-worker"].GetProperty("detail").GetString());
         Assert.EndsWith(" loaded", checks["skills"].GetProperty("detail").GetString());

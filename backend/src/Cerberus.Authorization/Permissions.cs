@@ -27,6 +27,9 @@ public static class ActionKinds
     /// <summary>Letting an agent ask questions on the public internet (the research tool).</summary>
     public const string UseTheInternet = "use-the-internet";
 
+    /// <summary>Letting an agent's researcher call the tools of the MCP servers the installation has configured.</summary>
+    public const string UseMcpServers = "use-mcp-servers";
+
     public static readonly IReadOnlyList<(string Kind, string Description)> All =
     [
         (ReadFiles, "Read files of the project"),
@@ -36,6 +39,7 @@ public static class ActionKinds
         (RunPlan, "Carry out a multi-step plan without showing it first"),
         (SendCodeToCloudModel, "Send source code to a cloud model provider"),
         (UseTheInternet, "Let an agent ask questions on the public internet"),
+        (UseMcpServers, "Let an agent's researcher use the configured outside servers (MCP)"),
     ];
 
     public static bool IsValid(string? kind) => All.Any(k => k.Kind == kind);
