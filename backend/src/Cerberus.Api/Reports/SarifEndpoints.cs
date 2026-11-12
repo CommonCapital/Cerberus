@@ -32,7 +32,8 @@ public static class SarifEndpoints
         var userId = UserId(http);
         var run = await db.AgentRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId, ct);
         if (run is null) return NotFound("Agent run");
-        return run.Agent == SastAgent.Name
+        // The code reviewer's findings — alone, as a specialist, or merged by a lead — share one form.
+        return run.Agent == SastAgent.Name || run.Agent == Team.Name || (run.Agent.StartsWith("specialist:", StringComparison.Ordinal) && run.Agent != "specialist:threat-model")
             ? File(Sarif.Log(RunOf(run)), $"cerberus-agent-{Short(run.Id)}.sarif")
             : Results.Json(new { error = $"A {run.Agent} run has no findings to export as SARIF." }, statusCode: 400);
     }

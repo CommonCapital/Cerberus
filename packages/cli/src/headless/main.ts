@@ -14,7 +14,7 @@ import { EXIT, runHeadless, type HeadlessDeps } from "./run";
 async function reportOf(job: Job): Promise<string | null> {
   if (!job.resultId) return null;
   if (job.type === "review") return (await cerberus.review(job.resultId)).report;
-  if (job.type === "sast" || job.type === "threat-model") return (await cerberus.agentRun(job.resultId)).report;
+  if (job.type === "sast" || job.type === "threat-model" || job.type === "investigate") return (await cerberus.agentRun(job.resultId)).report;
   return null;
 }
 

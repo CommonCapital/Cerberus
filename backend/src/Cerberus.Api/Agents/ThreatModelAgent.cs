@@ -114,7 +114,7 @@ public sealed class ThreatModelAgentRunner(
         }
     }
 
-    public async Task<AgentRun> RunAsync(Job job, ThreatModelJobParameters parameters, IRunReporter reporter, CancellationToken ct)
+    public async Task<AgentRun> RunAsync(Job job, ThreatModelJobParameters parameters, IRunReporter reporter, CancellationToken ct, SpecialistBrief? brief = null)
     {
         var provider = ModelRegistry.Find(parameters.Model)?.Provider
             ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
@@ -144,13 +144,15 @@ public sealed class ThreatModelAgentRunner(
         await reporter.StepAsync("threat-model", title, StepStatus.Running);
 
         AgentOutcome? outcome = null;
-        var messages = inbox.Open(job.Id);
+        // A specialist is steered by its lead, not by the operator: the job's messages are the lead's to read.
+        var messages = brief is null ? inbox.Open(job.Id) : null;
         var run = new AgentRun
         {
             UserId = job.UserId,
             EngagementId = job.EngagementId,
             JobId = job.Id,
-            Agent = ThreatModelAgent.Name,
+            ParentRunId = brief?.ParentRunId,
+            Agent = brief?.Agent ?? ThreatModelAgent.Name,
             Model = parameters.Model,
             TargetPath = job.TargetPath,
         };
@@ -158,9 +160,9 @@ public sealed class ThreatModelAgentRunner(
         {
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
-                parameters.Model, credentials, ThreatModelAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
+                parameters.Model, credentials, ThreatModelAgent.System + (brief is null ? "" : "\n\n" + brief.Focus) + (memory.Length > 0 ? "\n\n" + memory : ""),
                 ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint),
-                tools, maxSteps, reporter, ct, messages.Take);
+                tools, maxSteps, reporter, ct, messages is null ? null : messages.Take);
             if (outcome.StopNote(maxSteps, "the threat model may be incomplete") is { } stopped)
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
@@ -169,7 +171,7 @@ public sealed class ThreatModelAgentRunner(
         }
         finally
         {
-            messages.Dispose();
+            messages?.Dispose();
             // Kept even when stopped part-way: a partial model is still worth reading, marked as such.
             run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
             run.Findings = JsonSerializer.Serialize(new ThreatModel(components, threats), JsonOptions);

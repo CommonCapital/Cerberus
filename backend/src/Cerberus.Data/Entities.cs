@@ -340,6 +340,9 @@ public class AgentRun
     public string UserId { get; set; } = string.Empty;
     public string? EngagementId { get; set; }
     public string JobId { get; set; } = string.Empty;
+
+    /// <summary>For a specialist's run in a team review: the lead's run it belongs to.</summary>
+    public string? ParentRunId { get; set; }
     public string Agent { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string TargetPath { get; set; } = string.Empty;

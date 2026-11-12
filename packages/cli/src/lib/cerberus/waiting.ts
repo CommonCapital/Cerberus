@@ -16,6 +16,7 @@ const KIND: Record<string, string> = {
   sast: "Code review",
   evidence: "Evidence run",
   "threat-model": "Threat model",
+  investigate: "Team review",
   index: "Indexing",
 };
 

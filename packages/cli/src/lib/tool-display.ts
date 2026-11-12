@@ -42,6 +42,11 @@ export function summarizeToolCall(toolName: string, input: unknown): string {
       return text(input, "name");
     case "task":
       return clip(text(input, "description"), 80);
+    case "dispatch": {
+      // A lead's plan: who is sent. What each is asked to look at is in the plan shown for approval.
+      const assignments = input && typeof input === "object" ? (input as { assignments?: unknown }).assignments : undefined;
+      return Array.isArray(assignments) ? clip(assignments.map((assignment) => text(assignment, "specialist")).filter(Boolean).join(", "), 80) : "";
+    }
     case "updateTasks": {
       const tasks = input && typeof input === "object" ? (input as { tasks?: unknown }).tasks : undefined;
       return Array.isArray(tasks) ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "";

@@ -115,6 +115,11 @@ builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.EvidenceAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.ThreatModelAgentRunner>();
+// The team: a lead agent that dispatches specialists, several at a time with an API model.
+builder.Services.AddSingleton(new Cerberus.Api.Agents.TeamOptions(
+    Parallelism: Math.Clamp(EnvInt("CERBERUS_AGENT_PARALLELISM", 2), 1, Cerberus.Api.Agents.TeamOptions.MaxParallelism)));
+builder.Services.AddSingleton<Cerberus.Api.Agents.ISpecialistRunner, Cerberus.Api.Agents.ScopedSpecialistRunner>();
+builder.Services.AddScoped<Cerberus.Api.Agents.LeadAgentRunner>();
 
 // --- Semantic code search: a local embedding model, vectors in the local database ---
 builder.Services.AddSingleton(new Cerberus.Api.Search.EmbeddingOptions(

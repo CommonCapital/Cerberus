@@ -286,6 +286,19 @@ test("a question stops the run: nobody is here to answer it", async () => {
   expect(seen.log.join("\n")).toContain("It asks a question nobody is here to answer: The target ignores 3 files. Honour that?");
 });
 
+test("a team review that stops at its plan says how to approve plans in advance", async () => {
+  const question: Question = {
+    id: "q1", jobId: "job-12345678-abcd", text: "The lead agent proposes this plan for \"svc\": 1. auth — … Run it?", options: [], multiSelect: false, allowText: true, status: "Pending", answer: null,
+  };
+  const { deps, seen } = harness((emit) => emit(view({ job: job("AwaitingInput"), question })));
+
+  const code = await runHeadless(options("run investigate svc --model m"), deps);
+
+  expect(code).toBe(EXIT.needsPerson);
+  expect(seen.cancelled).toEqual(["job-12345678-abcd"]);
+  expect(seen.log.join("\n")).toContain("To let the lead's plan run without being shown first, add --approve run-plan.");
+});
+
 test("a job that fails, is cancelled or runs out of time on the server is exit code 2, with the server's reason", async () => {
   for (const [state, said] of [
     ["Failed", "Scan job-1234 failed: boom"],

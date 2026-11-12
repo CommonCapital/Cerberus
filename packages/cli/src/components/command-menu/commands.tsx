@@ -10,6 +10,7 @@ import {
   ScansDialogContent,
   ScopeDialogContent,
   ThreatModelDialogContent,
+  TeamReviewDialogContent,
   PermissionsDialogContent,
   AgentReviewDialogContent,
   ReviewDialogContent,
@@ -152,6 +153,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: `Threat model by ${ctx.model}`,
         children: <ThreatModelDialogContent model={ctx.model} />,
+      })
+    },
+  },
+  {
+    name: "team",
+    description: "Have a lead agent send specialist agents and merge what they find",
+    value: "/team",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: `Team review by ${ctx.model}`,
+        children: <TeamReviewDialogContent model={ctx.model} />,
       })
     },
   },

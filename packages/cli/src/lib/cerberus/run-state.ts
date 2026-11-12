@@ -50,6 +50,8 @@ export type ToolActivity = {
   output?: string;
   truncated?: boolean;
   isError?: boolean;
+  /** In a team review: the specialist whose call this is. Absent for the lead's own calls and for single agents. */
+  agent?: string;
 };
 
 export type RunView = {
@@ -103,7 +105,7 @@ export const isFinished = (view: RunView) => view.job !== null && TERMINAL.inclu
 export const canBeSteered = (view: RunView) =>
   view.job !== null &&
   view.job.state === "Running" &&
-  (["sast", "evidence", "threat-model"].includes(view.job.type) || view.tools.length > 0);
+  (["sast", "evidence", "threat-model", "investigate"].includes(view.job.type) || view.tools.length > 0);
 
 export const isWaitingForOperator = (view: RunView) => view.approval !== null || view.question !== null;
 
@@ -183,7 +185,8 @@ function applyOne(view: RunView, event: RunEvent): RunView {
       break;
     case "tool_result": {
       const result = data as unknown as ToolActivity;
-      next.tools = view.tools.map((tool) => (tool.id === result.id ? { ...tool, ...result, input: tool.input } : tool));
+      // Two specialists may use the same call id; a result belongs to the call of the same agent.
+      next.tools = view.tools.map((tool) => (tool.id === result.id && tool.agent === result.agent ? { ...tool, ...result, input: tool.input } : tool));
       break;
     }
     case "operator_message":

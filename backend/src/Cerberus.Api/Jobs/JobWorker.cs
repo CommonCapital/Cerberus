@@ -212,6 +212,11 @@ public sealed class JobWorker(
                     ?? throw new InvalidOperationException("The job has no parameters.");
                 return (await services.GetRequiredService<Agents.ThreatModelAgentRunner>().RunAsync(job, threatModel, reporter, ct)).Id;
 
+            case JobTypes.Investigate:
+                var investigate = JsonSerializer.Deserialize<Agents.InvestigateJobParameters>(job.Parameters, JobTypes.Json)
+                    ?? throw new InvalidOperationException("The job has no parameters.");
+                return (await services.GetRequiredService<Agents.LeadAgentRunner>().RunAsync(job, investigate, reporter, ct)).Id;
+
             case JobTypes.Evidence:
                 var evidence = JsonSerializer.Deserialize<Agents.EvidenceJobParameters>(job.Parameters, JobTypes.Json)
                     ?? throw new InvalidOperationException("The job has no parameters.");
@@ -288,7 +293,10 @@ public static class JobTypes
     /// <summary>Builds or refreshes the semantic index of a target with a local embedding model. The result id is the index.</summary>
     public const string Index = "index";
 
-    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review, Sast, Evidence, ThreatModel, Index];
+    /// <summary>A team review: a lead agent plans, dispatches specialist agents and merges what they find. The result id is the lead's agent run.</summary>
+    public const string Investigate = "investigate";
+
+    public static readonly IReadOnlyList<string> All = [Scan, Assess, Triage, Review, Sast, Evidence, ThreatModel, Index, Investigate];
 
     public static readonly JsonSerializerOptions Json = new()
     {
