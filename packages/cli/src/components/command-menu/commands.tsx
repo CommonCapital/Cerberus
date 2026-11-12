@@ -15,6 +15,7 @@ import {
   AgentReviewDialogContent,
   ReviewDialogContent,
   RunsDialogContent,
+  SchedulesDialogContent,
   ScanDialogContent,
   SessionsDialogContent,
   ForkDialogContent,
@@ -204,6 +205,14 @@ export const COMMANDS: Command[] = [
         title: "Runs",
         children: <RunsDialogContent />,
       })
+    },
+  },
+  {
+    name: "schedules",
+    description: "See the recurring runs; pause one or set it running again",
+    value: "/schedules",
+    action: (ctx) => {
+      ctx.dialog.open({ title: "Schedules", children: <SchedulesDialogContent /> });
     },
   },
   {

@@ -127,6 +127,9 @@ builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddSingleton<OperatorDesk>();
 builder.Services.AddScoped<JobControl>();
 builder.Services.AddHostedService<JobWorker>();
+// Recurring runs: due schedules are submitted through the same path as a request from the operator.
+builder.Services.AddSingleton<ScheduleRunner>();
+builder.Services.AddHostedService<SchedulerService>();
 
 // Serialize enums (e.g. Severity) as strings in JSON responses.
 builder.Services.ConfigureHttpJsonOptions(o =>
@@ -176,6 +179,7 @@ using (var scope = app.Services.CreateScope())
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
+app.MapScheduleEndpoints();
 app.MapReviewEndpoints();
 Cerberus.Api.Reports.SarifEndpoints.MapSarifEndpoints(app);
 Cerberus.Api.Agents.AgentRunEndpoints.MapAgentRunEndpoints(app);

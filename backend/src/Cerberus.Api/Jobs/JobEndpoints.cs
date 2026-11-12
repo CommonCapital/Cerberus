@@ -63,11 +63,21 @@ public static class JobEndpoints
         return Results.Json(new { jobId = job.Id, queued = true }, statusCode: 202);
     }
 
-    private static async Task<IResult> Submit(
+    private static Task<IResult> Submit(
         SubmitJobRequest body, HttpContext http, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct)
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct) =>
+        SubmitAsync(UserId(http), body, db, audit, bus, options, catalogs, events, policy, ct);
+
+    /// <summary>
+    /// Accepts a job for a user: validation, engagement scope, the permission policy, then the queue or an approval
+    /// request. The one way in — for a request over HTTP and for a schedule firing alike, so both get the same checks.
+    /// </summary>
+    /// <param name="accepted">Called with the job (and the approval it waits for, if any) once it has been stored.</param>
+    internal static async Task<IResult> SubmitAsync(
+        string userId, SubmitJobRequest body, CerberusDbContext db, AuditLog audit,
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct,
+        Action<Job, ApprovalRequest?>? accepted = null)
     {
-        var userId = UserId(http);
         var type = string.IsNullOrWhiteSpace(body.Type) ? JobTypes.Scan : body.Type.Trim().ToLowerInvariant();
         if (!JobTypes.All.Contains(type))
         {
@@ -401,6 +411,7 @@ public static class JobEndpoints
             await db.SaveChangesAsync(ct);
             await events.PublishAsync(job.Id);
             await bus.PublishAsync(new JobMessage(job.Id), ct);
+            accepted?.Invoke(job, null);
             return Results.Json(Describe(job), JsonOptions, statusCode: 202);
         }
 
@@ -425,6 +436,7 @@ public static class JobEndpoints
         await events.PublishAsync(job.Id);
         await events.PublishApprovalAsync(approval.Id, JobsHub.ApprovalRequested);
 
+        accepted?.Invoke(job, approval);
         return Results.Json(new { job = Describe(job), approval = ApprovalEndpoints.Describe(approval) }, JsonOptions, statusCode: 202);
     }
 

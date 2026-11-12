@@ -186,6 +186,21 @@ export type MemoryEntry = {
   createdAt: string;
 };
 
+export type ScheduleInfo = {
+  id: string;
+  name: string;
+  type: string;
+  targetPath: string;
+  everyMinutes: number;
+  /** "every day", "every 6 hours" */
+  every: string;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastOutcome: string | null;
+  lastJobId: string | null;
+};
+
 export type Catalog = { id: string; name: string; version: string; controlCount: number };
 
 export class ApiError extends Error {
@@ -358,6 +373,12 @@ export const cerberus = {
     request<{ id: string; title: string }>("POST", `/sessions/${sessionId}/fork`, options),
   /** The conversation as a Markdown document, credentials masked. */
   exportSession: (sessionId: string) => download(`/sessions/${sessionId}/export`),
+  /** Recurring runs: each is a job request and how often the server submits it. */
+  schedules: () => request<ScheduleInfo[]>("GET", "/schedules"),
+  createSchedule: (schedule: { name: string | null; every: string; job: SubmitJob }) => request<ScheduleInfo>("POST", "/schedules", schedule),
+  updateSchedule: (id: string, change: { enabled?: boolean; every?: string; name?: string }) => request<ScheduleInfo>("PUT", `/schedules/${id}`, change),
+  deleteSchedule: (id: string) => request<null>("DELETE", `/schedules/${id}`),
+  runSchedule: (id: string) => request<{ outcome: string; detail: string; jobId: string | null }>("POST", `/schedules/${id}/run`),
   scans: () => request<ScanSummary[]>("GET", "/scans"),
   scan: (id: string) => request<ScanDetail>("GET", `/scans/${id}`),
   /** Records the operator's decision on a finding, with the reason. It applies to that finding in later scans too. */

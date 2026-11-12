@@ -4,6 +4,7 @@ import { getAuth } from "../lib/auth";
 import { ApiError, baseUrl, cerberus, type Job } from "../lib/cerberus/api";
 import { followRun } from "../lib/cerberus/follow";
 import { parseArgs, USAGE } from "./args";
+import { parseSchedule, runSchedule, SCHEDULE_EXIT, SCHEDULE_USAGE } from "./schedule";
 import { EXIT, runHeadless, type HeadlessDeps } from "./run";
 
 // `nightcode run …`: the real network, disk and clock behind run.ts.
@@ -52,6 +53,7 @@ const deps: HeadlessDeps = {
 
 /** Runs the command line (without the program name) and returns the exit code. */
 export async function main(argv: string[]): Promise<number> {
+  if (argv[0] === "schedule") return scheduleMain(argv);
   const parsed = parseArgs(argv);
   if (parsed.kind === "help") {
     process.stdout.write(`${USAGE}\n`);
@@ -68,4 +70,31 @@ export async function main(argv: string[]): Promise<number> {
     return EXIT.notFinished;
   }
   return runHeadless(parsed.options, deps);
+}
+
+/** `nightcode schedule …` */
+async function scheduleMain(argv: string[]): Promise<number> {
+  const command = parseSchedule(argv);
+  if (command.kind === "help") {
+    process.stdout.write(`${SCHEDULE_USAGE}\n`);
+    return SCHEDULE_EXIT.ok;
+  }
+  if (command.kind === "usage") {
+    process.stderr.write(`${command.message}\nSee: nightcode schedule --help\n`);
+    return SCHEDULE_EXIT.usage;
+  }
+  if (command.server) process.env.API_URL = command.server;
+  if (!getAuth()) {
+    process.stderr.write(`Not signed in to ${baseUrl()}. Put a token in CERBERUS_TOKEN, or sign in with /login in the interactive CLI.\n`);
+    return SCHEDULE_EXIT.failed;
+  }
+  return runSchedule(command, {
+    list: cerberus.schedules,
+    create: cerberus.createSchedule,
+    update: cerberus.updateSchedule,
+    remove: cerberus.deleteSchedule,
+    runNow: cerberus.runSchedule,
+    out: (line) => process.stdout.write(`${line}\n`),
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
 }
