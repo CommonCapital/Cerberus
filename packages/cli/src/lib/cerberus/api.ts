@@ -37,6 +37,8 @@ export type Approval = {
   id: string;
   jobId: string;
   kind: string;
+  /** Every kind of action the request covers. */
+  kinds?: string[];
   title: string;
   detail: string;
   status: "Pending" | "Approved" | "Denied" | "Cancelled";

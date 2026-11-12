@@ -164,6 +164,8 @@ public class SarifApiTests(ApiHost host)
         var pickle = results.Single(r => r.GetProperty("ruleId").GetString() == "deserialization.unsafe");
         Assert.Equal("svc/loader.py", pickle.GetProperty("locations")[0].GetProperty("physicalLocation").GetProperty("artifactLocation").GetProperty("uri").GetString());
         Assert.False(pickle.TryGetProperty("suppressions", out _));
+        // The exact severity travels with each result: "error" alone cannot tell critical from high.
+        Assert.Contains(pickle.GetProperty("properties").GetProperty("severity").GetString(), new[] { "critical", "high", "medium", "low", "info" });
         var hidden = results.Single(r => r.GetProperty("ruleId").GetString() == "crypto.weak-hash");
         Assert.Equal("inSource", hidden.GetProperty("suppressions")[0].GetProperty("kind").GetString());
 

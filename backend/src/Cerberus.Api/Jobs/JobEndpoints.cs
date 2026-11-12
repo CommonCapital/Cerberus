@@ -390,7 +390,7 @@ public static class JobEndpoints
         {
             approvalNeed = new ApprovalNeed(
                 ActionKinds.RunJob,
-                $"Run a {type} of \"{targetPath}\"",
+                $"Run {("aeiou".Contains(type[0]) ? "an" : "a")} {type} of \"{targetPath}\"",
                 "The permission mode is \"ask\": every run waits for your approval, including passive ones. " +
                 "Approve to start this job; choose \"always allow\" to stop being asked about starting jobs.");
         }

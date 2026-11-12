@@ -34,4 +34,4 @@ ENV API_URL=http://api:3000 \
 # The CLI's file tools act on the directory it is started in: mount the project there.
 WORKDIR /workspace
 USER bun
-ENTRYPOINT ["bun", "run", "/app/packages/cli/src/index.tsx"]
+ENTRYPOINT ["bun", "run", "/app/packages/cli/src/main.ts"]

@@ -1,14 +1,14 @@
 {
   "name": "@nightcode/cli",
-  "module": "src/index.tsx",
+  "module": "src/main.ts",
   "type": "module",
   "private": true,
   "bin": {
     "nightcode": "./bin/nightcode"
   },
   "scripts": {
-    "dev": "bun run --watch src/index.tsx",
-    "build": "bun build src/index.tsx --outdir dist --target bun",
+    "dev": "bun run --watch src/main.ts",
+    "build": "bun build src/main.ts --outdir dist --target bun",
     "test": "bun test src"
   },
   "devDependencies": {

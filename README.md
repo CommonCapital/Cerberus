@@ -146,6 +146,37 @@ bun run --cwd packages/cli test
 
 Runs on `http://localhost:3000` (configurable via `PORT`), creates its SQLite schema on first run, and exposes the same local-auth / sessions / streaming-chat contract. See [`backend/README.md`](backend/README.md).
 
+### 5. In a pipeline (no screen)
+
+`nightcode run` starts one job, waits for it and exits with a code a pipeline can act on. Progress goes to stderr, the result to stdout.
+
+```bash
+nightcode run scan . --sarif cerberus.sarif --fail-on high
+```
+
+- **Jobs:** `scan`, `review`, `sast`, `threat-model`, `index`. The path is the target as the server sees it (under its scan root), so the server needs the code: run it on the build machine or give it the checkout.
+- **The gate:** `--fail-on critical|high|medium|low|info|none` (default `high`). What counts is what the review report counts: open findings in production code. A line the code marks with `cerberus:ignore`, a finding an operator decided on (accepted risk, false positive), and findings in tests or documentation are reported but do not fail the build; `--include-tests` counts the last group too. A model's findings (`sast`, a review with agents) count like the scanner's and are marked `[model]`.
+- **Files:** `--sarif <file>` writes the findings for a code-scanning dashboard, pass or fail; `--report <file>` writes the review or threat model as Markdown. `--json` prints the result as one JSON object instead of text.
+- **Nobody to ask:** a job that needs an approval stops with exit code 3 and is cancelled, and the message names what it needed. Approve in advance by name — `--approve run-plan` for a review, `--approve send-code-to-cloud-model` for an agent on a cloud model — or allow it for good in `/permissions`. There is deliberately no "approve everything". The target's own ignore marks are honoured without asking (`--exclusions ignore` counts everything).
+- **Sign-in:** the token in `CERBERUS_TOKEN` (a pipeline secret), else the one saved by `/login`. The server's address is `API_URL` or `--server`. A token is the one a sign-in returns and lasts 30 days; named, revocable tokens for pipelines are not built yet.
+- **Exit codes:** `0` nothing at or above the threshold · `1` findings at or above it · `2` the job did not finish (failed, cancelled, timed out after `--timeout` minutes, server not reachable, not signed in) · `3` it needs a person · `64` the command line is wrong. Options that would do nothing for the chosen job are refused, not ignored.
+
+In GitHub Actions, for example:
+
+```yaml
+- name: Cerberus scan
+  env:
+    API_URL: ${{ vars.CERBERUS_URL }}
+    CERBERUS_TOKEN: ${{ secrets.CERBERUS_TOKEN }}
+  run: nightcode run scan . --sarif cerberus.sarif --fail-on high
+- uses: github/codeql-action/upload-sarif@v3
+  if: always()
+  with:
+    sarif_file: cerberus.sarif
+```
+
+`nightcode run --help` lists every option.
+
 ## Local-first by design
 
 No Clerk, no Polar, no hosted Postgres. Authorization is self-hosted (email/password sessions), the database is local SQLite, models run via your own keys or local Ollama, and (per the roadmap) tool execution runs in a self-hosted sandbox. Azure is an optional production deploy target behind the same interfaces, never a requirement to run.
