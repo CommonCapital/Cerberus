@@ -32,8 +32,10 @@ public static class ChatTools
 
     private static readonly ToolDefinition[] ReadOnly =
     [
-        Tool("readFile", "Read a file from the current project directory.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Relative path to the file to read"}},"required":["path"],"additionalProperties":false}"""),
+        Tool("readFile",
+            "Read a text file from the current project directory. Lines come back as `<line number>\t<text>`; the number and the tab are not part of the file. " +
+            "At most 2000 lines per call: for a longer file, read on with offset.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Relative path to the file to read"},"offset":{"type":"integer","minimum":1,"description":"Line to start reading from (1-based); default 1"},"limit":{"type":"integer","minimum":1,"description":"How many lines to read; default and maximum 2000"}},"required":["path"],"additionalProperties":false}"""),
         Tool("listDirectory", "List entries in a directory under the current project directory.",
             """{"type":"object","properties":{"path":{"type":"string","default":".","description":"Relative directory path to list"}},"additionalProperties":false}"""),
         Tool("glob", "Find files matching a glob pattern under the current project directory.",
@@ -46,10 +48,14 @@ public static class ChatTools
     [
         Tool("writeFile", "Create or overwrite a file under the current project directory.",
             """{"type":"object","properties":{"path":{"type":"string","description":"Relative path to write"},"content":{"type":"string","description":"File contents"}},"required":["path","content"],"additionalProperties":false}"""),
-        Tool("editFile", "Replace exact text in a file under the current project directory.",
-            """{"type":"object","properties":{"path":{"type":"string","description":"Relative path to edit"},"oldString":{"type":"string","description":"Exact text to replace; must be unique"},"newString":{"type":"string","description":"Replacement text"}},"required":["path","oldString","newString"],"additionalProperties":false}"""),
-        Tool("bash", "Run a shell command in the current project directory.",
-            """{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"description":{"type":"string","description":"Short description of the command"},"timeout":{"type":"number","description":"Timeout in milliseconds"}},"required":["command"],"additionalProperties":false}"""),
+        Tool("editFile",
+            "Replace exact text in a file under the current project directory. oldString must match the file exactly (without the line-number prefix readFile shows) " +
+            "and be unique, unless replaceAll is set.",
+            """{"type":"object","properties":{"path":{"type":"string","description":"Relative path to edit"},"oldString":{"type":"string","description":"Exact text to replace; must be unique unless replaceAll is set"},"newString":{"type":"string","description":"Replacement text"},"replaceAll":{"type":"boolean","description":"Replace every occurrence instead of requiring a unique match"}},"required":["path","oldString","newString"],"additionalProperties":false}"""),
+        Tool("bash",
+            "Run a shell command in the current project directory. It is stopped after 2 minutes unless a longer timeout is given. " +
+            "Very long output is cut in the middle and saved whole to a file you can read with readFile.",
+            """{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"description":{"type":"string","description":"Short description of the command"},"timeout":{"type":"number","description":"Timeout in milliseconds; default 120000, maximum 600000"}},"required":["command"],"additionalProperties":false}"""),
     ];
 
     private static readonly ToolDefinition[] Server =

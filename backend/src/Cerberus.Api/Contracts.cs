@@ -40,4 +40,6 @@ public sealed record UiChatRequest(
     string? Id,
     List<System.Text.Json.JsonElement>? Messages,
     string? Mode,
-    string? Model);
+    string? Model,
+    // Where the client's tools run and the project's instructions file; optional (see ChatContext).
+    System.Text.Json.JsonElement? Context = null);

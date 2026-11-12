@@ -118,10 +118,35 @@ public sealed class AgentLoop(IModelProviderResolver providers)
 
             if (step >= maxSteps)
             {
+                // Out of steps while still working. One last call, without tools, so the run ends with
+                // an account of what was done and what was not — rather than mid-thought.
+                turns.Add(ChatTurn.User(StepLimitTurn));
+                var closing = new StringBuilder();
+                await foreach (var e in provider.StreamChatAsync(new ChatRequest(model, system, turns, [], credentials), ct))
+                {
+                    switch (e)
+                    {
+                        case TextDelta delta when delta.Text.Length > 0:
+                            closing.Append(delta.Text);
+                            await reporter.TextAsync($"agent-{step}-closing", delta.Text);
+                            break;
+                        case UsageReport usage:
+                            if (usage.InputTokens is { } i) inputTokens = (inputTokens ?? 0) + i;
+                            if (usage.OutputTokens is { } o) outputTokens = (outputTokens ?? 0) + o;
+                            break;
+                    }
+                }
+                await reporter.FlushTextAsync();
+                if (closing.Length > 0) finalText = closing.ToString();
                 return new AgentOutcome(finalText.Trim(), step, toolCalls, HitStepLimit: true, inputTokens, outputTokens);
             }
         }
     }
+
+    /// <summary>What the model is told when it has used up its steps.</summary>
+    public const string StepLimitTurn =
+        "You have reached your step limit and cannot call any more tools. Reply now with a short summary: " +
+        "what you did, what you found or recorded, and what you did not get to.";
 
     /// <summary>How the operator's words reach the model: marked as theirs, and as taking priority.</summary>
     public static string OperatorTurn(IReadOnlyList<string> messages) =>

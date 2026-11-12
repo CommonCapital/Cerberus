@@ -4,6 +4,7 @@ import { useTheme } from "../../providers/theme";
 import type { Message } from "../../hooks/use-chat";
 import { Mode, type ModeType } from "@nightcode/shared";
 import { TextAttributes } from "@opentui/core";
+import { summarizeToolCall, toolResultLines } from "../../lib/tool-display";
 
 type ClientMessagePart = Message["parts"][number];
 type ToolPart = Extract<ClientMessagePart, { type: `tool-${string}` | "dynamic-tool" }>;
@@ -26,10 +27,9 @@ function isToolPart(part: ClientMessagePart): part is ToolPart {
   return part.type === "dynamic-tool" || part.type.startsWith("tool-");
 };
 
-function formatToolArgs(tc: ToolPart): string {
+function formatToolArgs(tc: ToolPart, toolName: string): string {
   if (!("input" in tc) || tc.input == null) return "";
-  if (typeof tc.input !== "object") return String(tc.input);
-  return Object.values(tc.input).map(String).join(" ");
+  return summarizeToolCall(toolName, tc.input);
 }
 
 type PartGroup = {
@@ -107,13 +107,26 @@ export function BotMessage({
                   paddingX={2}
                 >
                   <text attributes={TextAttributes.DIM}>
-                    <em fg={colors.info}>{formatToolName(toolName)}:</em> {formatToolArgs(part)}
+                    <em fg={colors.info}>{formatToolName(toolName)}:</em> {formatToolArgs(part, toolName)}
                     {part.state !== "output-available" && part.state !== "output-error" 
                       ? " …" 
                       : ""
                     }
                     {part.state === "output-error" ? ` ${part.errorText}` : ""}
                   </text>
+                  {/* What it did: the change an edit made, how a command ended. */}
+                  {part.state === "output-available"
+                    ? toolResultLines(toolName, part.output).map((line, k) => (
+                        <text
+                          key={k}
+                          fg={line.tone === "added" ? colors.success : line.tone === "removed" || line.tone === "problem" ? colors.error : undefined}
+                          attributes={line.tone === "plain" ? TextAttributes.DIM : 0}
+                        >
+                          {"  "}
+                          {line.text}
+                        </text>
+                      ))
+                    : null}
                 </box>
               );
             }

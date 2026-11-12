@@ -260,6 +260,22 @@ public class AgentLoopTests
     }
 
     [Fact]
+    public async Task At_the_step_limit_the_run_ends_with_the_models_own_account_of_where_it_got_to()
+    {
+        var model = new PlaybackProvider(
+            Calls(("c1", "echo", """{"say":"one"}""")),
+            Calls(("c2", "echo", """{"say":"two"}""")),
+            [new TextDelta("Read two files; did not get to the tests."), new UsageReport(4, 6), new StepFinished("stop")]);
+
+        var (outcome, reporter) = await RunAsync(model, maxSteps: 2);
+
+        Assert.True(outcome.HitStepLimit);
+        Assert.Equal("Read two files; did not get to the tests.", outcome.FinalText);
+        Assert.Equal((2, 2, 24, 16), (outcome.Steps, outcome.ToolCalls, outcome.InputTokens, outcome.OutputTokens));
+        Assert.EndsWith("Read two files; did not get to the tests.", reporter.Text.ToString());   // streamed like any other text
+    }
+
+    [Fact]
     public async Task An_agent_that_never_stops_asking_is_stopped_at_its_step_limit()
     {
         var model = new PlaybackProvider(Calls(("c1", "echo", """{"say":"again"}""")));
@@ -268,7 +284,13 @@ public class AgentLoopTests
 
         Assert.True(outcome.HitStepLimit);
         Assert.Equal((3, 3), (outcome.Steps, outcome.ToolCalls));
-        Assert.Equal(3, model.Requests.Count);
+
+        // One more call after the last step: no tools on offer, asked to sum up. A tool call in its reply is not run.
+        Assert.Equal(4, model.Requests.Count);
+        Assert.Empty(model.Requests[3].Tools);
+        Assert.Equal(AgentLoop.StepLimitTurn, ChatEvents.TextOf(model.Requests[3].Turns[^1]));
+        Assert.Equal(3, outcome.ToolCalls);
+        Assert.Equal("Working.", outcome.FinalText);
     }
 }
 

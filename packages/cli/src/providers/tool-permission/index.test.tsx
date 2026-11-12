@@ -137,3 +137,60 @@ test("leaving denies whatever is still waiting", async () => {
   expect(await second).toBe("deny");
   expect(ui.captureCharFrame()).not.toContain("Allow this?");
 });
+
+test("t denies with the operator's own words for the model; typing them triggers no other key", async () => {
+  const ui = (current = await screen());
+  const decision = ask(bash("rm -rf build"));
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("t no, and tell it what to do instead");
+
+  ui.mockInput.pressKey("t");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("Not this — what instead?");
+
+  // "y", "a" and "n" are answers on the first screen; here they are just letters.
+  for (const key of "any way but that") ui.mockInput.pressKey(key);
+  await ui.settle();
+  ui.mockInput.pressEnter();
+  await ui.settle();
+
+  expect(await decision).toEqual({ deny: "any way but that" });
+  expect(ui.captureCharFrame()).not.toContain("Not this");
+});
+
+test("escape in the explanation goes back to the choices without deciding", async () => {
+  const ui = (current = await screen());
+  const answers: ToolDecision[] = [];
+  void ask(bash("make deploy")).then((d) => { answers.push(d); });
+  await ui.settle();
+
+  ui.mockInput.pressKey("t");
+  await ui.settle();
+  ui.mockInput.pressEscape();
+  await ui.settle(250);
+
+  expect(answers).toEqual([]);
+  expect(ui.captureCharFrame()).toContain("Allow this?");
+  ui.mockInput.pressKey("y");
+  await ui.settle();
+  expect(answers).toEqual(["allow"]);
+});
+
+test("reading a file that holds secrets is asked about by name, and cannot be always allowed", async () => {
+  const ui = (current = await screen());
+  const answers: ToolDecision[] = [];
+  void ask({ toolName: "readFile", input: { path: "config/.env.production" } }).then((d) => { answers.push(d); });
+  await ui.settle();
+
+  const text = ui.captureCharFrame();
+  expect(text).toContain("Read config/.env.production");
+  expect(text).toContain("probably holds secrets");
+  expect(text).not.toContain("always allow");
+
+  ui.mockInput.pressKey("a");   // not an answer here
+  await ui.settle();
+  expect(answers).toEqual([]);
+  ui.mockInput.pressKey("y");
+  await ui.settle();
+  expect(answers).toEqual(["allow"]);
+});

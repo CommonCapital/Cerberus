@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  deniedMessage,
   describeToolCall,
   gateToolCall,
+  isSensitiveRead,
   kindOfTool,
   STANDARD_POLICY,
   toolNeedsApproval,
@@ -109,5 +111,45 @@ describe("gateToolCall", () => {
     expect((await gateToolCall(first.policy, "editFile", {}, next.ask)).run).toBe(true);
     expect((await gateToolCall(first.policy, "bash", {}, next.ask)).run).toBe(false);
     expect(next.asked).toEqual(["bash"]);
+  });
+});
+
+describe("files that hold secrets", () => {
+  const read = (path: string) => isSensitiveRead("readFile", { path });
+
+  test("env files, key files and credential files are recognised; their templates and ordinary files are not", () => {
+    for (const path of [".env", "app/.env.local", ".env.production", "~/.netrc", ".npmrc", "keys/server.pem", "id_rsa", "deploy/id_ed25519", "tls/site.key"]) {
+      expect(read(path)).toBe(true);
+    }
+    for (const path of [".env.example", ".env.sample", "config/.env.template", "environment.ts", "src/keyboard.ts", "README.md", "monkey.py"]) {
+      expect(read(path)).toBe(false);
+    }
+    expect(isSensitiveRead("grep", { path: ".env" })).toBe(false);   // only a direct read of the file
+  });
+
+  test("reading one asks every time, whatever is always allowed", async () => {
+    const generous: Policy = { mode: "Default", allowedKinds: ["read-files", "edit-files", "run-commands"] };
+    expect(toolNeedsApproval(generous, "readFile", { path: ".env" })).toBe(true);
+    expect(toolNeedsApproval(generous, "readFile", { path: "main.py" })).toBe(false);
+
+    // "Always" allows this one read and remembers nothing.
+    const result = await gateToolCall(STANDARD_POLICY, "readFile", { path: ".env" }, async () => "always");
+    expect(result).toEqual({ run: true, policy: STANDARD_POLICY, remembered: null });
+    expect(describeToolCall("readFile", { path: ".env" }).detail).toContain("probably holds secrets");
+  });
+});
+
+describe("denying with a reason", () => {
+  test("the operator's words go back with the refusal, and nothing is remembered", async () => {
+    const result = await gateToolCall(STANDARD_POLICY, "bash", { command: "npm publish" }, async () => ({ deny: "  run the tests first  " }));
+
+    expect(result).toEqual({ run: false, policy: STANDARD_POLICY, remembered: null, feedback: "run the tests first" });
+    expect(deniedMessage(result.feedback)).toBe('The operator denied this tool call and said: "run the tests first". Do not retry it as it was; do what they said.');
+  });
+
+  test("an empty reason is a plain refusal", async () => {
+    const result = await gateToolCall(STANDARD_POLICY, "bash", { command: "x" }, async () => ({ deny: "   " }));
+    expect(result.feedback).toBeUndefined();
+    expect(deniedMessage(result.feedback)).toContain("Do not retry it; ask what they would like instead.");
   });
 });
