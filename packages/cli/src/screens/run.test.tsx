@@ -29,7 +29,7 @@ mock.module("../lib/cerberus/api", () => ({
     deny: async (id: string) => { calls.push(`deny ${id}`); },
     answer: async (id: string, selected: string[]) => { calls.push(`answer ${id} ${selected.join(",")}`); },
     cancelJob: async (id: string) => { calls.push(`cancel ${id}`); },
-    review: async (id: string) => { calls.push(`review ${id}`); return { report: "# Security review" }; },
+    review: async (id: string) => { calls.push(`review ${id}`); return { report: "# Security review", scanId: "scan-of-review" }; },
     agentRun: async (id: string) => { calls.push(`agentRun ${id}`); return { report: "# Threat model of `svc`" }; },
     sendMessage: async (id: string, text: string) => { calls.push(`message ${id} ${text}`); },
   },
@@ -46,6 +46,11 @@ mock.module("../lib/cerberus/export-io", () => ({
 
 const { Run } = await import("./run");
 const { useParams } = await import("react-router");
+
+function ScanStub() {
+  const { id } = useParams();
+  return <text>FINDINGS OF {id}</text>;
+}
 
 function AssessmentStub() {
   const { id } = useParams();
@@ -84,6 +89,7 @@ async function screen() {
         { index: true, element: <text>HOME SCREEN</text> },
         { path: "runs/:id", element: <Run /> },
         { path: "assessments/:id", element: <AssessmentStub /> },
+        { path: "scans/:id", element: <ScanStub /> },
       ],
     }],
     { initialEntries: ["/runs/job-1"] },
@@ -249,4 +255,24 @@ test("s saves a finished scan's findings as a SARIF file and says where; other r
 
   expect(calls).toEqual(["sarif scans scan-42", "write /work/cerberus-scan-scan-42.sarif"]);
   expect(ui.captureCharFrame()).toContain("Saved /work/cerberus-scan-scan-42.sarif");
+});
+
+test("f opens the findings of a finished scan, and of the scan behind a finished review", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", { ...job("Succeeded"), type: "review", resultId: "rev-3" }]]));
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("f go through the findings");
+
+  ui.mockInput.pressKey("f");
+  await ui.settle();
+  expect(ui.captureCharFrame()).toContain("FINDINGS OF scan-of-review");
+});
+
+test("a run that has not produced findings does not offer them", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", job("Running")]]));
+  expect(ui.captureCharFrame()).not.toContain("go through the findings");
+  ui.mockInput.pressKey("f");
+  await ui.settle();
+  expect(ui.captureCharFrame()).not.toContain("FINDINGS OF");
 });

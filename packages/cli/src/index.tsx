@@ -7,6 +7,7 @@ import { NewSession } from "./screens/new-session";
 import { Session } from "./screens/session";
 import { Run } from "./screens/run";
 import { Assessment } from "./screens/assessment";
+import { Scan } from "./screens/scan";
 import { WaitingWatcher } from "./components/waiting-watcher";
 
 const router = createMemoryRouter([
@@ -19,6 +20,7 @@ const router = createMemoryRouter([
       { path: "sessions/:id", element: <Session /> },
       { path: "runs/:id", element: <Run /> },
       { path: "assessments/:id", element: <Assessment /> },
+      { path: "scans/:id", element: <Scan /> },
     ]
   }
 ]);

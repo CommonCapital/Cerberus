@@ -487,6 +487,21 @@ public static class Endpoints
         var scan = await db.Scans.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
         if (scan is null) return Results.Json(new { error = "Scan not found" }, statusCode: 404);
 
+        // Each finding with its fingerprint and, where the operator has decided on it, that decision.
+        var decisions = await FindingDecisions.ForUserAsync(db, userId, ct);
+        var fingerprints = FindingDecisions.ReadFindings(scan.Findings)
+            .GroupBy(f => f.Id).ToDictionary(g => g.Key, g => FindingDecisions.Fingerprint(g.First()));
+        var findings = MaskEvidence(ParseStoredMessages(scan.Findings));
+        foreach (var finding in findings.OfType<System.Text.Json.Nodes.JsonObject>())
+        {
+            var findingId = (finding["id"] ?? finding["Id"])?.GetValue<string>();
+            if (findingId is null || !fingerprints.TryGetValue(findingId, out var fingerprint)) continue;
+            finding["fingerprint"] = fingerprint;
+            finding["decision"] = decisions.TryGetValue(fingerprint, out var decision)
+                ? JsonSerializer.SerializeToNode(FindingDecisions.Describe(decision))
+                : null;
+        }
+
         return Results.Json(new
         {
             scan.Id,
@@ -496,7 +511,7 @@ public static class Endpoints
             scan.ScaCompleted,
             scan.CreatedAt,
             // Evidence is masked when a scan is stored; scans stored before that are masked on the way out.
-            findings = MaskEvidence(ParseStoredMessages(scan.Findings)),
+            findings,
             // Advisory LLM opinions, keyed to findings by findingId. They never alter findings or compliance.
             triage = ParseStoredMessages(scan.Triage),
         });

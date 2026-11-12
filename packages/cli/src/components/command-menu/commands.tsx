@@ -7,6 +7,7 @@ import {
   AssessmentsDialogContent,
   EngagementDialogContent,
   MemoryDialogContent,
+  ScansDialogContent,
   ScopeDialogContent,
   ThreatModelDialogContent,
   PermissionsDialogContent,
@@ -121,6 +122,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: "Assessments",
         children: <AssessmentsDialogContent />,
+      })
+    },
+  },
+  {
+    name: "findings",
+    description: "Open a scan's findings: accept a risk, mark a false positive",
+    value: "/findings",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Scans",
+        children: <ScansDialogContent />,
       })
     },
   },

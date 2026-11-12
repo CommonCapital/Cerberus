@@ -220,7 +220,8 @@ public sealed class ReviewRunner(
             AgentRunId = agentRun?.Id,
             ThreatModelRunId = threatModelRun?.Id,
             FindingCount = scan.Scan.FindingCount,
-            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow, agentRun, threatModelRun),
+            Report = ReviewReport.Write(job.TargetPath, scan, results, opinions, DateTime.UtcNow, agentRun, threatModelRun,
+                await FindingDecisions.ForUserAsync(db, job.UserId, ct)),
         };
         db.Reviews.Add(review);
         await db.SaveChangesAsync(ct);
@@ -262,8 +263,12 @@ public static class ReviewReport
 
     public static string Write(
         string targetPath, ScanRun scan, IReadOnlyList<AssessmentRun> assessments,
-        IReadOnlyList<TriageResult> opinions, DateTime now, AgentRun? agentRun = null, AgentRun? threatModelRun = null)
+        IReadOnlyList<TriageResult> opinions, DateTime now, AgentRun? agentRun = null, AgentRun? threatModelRun = null,
+        IReadOnlyDictionary<string, FindingDecision>? decisions = null)
     {
+        // What the operator has already decided about these findings, in earlier scans or this one.
+        FindingDecision? DecisionOn(Finding f) =>
+            decisions is not null && decisions.TryGetValue(FindingDecisions.Fingerprint(f), out var d) ? d : null;
         var active = scan.Findings.Where(f => !f.Suppressed).ToList();
         var production = active.Where(f => f.Context is null).ToList();
 
@@ -300,6 +305,12 @@ public static class ReviewReport
             ? $"- **Dependencies:** {scan.Sca.DependenciesScanned} checked, {scan.Sca.Findings.Count} known vulnerabilities" + (scan.Sca.Completed ? "" : " — **the check did not complete; this is partial**")
             : "- **Dependencies:** not checked");
         if (scan.Static.Truncated) text.AppendLine("- **Truncated:** the scan stopped at its finding limit; there may be more.");
+        var decided = production.Select(DecisionOn).Where(d => d is not null).ToList();
+        if (decided.Count > 0)
+        {
+            text.AppendLine($"- **Your decisions:** {decided.Count} of the {production.Count} production findings already have one " +
+                            $"({decided.Count(d => d!.Status == DecisionStatuses.AcceptedRisk)} accepted risk, {decided.Count(d => d!.Status == DecisionStatuses.FalsePositive)} false positive); {production.Count - decided.Count} still open");
+        }
         if (agentRun is not null)
         {
             text.AppendLine($"- **Reported by the model:** {reported.Count} ({alsoFlagged} at places the scanner also flagged, {reported.Count - alsoFlagged} the model's alone)");
@@ -364,16 +375,19 @@ public static class ReviewReport
         {
             var verdicts = opinions.ToDictionary(o => o.FindingId, o => o.Verdict);
             var withModel = agentRun is not null;
-            text.AppendLine("| Severity | Finding | Location | Model review |" + (withModel ? " Model reported it too |" : ""));
-            text.AppendLine("|---|---|---|---|" + (withModel ? "---|" : ""));
-            // Most severe first; among equals, what the model also reported comes first.
-            foreach (var f in production.OrderByDescending(f => f.Severity).ThenByDescending(f => reported.Any(m => SamePlace(f, m))).Take(MaxFindingsListed))
+            var withDecisions = decided.Count > 0;
+            text.AppendLine("| Severity | Finding | Location | Model review |" + (withModel ? " Model reported it too |" : "") + (withDecisions ? " Your decision |" : ""));
+            text.AppendLine("|---|---|---|---|" + (withModel ? "---|" : "") + (withDecisions ? "---|" : ""));
+            // Open findings before decided ones; then most severe first; among equals, what the model also reported comes first.
+            foreach (var f in production.OrderBy(f => DecisionOn(f) is null ? 0 : 1).ThenByDescending(f => f.Severity)
+                         .ThenByDescending(f => reported.Any(m => SamePlace(f, m))).Take(MaxFindingsListed))
             {
                 var verdict = verdicts.TryGetValue(f.Id, out var v)
                     ? v switch { TriageVerdict.TruePositive => "real", TriageVerdict.FalsePositive => "harmless", _ => "unsure" }
                     : "—";
                 text.AppendLine($"| {f.Severity} | {Cell(f.Title)} | `{Cell(f.File)}:{f.Line}` | {verdict} |" +
-                                (withModel ? $" {(reported.Any(m => SamePlace(f, m)) ? "yes" : "—")} |" : ""));
+                                (withModel ? $" {(reported.Any(m => SamePlace(f, m)) ? "yes" : "—")} |" : "") +
+                                (withDecisions ? $" {(DecisionOn(f) is { } d ? $"{DecisionStatuses.Label(d.Status)}: {Cell(Shorten(d.Note, 120))}" : "open")} |" : ""));
             }
             if (production.Count > MaxFindingsListed)
             {

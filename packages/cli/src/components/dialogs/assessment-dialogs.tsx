@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import { useNavigate } from "react-router";
 import { useDialog } from "../../providers/dialog";
 import { useToast } from "../../providers/toast";
-import { cerberus, type AssessmentSummary, type Catalog } from "../../lib/cerberus/api";
+import { cerberus, type AssessmentSummary, type Catalog, type ScanSummary } from "../../lib/cerberus/api";
 import { DialogInputList } from "../dialog-input-list";
 import { DialogSearchList } from "../dialog-search-list";
 
@@ -123,6 +123,58 @@ export const AssessmentsDialogContent = () => {
       getKey={(a) => a.id}
       placeholder="Search assessments"
       emptyText="No assessments yet. Start one with /assess."
+    />
+  );
+};
+
+/** Past scans; opening one shows its findings to go through and decide on. */
+export const ScansDialogContent = () => {
+  const [scans, setScans] = useState<ScanSummary[] | null>(null);
+  const { close } = useDialog();
+  const { show } = useToast();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let ignore = false;
+    cerberus
+      .scans()
+      .then((result) => {
+        if (!ignore) setScans(result);
+      })
+      .catch((problem: unknown) => {
+        if (ignore) return;
+        show({ variant: "error", message: message(problem, "Could not load scans") });
+        close();
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [close, show]);
+
+  if (!scans) return <text attributes={TextAttributes.DIM}>Loading scans...</text>;
+
+  return (
+    <DialogSearchList
+      items={scans}
+      onSelect={(scan) => {
+        close();
+        navigate(`/scans/${scan.id}`);
+      }}
+      filterFn={(scan, query) => scan.targetPath.toLowerCase().includes(query.toLowerCase())}
+      renderItem={(scan, isSelected) => (
+        <>
+          <text selectable={false} fg={isSelected ? "black" : "white"}>
+            {scan.targetPath}
+          </text>
+          <box flexGrow={1} />
+          <text selectable={false} fg={isSelected ? "black" : undefined} attributes={TextAttributes.DIM}>
+            {scan.findingCount} finding{scan.findingCount === 1 ? "" : "s"} · {format(new Date(scan.createdAt), "MMM d HH:mm")}
+          </text>
+        </>
+      )}
+      getKey={(scan) => scan.id}
+      placeholder="Search scans"
+      emptyText="No scans yet. Start one with /scan."
     />
   );
 };

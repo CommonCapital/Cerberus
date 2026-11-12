@@ -381,6 +381,28 @@ public class MemoryNote
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// The operator's decision on a finding: accepted risk or false positive, with
+/// the reason. Keyed by the finding's fingerprint, so it applies to that
+/// finding in every scan.
+/// </summary>
+public class FindingDecision
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>accepted-risk | false-positive.</summary>
+    public string Status { get; set; } = string.Empty;
+    public string Note { get; set; } = string.Empty;
+
+    // What it was decided on, for display where no scan is at hand.
+    public string RuleId { get; set; } = string.Empty;
+    public string File { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

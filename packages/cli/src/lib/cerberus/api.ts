@@ -89,6 +89,35 @@ export type Engagement = {
   createdAt: string;
 };
 
+export type FindingDecision = {
+  id: string;
+  status: "accepted-risk" | "false-positive";
+  note: string;
+  decidedAt: string;
+};
+
+export type ScanFinding = {
+  id: string;
+  title: string;
+  severity: "Info" | "Low" | "Medium" | "High" | "Critical";
+  category: string;
+  file: string;
+  line: number;
+  /** The code on that line, with credentials masked. */
+  evidence: string;
+  remediation?: string | null;
+  /** "test" or "docs" when the file is not production code. */
+  context?: string | null;
+  /** The target itself marked this line to be ignored. */
+  suppressed?: boolean;
+  /** The operator's decision on this finding; it follows the finding across scans. */
+  decision: FindingDecision | null;
+};
+
+export type ScanSummary = { id: string; targetPath: string; findingCount: number; createdAt: string };
+
+export type ScanDetail = ScanSummary & { findings: ScanFinding[] };
+
 export type AssessmentSummary = {
   id: string;
   catalogId: string;
@@ -286,6 +315,12 @@ export const cerberus = {
   review: (id: string) => request<Review>("GET", `/reviews/${id}`),
   /** What an agent job produced; `report` is its written report (Markdown) when the agent writes one. */
   agentRun: (id: string) => request<{ id: string; agent: string; summary: string; report: string | null }>("GET", `/agent-runs/${id}`),
+  scans: () => request<ScanSummary[]>("GET", "/scans"),
+  scan: (id: string) => request<ScanDetail>("GET", `/scans/${id}`),
+  /** Records the operator's decision on a finding, with the reason. It applies to that finding in later scans too. */
+  decideFinding: (scanId: string, findingId: string, status: FindingDecision["status"], note: string) =>
+    request<FindingDecision>("PUT", `/scans/${scanId}/findings/decision`, { findingId, status, note }),
+  withdrawDecision: (decisionId: string) => request<null>("DELETE", `/decisions/${decisionId}`),
   /** The findings of a scan, a review or a SAST agent run as a SARIF 2.1.0 log. */
   sarif: (kind: "scans" | "reviews" | "agent-runs", id: string) => request<unknown>("GET", `/${kind}/${id}/sarif`),
   assessments: () => request<AssessmentSummary[]>("GET", "/compliance"),

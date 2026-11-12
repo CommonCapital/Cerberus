@@ -7,5 +7,5 @@ export { ReviewDialogContent } from "./review-dialog";
 export { RunsDialogContent } from "./runs-dialog";
 export { PermissionsDialogContent } from "./permissions-dialog";
 export { MemoryDialogContent } from "./memory-dialog";
-export { AssessDialogContent, AssessmentsDialogContent } from "./assessment-dialogs";
+export { AssessDialogContent, AssessmentsDialogContent, ScansDialogContent } from "./assessment-dialogs";
 export { AbortDialogContent, EngagementDialogContent, ScopeDialogContent } from "./engagement-dialog";

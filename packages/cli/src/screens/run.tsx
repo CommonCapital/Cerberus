@@ -21,6 +21,8 @@ export function Run() {
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState(0);
   const [report, setReport] = useState<string | null>(null);
+  // The scan behind a finished review, known once the review is loaded.
+  const [reviewScanId, setReviewScanId] = useState<string | null>(null);
   // Writing a message to the running agent; while true, keys go to the text field.
   const [composing, setComposing] = useState(false);
   const messageRef = useRef<InputRenderable>(null);
@@ -45,7 +47,9 @@ export function Run() {
     let current = true;
     (kind === "review" ? cerberus.review(resultId) : cerberus.agentRun(resultId))
       .then((result) => {
-        if (current) setReport(result.report);
+        if (!current) return;
+        setReport(result.report);
+        if ("scanId" in result) setReviewScanId(result.scanId);
       })
       .catch((problem: unknown) => {
         if (current) setError(problem instanceof Error ? problem.message : "Could not load the report");
@@ -54,6 +58,10 @@ export function Run() {
       current = false;
     };
   }, [reportOf]);
+
+  // A finished scan — on its own or as part of a review — has findings to go through.
+  const findingsScanId =
+    view.job?.state === "Succeeded" ? (view.job.type === "scan" ? view.job.resultId : view.job.type === "review" ? reviewScanId : null) : null;
 
   // A finished assessment or evidence run leads to the assessment it produced or worked on.
   const assessmentId =
@@ -123,6 +131,11 @@ export function Run() {
       return;
     }
 
+    if (key.name === "f" && findingsScanId) {
+      navigate(`/scans/${findingsScanId}`);
+      return;
+    }
+
     if (key.name === "o" && assessmentId) {
       navigate(`/assessments/${assessmentId}`);
       return;
@@ -153,6 +166,12 @@ export function Run() {
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
         <text>{composing ? "enter" : "esc"}</text>
         <text attributes={TextAttributes.DIM}>{composing ? "send · esc discard" : "back"}</text>
+        {!composing && findingsScanId ? (
+          <>
+            <text>f</text>
+            <text attributes={TextAttributes.DIM}>go through the findings</text>
+          </>
+        ) : null}
         {!composing && sarifSourceOf(view.job) ? (
           <>
             <text>s</text>
