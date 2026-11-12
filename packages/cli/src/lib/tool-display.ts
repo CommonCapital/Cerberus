@@ -39,6 +39,10 @@ export function summarizeToolCall(toolName: string, input: unknown): string {
       return clip(text(input, "query"), 60);
     case "loadSkill":
       return text(input, "name");
+    case "updateTasks": {
+      const tasks = input && typeof input === "object" ? (input as { tasks?: unknown }).tasks : undefined;
+      return Array.isArray(tasks) ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "";
+    }
     default:
       return input && typeof input === "object" ? clip(Object.values(input).map(String).join(" "), 80) : "";
   }
@@ -96,6 +100,9 @@ export function toolResultLines(toolName: string, output: unknown): ResultLine[]
     const total = number(result, "totalMatches");
     return [{ text: shown === 0 ? "no matches" : `${shown} match${shown === 1 ? "" : "es"}${total && total > shown ? ` of ${total}` : ""}`, tone: "plain" }];
   }
+
+  // The list itself is shown in the task strip; here, where it stands.
+  if (toolName === "updateTasks" && typeof result.summary === "string") return [{ text: result.summary, tone: "plain" }];
 
   if (toolName === "glob" && Array.isArray(result.files)) {
     return [{ text: `${result.files.length} file${result.files.length === 1 ? "" : "s"}${result.truncated === true ? " (more exist)" : ""}`, tone: "plain" }];

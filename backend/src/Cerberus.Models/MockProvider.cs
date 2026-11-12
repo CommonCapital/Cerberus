@@ -13,6 +13,7 @@ namespace Cerberus.Models;
 /// <item>"read &lt;path&gt;" → calls the client tool <c>readFile</c>;</item>
 /// <item>"list &lt;path&gt;" → calls the client tool <c>listDirectory</c>;</item>
 /// <item>"skills about &lt;words&gt;" → calls the server tool <c>searchSkills</c>;</item>
+/// <item>"tasks: a; b; c" → calls the server tool <c>updateTasks</c> with that list;</item>
 /// <item>once the tools have answered, it replies with what they returned;</item>
 /// <item>anything else is echoed back.</item>
 /// </list>
@@ -119,6 +120,18 @@ public sealed partial class MockProvider : IModelProvider
             _ when ReadPattern().Match(lastUser) is { Success: true } m => ("readFile", new { path = m.Groups[1].Value }),
             _ when ListPattern().Match(lastUser) is { Success: true } m => ("listDirectory", new { path = m.Groups[1].Value }),
             _ when SkillsPattern().Match(lastUser) is { Success: true } m => ("searchSkills", new { query = m.Groups[1].Value.Trim(), limit = 3 }),
+            // "tasks: a; b; c" → a task list, each task after the one before it, the first under way.
+            _ when TasksPattern().Match(lastUser) is { Success: true } m => ("updateTasks", new
+            {
+                tasks = m.Groups[1].Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select((content, i) => new
+                    {
+                        id = (i + 1).ToString(),
+                        content,
+                        status = i == 0 ? "in_progress" : "pending",
+                        dependsOn = i == 0 ? Array.Empty<string>() : [i.ToString()],
+                    }),
+            }),
             _ => null,
         };
 
@@ -308,4 +321,7 @@ public sealed partial class MockProvider : IModelProvider
 
     [GeneratedRegex(@"^skills about (.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex SkillsPattern();
+
+    [GeneratedRegex(@"^tasks:\s*(.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex TasksPattern();
 }

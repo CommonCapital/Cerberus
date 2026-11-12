@@ -23,6 +23,7 @@ public static class ChatTools
 
     public const string SearchSkills = "searchSkills";
     public const string LoadSkill = "loadSkill";
+    public const string UpdateTasks = "updateTasks";
 
     /// <summary>The tier the chat agent's skill access runs at: passive. It gets no offensive procedures.</summary>
     public const CapabilityTier SkillTier = CapabilityTier.T0;
@@ -66,6 +67,11 @@ public static class ChatTools
         Tool(LoadSkill,
             "Load the full text of one skill from the security skills library, by the exact name searchSkills returned.",
             """{"type":"object","properties":{"name":{"type":"string","description":"Exact skill name"}},"required":["name"],"additionalProperties":false}"""),
+        Tool(UpdateTasks,
+            "Keep a task list for work that takes several steps; the user sees it as it changes. Send the WHOLE list every time: it replaces the previous one. " +
+            "Mark a task in_progress when you start it and completed as soon as it is done — one in progress at a time. " +
+            "Use dependsOn when a task can only start after others; the result tells you which tasks can start now. Not for a single simple step.",
+            """{"type":"object","properties":{"tasks":{"type":"array","description":"The complete list, in order","items":{"type":"object","properties":{"id":{"type":"string","description":"Short stable id, e.g. \"1\" or \"tests\""},"content":{"type":"string","description":"What is to be done, in a few words"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"]},"dependsOn":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must be completed first"}},"required":["content","status"],"additionalProperties":false}}},"required":["tasks"],"additionalProperties":false}"""),
     ];
 
     public static bool IsValidMode(string? mode) => mode is ModeBuild or ModePlan;
@@ -73,7 +79,7 @@ public static class ChatTools
     public static IReadOnlyList<ToolDefinition> For(string mode) =>
         mode == ModePlan ? [.. ReadOnly, .. Server] : [.. ReadOnly, .. Write, .. Server];
 
-    public static bool IsServerTool(string name) => name is SearchSkills or LoadSkill;
+    public static bool IsServerTool(string name) => name is SearchSkills or LoadSkill or UpdateTasks;
 
     /// <summary>Runs a server tool. Returns the result as JSON text, or throws with a message for the model.</summary>
     public static string ExecuteServerTool(string name, JsonElement input, SkillLibrary skills)

@@ -670,6 +670,8 @@ public static class Endpoints
             messages = ParseStoredMessages(session.Messages),
             // Set once the chat was compacted: the model gets a summary in place of the messages up to this one.
             summarizedThrough = session.SummarizedThrough,
+            // The agent's task list as it last set it (see updateTasks).
+            tasks = Cerberus.Api.Chat.TaskList.Read(session.Tasks),
         });
     }
 
@@ -811,7 +813,15 @@ public static class Endpoints
         var result = await runner.RunAsync(
             new UiMessageStreamWriter(http.Response),
             new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection(),
-                session.Summary, session.SummarizedThrough, notices), ct);
+                session.Summary, session.SummarizedThrough, notices, session.Tasks), ct);
+
+        // The task list is kept as soon as it changes — also when the reply is waiting on client tools:
+        // the continuation is a new request and must find the list as the model left it.
+        if (result.Tasks is not null)
+        {
+            session.Tasks = result.Tasks;
+            if (!result.Complete) await db.SaveChangesAsync(CancellationToken.None);
+        }
 
         // Stored only once the reply is whole. While tool calls are waiting for the
         // client, the client holds the message and sends it back with the results.
