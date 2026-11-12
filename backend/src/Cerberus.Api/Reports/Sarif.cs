@@ -202,8 +202,11 @@ public static class Sarif
     }
 
     private static JsonObject Result(
-        string ruleId, int ruleIndex, Severity severity, string message, string file, int line, string evidence, string findingId, JsonObject properties) =>
-        new()
+        string ruleId, int ruleIndex, Severity severity, string message, string file, int line, string evidence, string findingId, JsonObject properties)
+    {
+        // SARIF's level has three steps; the exact severity is what a gate in a pipeline compares against.
+        properties["severity"] = severity.ToString().ToLowerInvariant();
+        return new()
         {
             ["ruleId"] = ruleId,
             ["ruleIndex"] = ruleIndex,
@@ -225,6 +228,7 @@ public static class Sarif
             ["partialFingerprints"] = new JsonObject { ["cerberusFindingId/v1"] = findingId },
             ["properties"] = properties,
         };
+    }
 
     /// <summary>The rule a scanner finding came from: its rule id, or for a dependency the advisory.</summary>
     private static string RuleIdOf(Finding finding)

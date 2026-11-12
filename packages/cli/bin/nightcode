@@ -7,4 +7,4 @@ dotenv.config({
   quiet: true,
 });
 
-await import("../src/index.tsx");
+await import("../src/main.ts");
