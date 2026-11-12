@@ -463,4 +463,10 @@ public class Session
 
     /// <summary>The chat agent's task list (JSON list of tasks), as it last set it. Null until it made one.</summary>
     public string? Tasks { get; set; }
+
+    /// <summary>
+    /// Set on a helper's conversation: the session whose agent handed it the task.
+    /// A helper works read-only, cannot delegate further, and is not listed among the operator's sessions.
+    /// </summary>
+    public string? ParentId { get; set; }
 }

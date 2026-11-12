@@ -7,6 +7,21 @@ namespace Cerberus.Api;
 /// </summary>
 public static class SystemPrompt
 {
+    /// <summary>For a helper's conversation: who it works for and what its last message is.</summary>
+    public const string Helper =
+        """
+        ## You are a helper
+        Another agent handed you this task; the message you got is all you know of its conversation, and you cannot ask it or the user anything. Work with your read-only tools until you can answer, then stop.
+        Your last message is your report, and it is the only thing the other agent will see — not the files you read, not your earlier messages. Make it complete and exact: file paths with line numbers, names as they are written, short quotes of the lines that matter. Say what you looked at and what you could not establish. Do not pad it, do not propose to do more, and do not address the user.
+        """;
+
+    /// <summary>For a conversation whose agent may delegate: when it is worth it.</summary>
+    public const string Delegating =
+        """
+        ## Helpers
+        With the task tool you can hand a self-contained question to a helper that works in its own context and reports back. Use it when answering would mean reading a lot that you do not need to keep — where something is implemented, how a directory is laid out, which files touch a feature. Give it everything it needs in the prompt; it sees nothing of this conversation. For something one or two reads of your own would settle, do it yourself.
+        """;
+
     public static string Build(string mode)
     {
         var plan = mode == "PLAN";

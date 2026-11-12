@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -22,6 +22,9 @@ import {
   type Policy,
 } from "../lib/cerberus/tool-permissions";
 import type { ToolDecision, ToolRequest } from "../providers/tool-permission";
+import { HELPER_TOOLS, runHelper } from "../lib/subagent";
+import { helperIo } from "../lib/subagent-io";
+import { setHelperProgress } from "../lib/subagent-progress";
 
 /**
  * The permission policy from the server. A server without the endpoint (or one
@@ -53,6 +56,9 @@ type ChatTools = {
     input: InferUITools<ToolContracts>[Name]["input"];
     output: unknown;
   };
+} & {
+  /** Handing a question to a helper (see lib/subagent.ts). */
+  task: { input: { description: string; prompt: string }; output: unknown };
 };
 
 /** The provider was busy; the server waits and tries again. Shown while it lasts, never stored. */
@@ -84,6 +90,8 @@ export function useChat(
   // Messages added on this side only (commands the operator ran); they go to the server with the next prompt.
   const unsentRef = useRef<Set<string>>(new Set());
   const [retry, setRetry] = useState<RetryNotice | null>(null);
+  // Stops the helpers at work when the operator interrupts the reply.
+  const helpersRef = useRef(new AbortController());
   // How many messages the server summarised before the latest reply; shown with that reply.
   const [compacted, setCompacted] = useState<number | null>(null);
 
@@ -116,6 +124,8 @@ export function useChat(
             model: message.metadata?.model ?? metadata?.model,
             // Where the tools run, and the project's instructions file — read fresh each time.
             context: projectContext(),
+            // This client can run helper conversations, so the agent may be offered the task tool.
+            subagents: true,
           },
         }
       }
@@ -143,20 +153,60 @@ export function useChat(
       const fail = (errorText: string) =>
         chat.addToolOutput({ tool, toolCallId: toolCall.toolCallId, state: "output-error", errorText });
 
-      void (async () => {
-        // Human in the loop: nothing that needs the operator's say-so runs without it.
+      /** Human in the loop: nothing that needs the operator's say-so runs without it. Returns why not, or null to go ahead. */
+      const refused = async (toolName: string, input: unknown): Promise<string | null> => {
         policyRef.current ??= loadPolicy();
-        const gate = await gateToolCall(await policyRef.current, toolCall.toolName, toolCall.input, askOperator);
-        if (!gate.run) {
-          fail(deniedMessage(gate.feedback));
-          return;
-        }
+        const gate = await gateToolCall(await policyRef.current, toolName, input, askOperator);
+        if (!gate.run) return deniedMessage(gate.feedback);
         if (gate.remembered || gate.rememberedCommands) {
           policyRef.current = Promise.resolve(gate.policy);
           // Remembered on the server too, so it holds in later chats. If that fails it still holds for this one.
           void cerberus
             .setPermissions(gate.rememberedCommands ? { allowedCommands: gate.policy.allowedCommands } : { allowedKinds: gate.policy.allowedKinds })
             .catch(() => {});
+        }
+        return null;
+      };
+
+      // A helper: its own conversation, read-only. Each thing it reads passes the same gate as the agent's own reads.
+      if (toolCall.toolName === "task") {
+        const input = (toolCall.input ?? {}) as { description?: unknown; prompt?: unknown };
+        void (async () => {
+          try {
+            const output = await runHelper(
+              {
+                parentSessionId: sessionId,
+                description: typeof input.description === "string" ? input.description : "",
+                prompt: typeof input.prompt === "string" ? input.prompt : "",
+                model: chat.messages.at(-1)?.metadata?.model ?? "",
+                signal: helpersRef.current.signal,
+              },
+              {
+                ...helperIo,
+                onProgress: (text) => setHelperProgress(toolCall.toolCallId, text),
+                runTool: async (toolName, toolInput) => {
+                  if (!(HELPER_TOOLS as readonly string[]).includes(toolName)) throw new Error(`A helper cannot use ${toolName}: it only reads.`);
+                  const why = await refused(toolName, toolInput);
+                  if (why) throw new Error(why);
+                  return executeLocalTool(toolName, toolInput, "PLAN");
+                },
+              },
+            );
+            chat.addToolOutput({ tool: "task", toolCallId: toolCall.toolCallId, output });
+          } catch (error) {
+            fail(error instanceof Error ? error.message : String(error));
+          } finally {
+            setHelperProgress(toolCall.toolCallId, null);
+          }
+        })();
+        return;
+      }
+
+      void (async () => {
+        const why = await refused(toolCall.toolName, toolCall.input);
+        if (why) {
+          fail(why);
+          return;
         }
 
         try {
@@ -178,6 +228,13 @@ export function useChat(
     },
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
+
+  /** Stops the reply and any helper working for it. */
+  const stopAll = useCallback(() => {
+    helpersRef.current.abort();
+    helpersRef.current = new AbortController();
+    return chat.stop();
+  }, [chat.stop]);
 
   return {
     messages: chat.messages,
@@ -220,7 +277,7 @@ export function useChat(
         { id, role: "user", parts: [{ type: "text", text }], metadata: { mode, model, note: true } },
       ]);
     },
-    abort: chat.stop,
-    interrupt: chat.stop,
+    abort: stopAll,
+    interrupt: stopAll,
   };
 };

@@ -8,6 +8,7 @@ import { summarizeToolCall, toolResultLines } from "../../lib/tool-display";
 import { foldQuietRuns, type Shown } from "../../lib/tool-folding";
 import { useToolCallsExpanded } from "../../lib/tool-fold-state";
 import { markdownStyle } from "../../lib/markdown-style";
+import { useHelperProgress } from "../../lib/subagent-progress";
 
 type ClientMessagePart = Message["parts"][number];
 type ToolPart = Extract<ClientMessagePart, { type: `tool-${string}` | "dynamic-tool" }>;
@@ -33,6 +34,12 @@ function isToolPart(part: ClientMessagePart): part is ToolPart {
 function formatToolArgs(tc: ToolPart, toolName: string): string {
   if (!("input" in tc) || tc.input == null) return "";
   return summarizeToolCall(toolName, tc.input);
+}
+
+/** What a helper is doing right now, under the call that started it. */
+function HelperProgress({ toolCallId }: { toolCallId: string }) {
+  const progress = useHelperProgress(toolCallId);
+  return progress ? <text attributes={TextAttributes.DIM}>{"  "}↳ {progress}</text> : null;
 }
 
 type Item = Shown<ClientMessagePart>;
@@ -149,6 +156,9 @@ export function BotMessage({
                     }
                     {part.state === "output-error" ? ` ${part.errorText}` : ""}
                   </text>
+                  {toolName === "task" && part.state !== "output-available" && part.state !== "output-error" ? (
+                    <HelperProgress toolCallId={part.toolCallId} />
+                  ) : null}
                   {/* What it did: the change an edit made, how a command ended. */}
                   {part.state === "output-available"
                     ? toolResultLines(toolName, part.output).map((line, k) => (
