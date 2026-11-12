@@ -144,7 +144,7 @@ public sealed partial class SastAgentRunner(
             }
             // Kept even when stopped part-way: what was found so far is still worth having,
             // and code may already have left this machine.
-            run.Summary = outcome?.FinalText ?? "";
+            run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
             run.Findings = JsonSerializer.Serialize(findings, JsonOptions);
             run.FindingCount = findings.Count;
             run.Steps = outcome?.Steps ?? 0;
@@ -213,7 +213,7 @@ public sealed partial class SastAgentRunner(
 
             var category = CodeTools.Text(input, "category");
             var cwe = CodeTools.Text(input, "cwe")?.Trim().ToUpperInvariant();
-            var evidence = lines[line - 1].Trim();
+            var evidence = SecretMasker.Mask(lines[line - 1].Trim());
             var finding = new AgentFinding(
                 id, Limit(title, 200), severity,
                 SastAgent.Categories.Contains(category) ? category! : "other",

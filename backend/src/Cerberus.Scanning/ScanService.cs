@@ -131,7 +131,8 @@ public sealed partial class ScanService(ScanOptions options)
                         Cwe: rule.Cwe,
                         File: relFile,
                         Line: i + 1,
-                        Evidence: Truncate(line.Trim(), 200),
+                        // Masked before it is cut, so no part of a secret survives the cut; the secret stays in the file.
+                        Evidence: Truncate(SecretMasker.Mask(line.Trim()), 200),
                         // A hit in test code or documentation is far more often an example than a defect.
                         Confidence: context is null ? rule.Confidence : "low",
                         Owasp: Rules.OwaspFor(rule.Category),

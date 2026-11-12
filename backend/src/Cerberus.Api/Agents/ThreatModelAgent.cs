@@ -164,7 +164,7 @@ public sealed class ThreatModelAgentRunner(
         {
             messages.Dispose();
             // Kept even when stopped part-way: a partial model is still worth reading, marked as such.
-            run.Summary = outcome?.FinalText ?? "";
+            run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
             run.Findings = JsonSerializer.Serialize(new ThreatModel(components, threats), JsonOptions);
             run.FindingCount = threats.Count;
             run.Steps = outcome?.Steps ?? 0;

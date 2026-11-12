@@ -129,11 +129,17 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
             }
         }
 
+        /// <summary>
+        /// A model may quote the code it read. What is kept of its text is masked per chunk — best effort:
+        /// a credential that happens to be split across two chunks is not recognised.
+        /// </summary>
+        private static string Mask(string text) => Cerberus.Scanning.SecretMasker.MaskText(text);
+
         public async Task TextAsync(string channel, string delta)
         {
             foreach (var (c, text) in _text.Add(channel, delta))
             {
-                await stream.EmitAsync(jobId, userId, RunEventTypes.Text, new { channel = c, text });
+                await stream.EmitAsync(jobId, userId, RunEventTypes.Text, new { channel = c, text = Mask(text) });
             }
         }
 
@@ -141,7 +147,7 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
         {
             if (_text.Flush() is { } chunk)
             {
-                await stream.EmitAsync(jobId, userId, RunEventTypes.Text, new { channel = chunk.Channel, text = chunk.Text });
+                await stream.EmitAsync(jobId, userId, RunEventTypes.Text, new { channel = chunk.Channel, text = Mask(chunk.Text) });
             }
         }
 
