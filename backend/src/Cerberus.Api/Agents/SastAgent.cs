@@ -16,7 +16,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Cerberus.Api.Agents;
 
 /// <param name="Instructions">What the operator wants looked at, in their words. Optional.</param>
-public sealed record SastJobParameters(string Model, int MaxSteps = SastAgent.DefaultSteps, string? Instructions = null);
+/// <param name="Research">The agent may ask questions on the public internet through the clean-room researcher.</param>
+public sealed record SastJobParameters(string Model, int MaxSteps = SastAgent.DefaultSteps, string? Instructions = null, bool Research = false);
 
 /// <summary>A finding reported by a model. A candidate for a person to check — never a verdict.</summary>
 public sealed record AgentFinding(
@@ -70,7 +71,7 @@ public static class SastAgent
 /// </summary>
 public sealed partial class SastAgentRunner(
     AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox, Search.CodeSearch search)
+    OperatorInbox inbox, Search.CodeSearch search, Web.ResearchTools research)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -103,10 +104,13 @@ public sealed partial class SastAgentRunner(
         var findings = new List<AgentFinding>();
         // Where the target has a semantic index, the agent can also search the code by meaning.
         var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
+        // Where the operator allowed it, the agent can ask questions on the internet — through the clean-room researcher only.
+        var researcher = parameters.Research ? await research.ForAsync(job, parameters.Model, credentials, reporter, db, ct) : null;
         IReadOnlyList<IAgentTool> tools =
         [
             .. CodeTools.For(workspace),
             .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
+            .. researcher is null ? Array.Empty<IAgentTool>() : [researcher],
             new ReportFindingTool(workspace, findings, reporter),
             new RememberTool(db, audit, job),
             new SkillTool(ChatTools.SearchSkills, skills),
@@ -132,7 +136,7 @@ public sealed partial class SastAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, SastAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
+                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint),
                 tools, maxSteps, reporter, ct, messages.Take);
             if (outcome.StopNote(maxSteps, "the review may be incomplete") is { } stopped)
             {

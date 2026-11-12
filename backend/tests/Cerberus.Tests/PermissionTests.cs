@@ -84,7 +84,8 @@ public class PermissionApiTests(ApiHost host)
         Assert.False(asks["run-job"]);
         Assert.True(asks["run-commands"]);
         Assert.True(asks["run-plan"]);
-        Assert.Equal(6, asks.Count);
+        Assert.True(asks["use-the-internet"]);   // an agent asking the internet is never a silent default
+        Assert.Equal(7, asks.Count);
     }
 
     [Fact]

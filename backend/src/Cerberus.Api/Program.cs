@@ -124,6 +124,15 @@ builder.Services.AddSingleton(new Cerberus.Api.Search.EmbeddingOptions(
 builder.Services.AddSingleton<Cerberus.Api.Search.IEmbedder, Cerberus.Api.Search.OllamaEmbedder>();
 builder.Services.AddSingleton<Cerberus.Api.Search.CodeSearch>();
 builder.Services.AddScoped<Cerberus.Api.Search.CodeIndexer>();
+// --- Internet access for agents: off unless switched on; search only through a self-hosted SearXNG ---
+builder.Services.AddSingleton(new Cerberus.Api.Web.WebOptions(
+    Enabled: Environment.GetEnvironmentVariable("CERBERUS_WEB") == "on",
+    SearchUrl: Environment.GetEnvironmentVariable("CERBERUS_SEARXNG_URL"),
+    BlockedTerms: (Environment.GetEnvironmentVariable("CERBERUS_EGRESS_BLOCKED_TERMS") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+builder.Services.AddSingleton<Cerberus.Api.Web.IWebFetcher, Cerberus.Api.Web.SafeFetcher>();
+builder.Services.AddSingleton<Cerberus.Api.Web.IWebSearch, Cerberus.Api.Web.SearxngSearch>();
+builder.Services.AddSingleton<Cerberus.Api.Web.ResearchTools>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddSingleton<OperatorDesk>();
@@ -138,6 +147,14 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
+
+// `web-check <url>`: fetch one page as a researcher would, to see that web access works and what it refuses.
+if (args is ["web-check", ..])
+{
+    return await Cerberus.Api.Health.ServiceCommands.WebCheckAsync(
+        app.Services.GetRequiredService<Cerberus.Api.Web.IWebFetcher>(), app.Services.GetRequiredService<Cerberus.Api.Web.WebOptions>(),
+        args.ElementAtOrDefault(1), Console.Out, CancellationToken.None);
+}
 
 // `smoke-llm <model>`: can this model do what the agents need? Keys come from the environment; nothing is served.
 if (args is ["smoke-llm", ..])

@@ -24,6 +24,9 @@ public static class ActionKinds
     /// <summary>Sending source code to a model provider outside this machine.</summary>
     public const string SendCodeToCloudModel = "send-code-to-cloud-model";
 
+    /// <summary>Letting an agent ask questions on the public internet (the research tool).</summary>
+    public const string UseTheInternet = "use-the-internet";
+
     public static readonly IReadOnlyList<(string Kind, string Description)> All =
     [
         (ReadFiles, "Read files of the project"),
@@ -32,6 +35,7 @@ public static class ActionKinds
         (RunJob, "Start background jobs (scans, assessments, triage)"),
         (RunPlan, "Carry out a multi-step plan without showing it first"),
         (SendCodeToCloudModel, "Send source code to a cloud model provider"),
+        (UseTheInternet, "Let an agent ask questions on the public internet"),
     ];
 
     public static bool IsValid(string? kind) => All.Any(k => k.Kind == kind);

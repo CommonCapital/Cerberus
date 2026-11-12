@@ -4,6 +4,7 @@
 #   docker compose run --rm cli               # the terminal client, attached to your terminal
 #   docker compose --profile models up -d     # + Ollama (local models; heavy, opt-in)
 #   docker compose --profile infra up -d      # + RabbitMQ and Redis (not used by the API yet)
+#   docker compose --profile web up -d        # + SearXNG, a search service of your own for the agents' research
 #
 # Settings come from a .env file next to this one (copy .env.example). All are optional.
 #
@@ -30,6 +31,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Only reachable when the "models" profile is running.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      # Internet access for agents is off unless switched on. With the "web" profile running,
+      # also set CERBERUS_SEARXNG_URL so the researcher can search and not only fetch.
+      CERBERUS_WEB: ${CERBERUS_WEB:-off}
+      CERBERUS_SEARXNG_URL: ${CERBERUS_SEARXNG_URL:-}
+      # Comma-separated names that must never appear in anything sent to the internet.
+      CERBERUS_EGRESS_BLOCKED_TERMS: ${CERBERUS_EGRESS_BLOCKED_TERMS:-}
       # Uncomment to change behaviour (see backend/README.md):
       # CERBERUS_REQUIRE_ENGAGEMENT: "true"
       # CERBERUS_JOB_TIMEOUT_SECONDS: "600"
@@ -102,6 +109,20 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
 
+  # A search service of your own: what agents search for stays between this machine and the search engines
+  # SearXNG asks, with no account and no history. Set CERBERUS_SEARXNG_URL=http://searxng:8080 for the API.
+  # Not published to the host: only the API talks to it. Its JSON output must be enabled in its settings
+  # (search.formats: [html, json]); set SEARXNG_SECRET in .env before using it.
+  searxng:
+    profiles: ["web"]
+    # Pin this to a released version before real use; no version was checked when this was written.
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env to use the web profile}
+    volumes:
+      - searxng-config:/etc/searxng
+
   # Cache for IDistributedCache, when something needs one. Unused today.
   redis:
     profiles: ["infra"]
@@ -113,6 +134,7 @@ services:
       - redis-data:/data
 
 volumes:
+  searxng-config:
   cerberus-data:
   cerberus-cli-home:
   ollama-models:

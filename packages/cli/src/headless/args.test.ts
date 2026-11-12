@@ -80,3 +80,11 @@ test("an option that would do nothing for this job is refused", () => {
 test("nobody is here to ask, so exclusions cannot be 'ask'", () => {
   expect(refusal("run scan --exclusions ask")).toContain("honour or ignore");
 });
+
+test("research is asked for by name, for the agents that can use it", () => {
+  expect(run("run sast src --model m --research").job).toMatchObject({ type: "sast", research: true });
+  expect(run("run threat-model src --model m --research").job).toMatchObject({ type: "threat-model", research: true });
+  expect(run("run sast src --model m").job).not.toHaveProperty("research");
+  expect(refusal("run scan src --research")).toContain("--research does not apply to scan");
+  expect(refusal("run sast src --model m --research=yes")).toContain("takes no value");
+});

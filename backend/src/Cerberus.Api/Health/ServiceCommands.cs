@@ -85,6 +85,44 @@ public static class ServiceCommands
         }
     }
 
+    /// <summary>
+    /// `web-check &lt;url&gt;`: fetches one page the way an agent's researcher would — same rules, same refusals —
+    /// and says what came back. For the operator who has switched web access on and wants to know it works,
+    /// and that this server cannot be made to fetch from its own network.
+    /// </summary>
+    public static async Task<int> WebCheckAsync(Web.IWebFetcher fetcher, Web.WebOptions options, string? url, TextWriter output, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            output.WriteLine("Name the page to fetch: web-check <url>");
+            return Usage;
+        }
+        output.WriteLine(options.Enabled
+            ? "Web access for agents is ON (CERBERUS_WEB=on)."
+            : "Web access for agents is OFF on this server (set CERBERUS_WEB=on to let agents research). The check below still runs.");
+        output.WriteLine(string.IsNullOrWhiteSpace(options.SearchUrl)
+            ? "No search service is configured (CERBERUS_SEARXNG_URL): a researcher can fetch pages it is pointed at, not search."
+            : "A search service is configured.");
+        if (new Web.EgressGuard(blocked: options.BlockedTerms).Refuse(url) is { } why)
+        {
+            output.WriteLine($"Refused before anything was sent: the address contains {why}.");
+            return Failed;
+        }
+        try
+        {
+            var page = await fetcher.FetchAsync(url, ct);
+            output.WriteLine($"Fetched {page.Url}: HTTP {page.Status}, {page.Text.Length} characters of text{(page.Truncated ? " (cut)" : "")}.");
+            if (page.Title.Length > 0) output.WriteLine($"Title: {page.Title}");
+            foreach (var line in page.Text.Split('\n').Take(3)) output.WriteLine($"  {(line.Length <= 120 ? line : line[..120] + "…")}");
+            return Ok;
+        }
+        catch (Web.WebAccessException ex)
+        {
+            output.WriteLine($"Not fetched: {ex.Message}.");
+            return Failed;
+        }
+    }
+
     public const string SmokeTask = "read the file smoke.txt and reply with the word it contains";
 
     /// <summary>

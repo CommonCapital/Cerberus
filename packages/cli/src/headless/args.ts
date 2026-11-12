@@ -60,6 +60,10 @@ Job options
   --exclusions <mode>     scan, review: honour (default) or ignore the target's own ignore marks
   --max-steps <n>         sast, threat-model: the agent's step limit
   --instructions <text>   sast, threat-model: what to concentrate on
+  --research              sast, threat-model: let the agent ask questions on the public internet.
+                          Each question is checked before it leaves and answered by a separate
+                          researcher that never sees the code. Needs approval (use-the-internet)
+                          and a server with web access switched on.
   --engagement <id>       run under this engagement
 
 Running unattended
@@ -82,7 +86,7 @@ const VALUE_FLAGS = new Set([
   "--fail-on", "--sarif", "--report", "--model", "--agent-model", "--agents", "--catalogs",
   "--exclusions", "--max-steps", "--instructions", "--engagement", "--approve", "--timeout", "--server",
 ]);
-const SWITCHES = new Set(["--include-tests", "--json", "--quiet", "--no-sca"]);
+const SWITCHES = new Set(["--include-tests", "--json", "--quiet", "--no-sca", "--research"]);
 
 /** Which job options make sense for which job. Result and unattended options apply to all. */
 const JOB_FLAGS: Record<string, RunType[]> = {
@@ -94,6 +98,7 @@ const JOB_FLAGS: Record<string, RunType[]> = {
   "--exclusions": ["scan", "review"],
   "--max-steps": ["sast", "threat-model"],
   "--instructions": ["sast", "threat-model"],
+  "--research": ["sast", "threat-model"],
   "--sarif": ["scan", "review", "sast"],
   "--report": ["review", "sast", "threat-model"],
   "--fail-on": ["scan", "review", "sast"],
@@ -187,7 +192,7 @@ export function parseArgs(argv: string[]): Parsed {
     case "sast":
     case "threat-model":
       if (!model) return usage(`${type} is run by a model: name it with --model.`);
-      job = { type, path, model, maxSteps, instructions, engagementId };
+      job = { type, path, model, maxSteps, instructions, engagementId, ...(switches.has("--research") ? { research: true } : {}) };
       break;
     case "review": {
       const agents = values.has("--agents") ? list(values.get("--agents")!) : undefined;
