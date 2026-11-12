@@ -92,7 +92,7 @@ public static class ThreatModelAgent
 /// </summary>
 public sealed class ThreatModelAgentRunner(
     AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox)
+    OperatorInbox inbox, Search.CodeSearch search)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -124,9 +124,11 @@ public sealed class ThreatModelAgentRunner(
 
         var components = new List<ThreatComponent>();
         var threats = new List<Threat>();
+        var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
         IReadOnlyList<IAgentTool> tools =
         [
             .. CodeTools.For(workspace),
+            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
             new RecordComponentTool(workspace, components, reporter),
             new RecordThreatTool(workspace, components, threats, reporter),
             new SastAgentRunner.RememberTool(db, audit, job),
@@ -153,7 +155,8 @@ public sealed class ThreatModelAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, ThreatModelAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions), tools, maxSteps, reporter, ct, messages.Take);
+                ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
+                tools, maxSteps, reporter, ct, messages.Take);
             if (outcome.HitStepLimit)
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; the threat model may be incomplete." });

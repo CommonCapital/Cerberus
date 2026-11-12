@@ -167,6 +167,11 @@ public static class JobEndpoints
                     "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
             }
         }
+        else if (type == JobTypes.Index)
+        {
+            // Nothing to choose: the path is the request. The embedding model is the server's, and local.
+            parameters = "{}";
+        }
         else if (type == JobTypes.ThreatModel)
         {
             if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))

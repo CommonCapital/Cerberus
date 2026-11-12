@@ -74,6 +74,7 @@ services:
   # Local models. Opt-in: images and models are several GB and inference needs
   # a lot of memory. Pull a model after starting it, e.g.
   #   docker compose exec ollama ollama pull llama3.1
+  #   docker compose exec ollama ollama pull nomic-embed-text   # the embedding model for semantic code search (index jobs)
   ollama:
     profiles: ["models"]
     image: ollama/ollama:latest

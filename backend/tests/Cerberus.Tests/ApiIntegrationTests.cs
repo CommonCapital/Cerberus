@@ -56,6 +56,9 @@ public sealed class ApiHost : IDisposable
     public ScriptedProvider Cloud { get; } = new(Cerberus.Core.Models.ModelProvider.Anthropic,
         _ => """{"verdict":"true_positive","reasoning":"Reviewed remotely.","remediation":"Fix it."}""");
 
+    /// <summary>Stands in for the embedding model; records what it was asked to embed.</summary>
+    public WordEmbedder Embedder { get; } = new();
+
     /// <summary>Stands in for DNS and HTTP so ownership verification is testable offline.</summary>
     public FakeOwnershipProbe Probe { get; } = new();
 
@@ -64,6 +67,10 @@ public sealed class ApiHost : IDisposable
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton<Cerberus.Authorization.IOwnershipProbe>(Probe);
+
+                // No embedding model is run by the tests: vectors come from the words of the text.
+                services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.Search.IEmbedder)));
+                services.AddSingleton<Cerberus.Api.Search.IEmbedder>(Embedder);
 
                 // Retries happen as in production, without the waiting.
                 services.AddSingleton(new Cerberus.Models.RetryPolicy(

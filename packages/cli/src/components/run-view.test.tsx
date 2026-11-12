@@ -278,3 +278,26 @@ test("a threat-model run shows the model as it is built, then its report", async
   expect(finished).toContain("Result: agent run run-8");
   expect(finished).toContain("# Threat model of `services/api`");
 });
+
+test("an indexing run shows its steps and progress, and an agent's search by meaning reads as its question", async () => {
+  const indexing = await frame(
+    view([
+      ["state", job("Running", { type: "index" })],
+      ["step", { id: "chunk", title: "Cut the code into chunks", status: "completed" }],
+      ["step", { id: "embed", title: "Embed 990 chunk(s) with nomic-embed-text", status: "running" }],
+      ["progress", { done: 320, total: 990, message: "320 of 990 chunk(s) embedded." }],
+    ]),
+  );
+  expect(indexing).toContain("Semantic index · services/api");
+  expect(indexing).toContain("▶ Embed 990 chunk(s) with nomic-embed-text");
+  expect(indexing).toContain("320 of 990 chunk(s) embedded.");
+
+  const searching = await frame(
+    view([
+      ["state", job("Running", { type: "sast" })],
+      ["tool_call", { id: "c1", name: "searchCode", input: { query: "where are passwords checked" } }],
+      ["tool_result", { id: "c1", name: "searchCode", output: "3 closest piece(s) of code", truncated: false, isError: false }],
+    ]),
+  );
+  expect(searching).toContain("✔ searchCode where are passwords checked");
+});

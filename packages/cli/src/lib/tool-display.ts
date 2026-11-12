@@ -36,6 +36,7 @@ export function summarizeToolCall(toolName: string, input: unknown): string {
     case "bash":
       return clip(text(input, "command"), 100);
     case "searchSkills":
+    case "searchCode":
       return clip(text(input, "query"), 60);
     case "loadSkill":
       return text(input, "name");

@@ -70,7 +70,7 @@ public static class SastAgent
 /// </summary>
 public sealed partial class SastAgentRunner(
     AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox)
+    OperatorInbox inbox, Search.CodeSearch search)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -101,9 +101,12 @@ public sealed partial class SastAgentRunner(
         var maxSteps = Math.Clamp(parameters.MaxSteps, 1, SastAgent.MaxSteps);
 
         var findings = new List<AgentFinding>();
+        // Where the target has a semantic index, the agent can also search the code by meaning.
+        var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
         IReadOnlyList<IAgentTool> tools =
         [
             .. CodeTools.For(workspace),
+            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
             new ReportFindingTool(workspace, findings, reporter),
             new RememberTool(db, audit, job),
             new SkillTool(ChatTools.SearchSkills, skills),
@@ -129,7 +132,8 @@ public sealed partial class SastAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, SastAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions), tools, maxSteps, reporter, ct, messages.Take);
+                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
+                tools, maxSteps, reporter, ct, messages.Take);
             if (outcome.HitStepLimit)
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; the review may be incomplete." });

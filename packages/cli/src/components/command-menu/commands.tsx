@@ -6,6 +6,7 @@ import {
   AssessDialogContent,
   AssessmentsDialogContent,
   EngagementDialogContent,
+  IndexDialogContent,
   MemoryDialogContent,
   ScansDialogContent,
   ScopeDialogContent,
@@ -143,6 +144,17 @@ export const COMMANDS: Command[] = [
       ctx.dialog.open({
         title: `Threat model by ${ctx.model}`,
         children: <ThreatModelDialogContent model={ctx.model} />,
+      })
+    },
+  },
+  {
+    name: "index",
+    description: "Index code for search by meaning (local embedding model)",
+    value: "/index",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Semantic index",
+        children: <IndexDialogContent />,
       })
     },
   },

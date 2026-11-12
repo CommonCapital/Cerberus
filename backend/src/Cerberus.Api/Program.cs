@@ -103,6 +103,15 @@ builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.EvidenceAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.ThreatModelAgentRunner>();
+
+// --- Semantic code search: a local embedding model, vectors in the local database ---
+builder.Services.AddSingleton(new Cerberus.Api.Search.EmbeddingOptions(
+    Model: Environment.GetEnvironmentVariable("CERBERUS_EMBEDDING_MODEL") ?? "nomic-embed-text",
+    BaseUrl: Environment.GetEnvironmentVariable("CERBERUS_EMBEDDING_URL") ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? "http://localhost:11434/v1",
+    AllowRemote: Environment.GetEnvironmentVariable("CERBERUS_EMBEDDING_ALLOW_REMOTE") == "true"));
+builder.Services.AddSingleton<Cerberus.Api.Search.IEmbedder, Cerberus.Api.Search.OllamaEmbedder>();
+builder.Services.AddSingleton<Cerberus.Api.Search.CodeSearch>();
+builder.Services.AddScoped<Cerberus.Api.Search.CodeIndexer>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
 builder.Services.AddSingleton<OperatorDesk>();
@@ -154,6 +163,7 @@ app.MapQuestionEndpoints();
 app.MapSkillEndpoints();
 app.MapPermissionEndpoints();
 app.MapMemoryEndpoints();
+Cerberus.Api.Search.CodeSearchEndpoints.MapCodeSearchEndpoints(app);
 app.MapFindingDecisionEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");

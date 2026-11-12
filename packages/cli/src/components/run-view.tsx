@@ -24,7 +24,7 @@ export function describeTool(tool: ToolActivity): string {
   const main =
     tool.name === "reportFinding"
       ? `${String(input.file ?? "?")}:${String(input.line ?? "?")} ${String(input.title ?? "")}`
-      : (["pattern", "query", "name", "path"] as const)
+      : (["pattern", "query", "name", "path"] as const)   // searchCode's "query" reads as it is
           .filter((key) => typeof input[key] === "string")
           .map((key) => String(input[key]))
           .join(" in ");
@@ -58,9 +58,10 @@ const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assess
   sast: "Code review by a model",
   evidence: "Compliance evidence by a model",
   "threat-model": "Threat model by a model",
+  index: "Semantic index",
 };
 
-const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment", "threat-model": "agent run" };
+const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment", "threat-model": "agent run", index: "index" };
 
 export function RunView({ view, selectedOption, error, report }: Props) {
   const { colors } = useTheme();
