@@ -46,6 +46,8 @@ services:
       # CERBERUS_REQUIRE_ENGAGEMENT: "true"
       # CERBERUS_JOB_TIMEOUT_SECONDS: "600"
       # CERBERUS_JOB_CONCURRENCY: "2"
+      # How many specialists of a team review work at once with an API model (1-4):
+      # CERBERUS_AGENT_PARALLELISM: "2"
       # CERBERUS_QUESTION_TIMEOUT_SECONDS: "3600"
     volumes:
       # Database and encryption key ring. Losing this volume loses accounts,

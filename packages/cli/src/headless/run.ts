@@ -41,6 +41,7 @@ const LABEL: Record<string, string> = {
   review: "Review",
   sast: "SAST agent run",
   "threat-model": "Threat model",
+  investigate: "Team review",
   index: "Code index",
 };
 
@@ -88,7 +89,7 @@ function progressPrinter(say: (line: string) => void) {
       if (step.status === "completed") say(`[done] ${step.title}`);
       if (step.status === "skipped") say(`[skip] ${step.title}`);
     }
-    for (const tool of view.tools.slice(tools)) say(`[tool] ${tool.name} ${summarizeToolCall(tool.name, tool.input)}`.trimEnd());
+    for (const tool of view.tools.slice(tools)) say(`[tool] ${tool.agent ? `${tool.agent} · ` : ""}${tool.name} ${summarizeToolCall(tool.name, tool.input)}`.trimEnd());
     tools = view.tools.length;
     for (const note of view.notes.slice(notes)) say(`[note] ${note}`);
     notes = view.notes.length;
@@ -140,7 +141,12 @@ function watch(jobId: string, options: RunOptions, deps: HeadlessDeps, say: (lin
         }
 
         if (view.question) {
-          finish({ kind: "needs-person", reason: `It asks a question nobody is here to answer: ${view.question.text}` });
+          finish({
+            kind: "needs-person",
+            reason:
+              `It asks a question nobody is here to answer: ${view.question.text}` +
+              (options.job.type === "investigate" ? "\nTo let the lead's plan run without being shown first, add --approve run-plan." : ""),
+          });
           return;
         }
         if (isFinished(view)) finish({ kind: "finished", view });

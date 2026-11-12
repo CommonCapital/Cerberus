@@ -5,7 +5,7 @@ export { SchedulesDialogContent } from "./schedules-dialog";
 export { KeysDialogContent } from "./keys-dialog";
 export { AgentsDialogContent } from "./agents-dialog";
 export { ModelsDialogContent } from "./models-dialog";
-export { AgentReviewDialogContent, IndexDialogContent, ScanDialogContent, ThreatModelDialogContent } from "./scan-dialog";
+export { AgentReviewDialogContent, IndexDialogContent, ScanDialogContent, ThreatModelDialogContent, TeamReviewDialogContent } from "./scan-dialog";
 export { ReviewDialogContent } from "./review-dialog";
 export { RunsDialogContent } from "./runs-dialog";
 export { PermissionsDialogContent } from "./permissions-dialog";

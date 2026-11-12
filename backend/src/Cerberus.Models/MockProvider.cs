@@ -68,6 +68,26 @@ public sealed partial class MockProvider : IModelProvider
             yield break;
         }
 
+        // Offered a team to lead: look at the top directory, send two specialists, report what came back.
+        if (request.Tools.Any(t => t.Name == "dispatch"))
+        {
+            var (tool, input, closing) = NextLeadAction(request);
+            if (tool is not null)
+            {
+                await foreach (var word in Words($"Calling {tool}.", cancellationToken)) yield return new TextDelta(word);
+                foreach (var e in ToolCall(tool, input!)) yield return e;
+                yield return new UsageReport(InputTokens: 12, OutputTokens: 8);
+                yield return new StepFinished("tool_calls");
+            }
+            else
+            {
+                await foreach (var word in Words(closing!, cancellationToken)) yield return new TextDelta(word);
+                yield return new UsageReport(InputTokens: 20, OutputTokens: 10);
+                yield return new StepFinished("stop");
+            }
+            yield break;
+        }
+
         // Offered the evidence agent's tools: look at one file, then say it cannot tell.
         if (request.Tools.Any(t => t.Name == "suggestVerdict"))
         {
@@ -257,6 +277,43 @@ public sealed partial class MockProvider : IModelProvider
 
         return (null, null,
             $"Read {read.Count} file(s) and reported {reported.Count} finding(s). This was the dev model following fixed rules, not a review.");
+    }
+
+    /// <summary>
+    /// The lead of a team, acted out without a model: list the top directory, send the injection and the
+    /// access-control specialist, and say what came back. Asked to change the plan, it sends one specialist instead.
+    /// </summary>
+    private static (string? Tool, object? Input, string? Closing) NextLeadAction(ChatRequest request)
+    {
+        var calls = request.Turns.SelectMany(t => t.Parts.OfType<ToolCallPart>()).ToList();
+        var dispatched = request.Turns.SelectMany(t => t.Parts.OfType<ToolResultPart>()).Where(r => r.Name == "dispatch").ToList();
+        if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
+        if (request.Turns[^1] is { Role: "user" })
+        {
+            return (null, null, "The operator sent a message. Stopping here, as the dev model does for any message.");
+        }
+
+        const string injection = "Follow data that comes from outside to where it is interpreted: queries, commands, deserializers.";
+        if (dispatched.Count == 0)
+        {
+            return ("dispatch", new
+            {
+                assignments = new object[]
+                {
+                    new { specialist = "injection", focus = injection },
+                    new { specialist = "auth", focus = "Check how callers are identified and whether each operation checks what they may do." },
+                },
+            }, null);
+        }
+        if (dispatched[^1].IsError)
+        {
+            // Asked for changes, once: a smaller plan. Refused or unanswered: nothing more to do.
+            return dispatched.Count == 1 && dispatched[0].Content.Contains("Revise the plan", StringComparison.Ordinal)
+                ? ("dispatch", new { assignments = new object[] { new { specialist = "injection", focus = injection + " Only this, as the operator asked." } } }, null)
+                : (null, null, "No specialist ran: the plan was not approved. This was the dev model following fixed rules, not a review.");
+        }
+        var findings = dispatched[^1].Content.Split('\n').FirstOrDefault(line => line.StartsWith("Findings of the whole run", StringComparison.Ordinal) || line.StartsWith("No findings", StringComparison.Ordinal));
+        return (null, null, $"The team has reported. {findings?.TrimEnd(':') ?? "See the findings."}. This was the dev model following fixed rules, not a review.");
     }
 
     /// <summary>

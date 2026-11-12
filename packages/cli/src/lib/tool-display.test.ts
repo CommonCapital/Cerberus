@@ -94,3 +94,8 @@ test("a helper that was stopped says so, and a long report is only begun", () =>
   expect(lines[1]).toEqual({ text: "The helper was stopped after 25 rounds.", tone: "problem" });
   expect(lines.slice(2).map((line) => line.text)).toEqual(["line 1", "line 2", "line 3", "line 4", "… 5 more line(s) in its report"]);
 });
+
+test("a lead's dispatch is shown by who is sent", () => {
+  expect(summarizeToolCall("dispatch", { assignments: [{ specialist: "injection", focus: "a long focus" }, { specialist: "auth", focus: "another" }] })).toBe("injection, auth");
+  expect(summarizeToolCall("dispatch", {})).toBe("");
+});

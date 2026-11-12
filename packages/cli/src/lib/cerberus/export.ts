@@ -10,7 +10,7 @@ export type SarifSource = { kind: "scans" | "reviews" | "agent-runs"; id: string
 /** Where a finished run's findings can be exported from, or null if it has none to export. */
 export function sarifSourceOf(job: Pick<Job, "type" | "state" | "resultId"> | null): SarifSource | null {
   if (!job || job.state !== "Succeeded" || !job.resultId) return null;
-  const kind = job.type === "scan" ? "scans" : job.type === "review" ? "reviews" : job.type === "sast" ? "agent-runs" : null;
+  const kind = job.type === "scan" ? "scans" : job.type === "review" ? "reviews" : job.type === "sast" || job.type === "investigate" ? "agent-runs" : null;
   return kind ? { kind, id: job.resultId } : null;
 }
 

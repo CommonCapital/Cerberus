@@ -289,6 +289,18 @@ export type SubmitJob =
   | { type: "index"; path: string; engagementId?: string }
   /** The threat-model agent: a model maps the components and threats of the code under `path` and writes them up. */
   | { type: "threat-model"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string; research?: boolean }
+  /** A team review: a lead agent plans, dispatches specialist agents and merges their findings. `maxSteps` is each specialist's. */
+  | {
+      type: "investigate";
+      path: string;
+      model: string;
+      maxSteps?: number;
+      maxSpecialists?: number;
+      instructions?: string;
+      engagementId?: string;
+      /** The lead's plan runs without being put to the operator first. */
+      approvePlan?: boolean;
+    }
   /** The evidence agent: a model suggests answers for controls of an assessment the scanner could not judge. */
   | { type: "evidence"; assessmentId: string; model: string; maxControls?: number; maxSteps?: number; controlIds?: string[] }
   /** A planned review: scan, optional model triage, one assessment per catalog (all if none named), a report. */

@@ -9,7 +9,7 @@ export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const
 export type Severity = (typeof SEVERITIES)[number];
 export type FailOn = Severity | "none";
 
-export const RUN_TYPES = ["scan", "review", "sast", "threat-model", "index"] as const;
+export const RUN_TYPES = ["scan", "review", "sast", "threat-model", "investigate", "index"] as const;
 export type RunType = (typeof RUN_TYPES)[number];
 
 export type RunOptions = {
@@ -32,7 +32,7 @@ export type RunOptions = {
 
 export type Parsed = { kind: "help" } | { kind: "run"; options: RunOptions } | { kind: "usage"; message: string };
 
-export const USAGE = `Usage: cerberus run <scan|review|sast|threat-model|index> [path] [options]
+export const USAGE = `Usage: cerberus run <scan|review|sast|threat-model|investigate|index> [path] [options]
 
 Runs one job on the Cerberus server without the interactive screen, waits for
 it, and exits with a code a pipeline can act on. The path is the target as the
@@ -43,26 +43,29 @@ Jobs
   review         a planned review: scan, assessments, a written report
   sast           a model reads the code and reports vulnerabilities (--model)
   threat-model   a model maps components and threats (--model)
+  investigate    a team: a lead agent plans, sends specialist agents, and merges what
+                 they find into one list and one report (--model)
   index          build or refresh the semantic code index
 
 Result
   --fail-on <severity>    critical, high, medium, low, info or none (default high)
   --include-tests         also count findings in tests and documentation
-  --sarif <file>          write the findings as SARIF 2.1.0 (scan, review, sast)
-  --report <file>         write the written report as Markdown (review, sast, threat-model)
+  --sarif <file>          write the findings as SARIF 2.1.0 (scan, review, sast, investigate)
+  --report <file>         write the written report as Markdown (review, sast, threat-model, investigate)
   --screenshots <dir>     save the screenshots the run's researcher took (sast, threat-model with --research)
   --json                  print the result as one JSON object
   --quiet                 no progress on stderr
 
 Job options
-  --model <id>            the model for sast and threat-model; for a review, the triage model
+  --model <id>            the model for sast, threat-model and investigate; for a review, the triage model
   --agent-model <id>      review: the model that runs the review's agents
   --agents <a,b>          review: sast, threat-model, evidence
   --catalogs <a,b>        review: compliance catalogs (default: all)
   --no-sca                scan, review: skip the dependency check
   --exclusions <mode>     scan, review: honour (default) or ignore the target's own ignore marks
-  --max-steps <n>         sast, threat-model: the agent's step limit
-  --instructions <text>   sast, threat-model: what to concentrate on
+  --max-steps <n>         sast, threat-model: the agent's step limit; investigate: each specialist's
+  --max-specialists <n>   investigate: how many specialists the lead may send (1-6, default 4)
+  --instructions <text>   sast, threat-model, investigate: what to concentrate on
   --research              sast, threat-model: let the agent ask questions on the public internet.
                           Each question is checked before it leaves and answered by a separate
                           researcher that never sees the code. Needs approval (use-the-internet)
@@ -75,6 +78,9 @@ Running unattended
   --approve <kind,kind>   approve these kinds of action in advance, by name
                           (for example send-code-to-cloud-model). Anything that
                           needs an approval not named here stops the run.
+                          For investigate, run-plan lets the lead's plan of specialists
+                          run without being shown to anyone first; without it the run
+                          stops at the plan, because nobody is here to approve it.
   --timeout <minutes>     give up and cancel the job after this long (default 60)
   --server <url>          the server's address (default: API_URL)
 
@@ -89,26 +95,27 @@ Exit codes
 
 const VALUE_FLAGS = new Set([
   "--fail-on", "--sarif", "--report", "--screenshots", "--model", "--agent-model", "--agents", "--catalogs",
-  "--exclusions", "--max-steps", "--instructions", "--engagement", "--approve", "--timeout", "--server",
+  "--exclusions", "--max-steps", "--max-specialists", "--instructions", "--engagement", "--approve", "--timeout", "--server",
 ]);
 const SWITCHES = new Set(["--include-tests", "--json", "--quiet", "--no-sca", "--research"]);
 
 /** Which job options make sense for which job. Result and unattended options apply to all. */
 const JOB_FLAGS: Record<string, RunType[]> = {
-  "--model": ["review", "sast", "threat-model"],
+  "--model": ["review", "sast", "threat-model", "investigate"],
   "--agent-model": ["review"],
   "--agents": ["review"],
   "--catalogs": ["review"],
   "--no-sca": ["scan", "review"],
   "--exclusions": ["scan", "review"],
-  "--max-steps": ["sast", "threat-model"],
-  "--instructions": ["sast", "threat-model"],
+  "--max-steps": ["sast", "threat-model", "investigate"],
+  "--max-specialists": ["investigate"],
+  "--instructions": ["sast", "threat-model", "investigate"],
   "--research": ["sast", "threat-model"],
-  "--sarif": ["scan", "review", "sast"],
-  "--report": ["review", "sast", "threat-model"],
+  "--sarif": ["scan", "review", "sast", "investigate"],
+  "--report": ["review", "sast", "threat-model", "investigate"],
   "--screenshots": ["sast", "threat-model"],
-  "--fail-on": ["scan", "review", "sast"],
-  "--include-tests": ["scan", "review", "sast"],
+  "--fail-on": ["scan", "review", "sast", "investigate"],
+  "--include-tests": ["scan", "review", "sast", "investigate"],
 };
 
 const REVIEW_AGENTS = ["sast", "threat-model", "evidence"] as const;
@@ -176,6 +183,12 @@ export function parseArgs(argv: string[]): Parsed {
     if (!Number.isInteger(maxSteps) || maxSteps < 1) return usage("--max-steps must be a whole number of at least 1.");
   }
 
+  let maxSpecialists: number | undefined;
+  if (values.has("--max-specialists")) {
+    maxSpecialists = Number(values.get("--max-specialists"));
+    if (!Number.isInteger(maxSpecialists) || maxSpecialists < 1 || maxSpecialists > 6) return usage("--max-specialists must be a whole number from 1 to 6.");
+  }
+
   let timeoutMinutes = 60;
   if (values.has("--timeout")) {
     timeoutMinutes = Number(values.get("--timeout"));
@@ -200,6 +213,14 @@ export function parseArgs(argv: string[]): Parsed {
       if (!model) return usage(`${type} is run by a model: name it with --model.`);
       job = { type, path, model, maxSteps, instructions, engagementId, ...(switches.has("--research") ? { research: true } : {}) };
       break;
+    case "investigate": {
+      if (!model) return usage("investigate is run by a model: name it with --model.");
+      // The lead's plan is a question to the operator during the run. Approving plans in advance is said to the
+      // server with the job, so the plan runs without a question nobody here could answer.
+      const approvePlan = values.has("--approve") && list(values.get("--approve")!).includes("run-plan");
+      job = { type, path, model, maxSteps, maxSpecialists, instructions, engagementId, ...(approvePlan ? { approvePlan: true } : {}) };
+      break;
+    }
     case "review": {
       const agents = values.has("--agents") ? list(values.get("--agents")!) : undefined;
       const unknown = agents?.find((agent) => !REVIEW_AGENTS.includes(agent as (typeof REVIEW_AGENTS)[number]));

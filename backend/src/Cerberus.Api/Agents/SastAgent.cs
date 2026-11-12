@@ -20,9 +20,19 @@ namespace Cerberus.Api.Agents;
 public sealed record SastJobParameters(string Model, int MaxSteps = SastAgent.DefaultSteps, string? Instructions = null, bool Research = false);
 
 /// <summary>A finding reported by a model. A candidate for a person to check — never a verdict.</summary>
+/// <param name="ReportedBy">In a team review: the specialists that reported it. Absent for a single agent's finding.</param>
 public sealed record AgentFinding(
     string Id, string Title, Severity Severity, string Category, string? Cwe, string File, int Line,
-    string Evidence, string Description, string? Remediation, string Confidence = "model");
+    string Evidence, string Description, string? Remediation, string Confidence = "model",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ReportedBy = null);
+
+/// <summary>
+/// How an agent is used when it works for a lead agent (see <see cref="Team"/>) instead of on its own.
+/// </summary>
+/// <param name="Agent">The name its run is stored under.</param>
+/// <param name="Focus">Added to its instructions: what this specialist is for.</param>
+/// <param name="ParentRunId">The lead's run, which this one belongs to.</param>
+public sealed record SpecialistBrief(string Agent, string Focus, string ParentRunId);
 
 public static class SastAgent
 {
@@ -92,7 +102,7 @@ public sealed partial class SastAgentRunner(
         }
     }
 
-    public async Task<AgentRun> RunAsync(Job job, SastJobParameters parameters, IRunReporter reporter, CancellationToken ct)
+    public async Task<AgentRun> RunAsync(Job job, SastJobParameters parameters, IRunReporter reporter, CancellationToken ct, SpecialistBrief? brief = null)
     {
         var provider = ModelRegistry.Find(parameters.Model)?.Provider
             ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
@@ -121,13 +131,15 @@ public sealed partial class SastAgentRunner(
         await reporter.StepAsync("review", title, StepStatus.Running);
 
         AgentOutcome? outcome = null;
-        var messages = inbox.Open(job.Id);
+        // A specialist is steered by its lead, not by the operator: the job's messages are the lead's to read.
+        var messages = brief is null ? inbox.Open(job.Id) : null;
         var run = new AgentRun
         {
             UserId = job.UserId,
             EngagementId = job.EngagementId,
             JobId = job.Id,
-            Agent = SastAgent.Name,
+            ParentRunId = brief?.ParentRunId,
+            Agent = brief?.Agent ?? SastAgent.Name,
             Model = parameters.Model,
             TargetPath = job.TargetPath,
         };
@@ -135,9 +147,9 @@ public sealed partial class SastAgentRunner(
         {
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
-                parameters.Model, credentials, SastAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
+                parameters.Model, credentials, SastAgent.System + (brief is null ? "" : "\n\n" + brief.Focus) + (memory.Length > 0 ? "\n\n" + memory : ""),
                 SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint),
-                tools, maxSteps, reporter, ct, messages.Take);
+                tools, maxSteps, reporter, ct, messages is null ? null : messages.Take);
             if (outcome.StopNote(maxSteps, "the review may be incomplete") is { } stopped)
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
@@ -146,8 +158,8 @@ public sealed partial class SastAgentRunner(
         }
         finally
         {
-            messages.Dispose();
-            if (messages.Unread.Count > 0)
+            messages?.Dispose();
+            if (messages is { Unread.Count: > 0 })
             {
                 await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent had finished before it could read your last {messages.Unread.Count} message(s)." });
             }
@@ -164,7 +176,7 @@ public sealed partial class SastAgentRunner(
 
             var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
             await audit.AppendAsync(job.UserId, "agent.run", run.Complete ? AuditOutcome.Ok : AuditOutcome.Error,
-                $"SAST agent run {run.Id} on \"{job.TargetPath}\" with {parameters.Model}: {run.ToolCalls} tool call(s), {findings.Count} finding(s) reported" +
+                $"{(brief is null ? "SAST agent" : $"Specialist ({brief.Agent})")} run {run.Id} on \"{job.TargetPath}\" with {parameters.Model}: {run.ToolCalls} tool call(s), {findings.Count} finding(s) reported" +
                 $"{(run.Complete ? "" : ", not completed")}; the code it read was sent to {where}.",
                 job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
         }

@@ -25,6 +25,8 @@ export function Run() {
   const [reviewScanId, setReviewScanId] = useState<string | null>(null);
   // Writing a message to the running agent; while true, keys go to the text field.
   const [composing, setComposing] = useState(false);
+  // What is being written is an answer to the run's question, in the operator's own words — not a message to the agent.
+  const [answering, setAnswering] = useState(false);
   const messageRef = useRef<InputRenderable>(null);
   const busy = useRef(false);
 
@@ -38,7 +40,7 @@ export function Run() {
 
   // A review or a threat model that succeeded has a report to show.
   const reportOf =
-    view.job?.state === "Succeeded" && view.job.resultId && (view.job.type === "review" || view.job.type === "threat-model")
+    view.job?.state === "Succeeded" && view.job.resultId && (view.job.type === "review" || view.job.type === "threat-model" || view.job.type === "investigate")
       ? `${view.job.type}:${view.job.resultId}`
       : null;
   useEffect(() => {
@@ -90,11 +92,17 @@ export function Run() {
     if (!isTopLayer("base")) return;
 
     if (composing) {
-      if (key.name === "escape") setComposing(false);
-      else if (key.name === "return" || key.name === "enter") {
-        const text = (messageRef.current?.value ?? "").trim();
+      if (key.name === "escape") {
         setComposing(false);
-        if (text && id) void act(() => cerberus.sendMessage(id, text));
+        setAnswering(false);
+      } else if (key.name === "return" || key.name === "enter") {
+        const text = (messageRef.current?.value ?? "").trim();
+        const asked = answering ? view.question : null;
+        setComposing(false);
+        setAnswering(false);
+        // Words alone, no option chosen: for a lead's plan that reads as "not like this — change it so".
+        if (text && asked) void act(() => cerberus.answer(asked.id, [], text));
+        else if (text && id && !answering) void act(() => cerberus.sendMessage(id, text));
       }
       return;
     }
@@ -109,6 +117,12 @@ export function Run() {
       if (key.name === "a") void act(() => cerberus.approve(approval.id));
       else if (key.name === "r") void act(() => cerberus.approve(approval.id, { remember: true }));
       else if (key.name === "d") void act(() => cerberus.deny(approval.id));
+      return;
+    }
+
+    if (question?.allowText && key.name === "t") {
+      setAnswering(true);
+      setComposing(true);
       return;
     }
 
@@ -160,7 +174,7 @@ export function Run() {
       </scrollbox>
       {composing ? (
         <box flexShrink={0} flexDirection="column">
-          <input ref={messageRef} placeholder="Tell the agent what to do next" focused />
+          <input ref={messageRef} placeholder={answering ? "Your answer in your own words (for a plan: what should change)" : "Tell the agent what to do next"} focused />
         </box>
       ) : null}
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
@@ -182,6 +196,12 @@ export function Run() {
           <>
             <text>o</text>
             <text attributes={TextAttributes.DIM}>open the assessment</text>
+          </>
+        ) : null}
+        {!composing && view.question?.allowText ? (
+          <>
+            <text>t</text>
+            <text attributes={TextAttributes.DIM}>answer in your own words</text>
           </>
         ) : null}
         {!composing && canBeSteered(view) && !waiting ? (

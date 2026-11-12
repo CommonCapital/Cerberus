@@ -42,15 +42,19 @@ public static class AgentRunEndpoints
     {
         var userId = UserId(http);
         var run = await db.AgentRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id && r.UserId == userId, ct);
-        return run is null
-            ? Results.Json(new { error = "Agent run not found" }, statusCode: 404)
-            : Results.Json(Describe(run, withFindings: true));
+        if (run is null) return Results.Json(new { error = "Agent run not found" }, statusCode: 404);
+        // A lead's run comes with the runs of the specialists it sent.
+        var specialists = run.Agent == Team.Name
+            ? await db.AgentRuns.AsNoTracking().Where(r => r.ParentRunId == run.Id && r.UserId == userId).OrderBy(r => r.CreatedAt).ToListAsync(ct)
+            : [];
+        return Results.Json(Describe(run, withFindings: true, specialists));
     }
 
-    private static object Describe(AgentRun r, bool withFindings) => new
+    private static object Describe(AgentRun r, bool withFindings, IReadOnlyList<AgentRun>? specialists = null) => new
     {
         id = r.Id,
         jobId = r.JobId,
+        parentRunId = r.ParentRunId,
         engagementId = r.EngagementId,
         agent = r.Agent,
         model = r.Model,
@@ -64,6 +68,13 @@ public static class AgentRunEndpoints
         hasReport = r.Report.Length > 0,
         findings = withFindings ? JsonSerializer.Deserialize<JsonElement>(r.Findings) : (JsonElement?)null,
         report = withFindings && r.Report.Length > 0 ? r.Report : null,
+        specialists = specialists is { Count: > 0 }
+            ? specialists.Select(s => new
+            {
+                id = s.Id, agent = s.Agent, complete = s.Complete, steps = s.Steps, toolCalls = s.ToolCalls, findingCount = s.FindingCount,
+                summary = s.Summary, hasReport = s.Report.Length > 0,
+            })
+            : null,
     };
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;

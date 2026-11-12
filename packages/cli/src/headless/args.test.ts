@@ -88,3 +88,21 @@ test("research is asked for by name, for the agents that can use it", () => {
   expect(refusal("run scan src --research")).toContain("--research does not apply to scan");
   expect(refusal("run sast src --model m --research=yes")).toContain("takes no value");
 });
+
+test("investigate: a team review, with its own limits and its plan approved in advance only when named", () => {
+  expect(run("run investigate src --model m").job).toEqual({
+    type: "investigate", path: "src", model: "m", maxSteps: undefined, maxSpecialists: undefined, instructions: undefined, engagementId: undefined,
+  });
+  expect(run("run investigate . --model m --max-specialists 2 --max-steps 8 --approve send-code-to-cloud-model,run-plan").job).toMatchObject({
+    type: "investigate", maxSpecialists: 2, maxSteps: 8, approvePlan: true,
+  });
+  // Approving something else does not approve the plan.
+  expect(run("run investigate . --model m --approve send-code-to-cloud-model").job).not.toHaveProperty("approvePlan");
+  // Its findings gate a build like the SAST agent's, and it writes a report.
+  expect(run("run investigate . --model m --fail-on medium --sarif out.sarif --report team.md")).toMatchObject({ failOn: "medium", sarif: "out.sarif", report: "team.md" });
+
+  expect(refusal("run investigate .")).toBe("investigate is run by a model: name it with --model.");
+  expect(refusal("run investigate . --model m --max-specialists 7")).toBe("--max-specialists must be a whole number from 1 to 6.");
+  expect(refusal("run sast . --model m --max-specialists 2")).toContain("--max-specialists does not apply to sast");
+  expect(refusal("run investigate . --model m --research")).toContain("--research does not apply to investigate");
+});

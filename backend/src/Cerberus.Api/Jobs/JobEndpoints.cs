@@ -15,7 +15,9 @@ public sealed record SubmitJobRequest(
     int? MaxSteps = null, string? Instructions = null, string? AgentModel = null,
     string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null, List<string>? Agents = null,
     // sast, threat-model: let the agent ask questions on the public internet (needs the server's web access switched on).
-    bool? Research = null);
+    bool? Research = null,
+    // investigate: how many specialists the lead may dispatch, and whether its plan runs without being shown first.
+    int? MaxSpecialists = null, bool? ApprovePlan = null);
 
 public sealed record JobMessageRequest(string? Text);
 
@@ -205,6 +207,43 @@ public static class JobEndpoints
                     $"The SAST agent decides for itself which files under \"{targetPath}\" to read, in up to {sast.MaxSteps} steps; " +
                     $"whatever it reads is sent to {provider}. Credential-shaped values are masked before sending; other code is sent as is. " +
                     "It can only read — it cannot change files or run anything. Nothing is sent until you approve.");
+            }
+        }
+        else if (type == JobTypes.Investigate)
+        {
+            if (string.IsNullOrWhiteSpace(body.Model) || !Cerberus.Core.Models.ModelRegistry.IsSupported(body.Model))
+            {
+                return BadRequest("model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:) (a local Ollama model keeps the code on this machine)");
+            }
+            if (body.MaxSteps is < 1 or > Agents.SastAgent.MaxSteps)
+            {
+                return BadRequest($"maxSteps must be between 1 and {Agents.SastAgent.MaxSteps}");
+            }
+            if (body.MaxSpecialists is < 1 or > Agents.Team.MaxSpecialists)
+            {
+                return BadRequest($"maxSpecialists must be between 1 and {Agents.Team.MaxSpecialists}");
+            }
+            if (body.Instructions is { Length: > Agents.Team.MaxInstructions })
+            {
+                return BadRequest($"instructions must be at most {Agents.Team.MaxInstructions} characters");
+            }
+            var investigate = new Agents.InvestigateJobParameters(
+                body.Model, body.MaxSteps ?? Agents.SastAgent.DefaultSteps, body.MaxSpecialists ?? Agents.Team.DefaultSpecialists,
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), body.ApprovePlan == true);
+            parameters = JsonSerializer.Serialize(investigate, JobTypes.Json);
+
+            var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
+            if (!Cerberus.Triage.FindingTriager.IsLocal(provider))
+            {
+                approvalNeed = new ApprovalNeed(
+                    ApprovalKinds.SendCodeToCloudModel,
+                    $"Let a team of agents with {body.Model} ({provider}) read the code under \"{targetPath}\"",
+                    $"A lead agent and up to {investigate.MaxSpecialists} specialists each decide for themselves which files under \"{targetPath}\" to read " +
+                    $"(a specialist in up to {investigate.MaxSteps} steps); whatever they read is sent to {provider}. Credential-shaped values are masked " +
+                    "before sending; other code is sent as is. They can only read — they cannot change files or run anything. Nothing is sent until you approve. " +
+                    (investigate.ApprovePlan
+                        ? "The lead's plan of specialists then runs without being shown to you first, as this request asks."
+                        : "The lead's plan of specialists is shown to you before any specialist starts."));
             }
         }
         else if (type == JobTypes.Index)
