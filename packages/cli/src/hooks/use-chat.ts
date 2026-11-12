@@ -56,7 +56,11 @@ export type RetryNotice = { attempt: number; maxAttempts: number; seconds: numbe
 export const describeRetry = (retry: RetryNotice) =>
   `The model provider is busy (${retry.reason}). Trying again in ${retry.seconds} s — attempt ${retry.attempt} of ${retry.maxAttempts}.`;
 
-export type Message = UIMessage<ChatMessageMetadata, { retry: RetryNotice }, ChatTools>;
+/** What the operator is told when the server made room by summarising. */
+export const describeCompaction = (messages: number) =>
+  `To make room, ${messages} earlier message${messages === 1 ? " was" : "s were"} summarised for the model. Nothing is removed from this screen.`;
+
+export type Message = UIMessage<ChatMessageMetadata, { retry: RetryNotice; compaction: { messages: number } }, ChatTools>;
 
 /** Whether the reply in progress has produced anything yet (after which a retry notice is stale). */
 function lastHasContent(messages: Message[]): boolean {
@@ -72,6 +76,8 @@ export function useChat(
   // Read once per chat, then kept current as the operator chooses "always allow".
   const policyRef = useRef<Promise<Policy> | null>(null);
   const [retry, setRetry] = useState<RetryNotice | null>(null);
+  // How many messages the server summarised before the latest reply; shown with that reply.
+  const [compacted, setCompacted] = useState<number | null>(null);
 
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
@@ -113,6 +119,7 @@ export function useChat(
     transport,
     onData(part) {
       if (part.type === "data-retry") setRetry(part.data);
+      else if (part.type === "data-compaction") setCompacted(part.data.messages);
     },
     onFinish() {
       setRetry(null);
@@ -157,7 +164,10 @@ export function useChat(
     error: chat.error,
     /** Set while the server is waiting to retry a busy provider; cleared once content arrives or the reply ends. */
     retry: chat.status === "streaming" && lastHasContent(chat.messages) ? null : retry,
+    /** Set when the server summarised earlier messages to fit the model's window; stays until the next message is sent. */
+    compacted,
     submit: (params: { userText: string; mode: ModeType; model: SupportedChatModelId }) => {
+      setCompacted(null);
       return chat.sendMessage({
         text: params.userText,
         metadata: {

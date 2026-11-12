@@ -12,6 +12,8 @@ export type CommandContext = {
   /** The model chosen with /models; agents started from a command use it too. */
   model: SupportedChatModelId;
   setModel: (model: SupportedChatModelId) => void;
+  /** The chat session on screen, when the operator is in one. */
+  sessionId?: string;
 };
 
 export type Command = {

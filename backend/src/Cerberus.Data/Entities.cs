@@ -413,4 +413,10 @@ public class Session
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string Messages { get; set; } = "[]";
+
+    /// <summary>A summary standing in, for the model, for the messages up to <see cref="SummarizedThrough"/>. Null until the chat was compacted.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>Id of the last message the summary covers.</summary>
+    public string? SummarizedThrough { get; set; }
 }

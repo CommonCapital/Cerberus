@@ -4,6 +4,9 @@ public sealed record CredentialsRequest(string Email, string Password);
 
 public sealed record CreateSessionRequest(string? Title);
 
+/// <param name="Model">The model that writes the summary; default: the one that wrote the session's last reply.</param>
+public sealed record CompactRequest(string? Model);
+
 public sealed record SetApiKeyRequest(string Provider, string ApiKey);
 
 /// <summary>

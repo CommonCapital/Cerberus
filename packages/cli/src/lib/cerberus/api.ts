@@ -315,6 +315,9 @@ export const cerberus = {
   review: (id: string) => request<Review>("GET", `/reviews/${id}`),
   /** What an agent job produced; `report` is its written report (Markdown) when the agent writes one. */
   agentRun: (id: string) => request<{ id: string; agent: string; summary: string; report: string | null }>("GET", `/agent-runs/${id}`),
+  /** Summarises the earlier part of a chat now; the model gets the summary in its place from the next reply on. */
+  compactSession: (sessionId: string, model?: string) =>
+    request<{ messages: number; summary: string; model: string }>("POST", `/sessions/${sessionId}/compact`, model ? { model } : {}),
   scans: () => request<ScanSummary[]>("GET", "/scans"),
   scan: (id: string) => request<ScanDetail>("GET", `/scans/${id}`),
   /** Records the operator's decision on a finding, with the reason. It applies to that finding in later scans too. */

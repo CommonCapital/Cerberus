@@ -69,6 +69,11 @@ builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatCompactor>();
+builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatLimits
+{
+    ContextTokens = int.TryParse(Environment.GetEnvironmentVariable("CERBERUS_CONTEXT_TOKENS"), out var contextTokens) && contextTokens >= 1000 ? contextTokens : null,
+});
 
 // --- Authorization & safety spine: append-only, hash-chained audit log ------
 builder.Services.AddSingleton<AuditLog>();
