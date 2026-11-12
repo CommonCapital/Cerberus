@@ -5,6 +5,9 @@ import type { Message } from "../../hooks/use-chat";
 import { Mode, type ModeType } from "@nightcode/shared";
 import { TextAttributes } from "@opentui/core";
 import { summarizeToolCall, toolResultLines } from "../../lib/tool-display";
+import { foldQuietRuns, type Shown } from "../../lib/tool-folding";
+import { useToolCallsExpanded } from "../../lib/tool-fold-state";
+import { markdownStyle } from "../../lib/markdown-style";
 
 type ClientMessagePart = Message["parts"][number];
 type ToolPart = Extract<ClientMessagePart, { type: `tool-${string}` | "dynamic-tool" }>;
@@ -32,26 +35,33 @@ function formatToolArgs(tc: ToolPart, toolName: string): string {
   return summarizeToolCall(toolName, tc.input);
 }
 
-type PartGroup = {
-  type: ClientMessagePart["type"];
-  parts: ClientMessagePart[];
+type Item = Shown<ClientMessagePart>;
+
+type ItemGroup = {
+  type: string;
+  items: Item[];
   key: string;
 };
 
-function groupConsecutiveParts(parts: ClientMessagePart[]): PartGroup[] {
-  const groups: PartGroup[] = [];
+/** What is shown, in groups of the same kind; a blank line separates one group from the next. */
+function groupConsecutive(items: Item[]): ItemGroup[] {
+  const groups: ItemGroup[] = [];
 
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
+  for (const item of items) {
+    const type = item.kind === "fold" ? "fold" : item.part.type;
     const lastGroup = groups[groups.length - 1];
 
-     if (lastGroup && lastGroup.type === part.type) {
-      lastGroup.parts.push(part);
-     } else {
-      const key = 
-        isToolPart(part) ? `group-tc-${part.toolCallId}` : `group-${part.type}-${i}`;
-      groups.push({ type: part.type, parts: [part], key });
-     }
+    if (lastGroup && lastGroup.type === type) {
+      lastGroup.items.push(item);
+    } else {
+      const key =
+        item.kind === "fold"
+          ? `group-${item.key}`
+          : isToolPart(item.part)
+            ? `group-tc-${item.part.toolCallId}`
+            : `group-${type}-${item.index}`;
+      groups.push({ type, items: [item], key });
+    }
   }
 
   return groups;
@@ -65,11 +75,36 @@ export function BotMessage({
   streaming = false,
 }: Props) {
   const { colors } = useTheme();
+  const expanded = useToolCallsExpanded();
+  const style = markdownStyle(colors);
+  const lastIndex = parts.length - 1;
   return (
     <box width="100%" alignItems="center">
-      {groupConsecutiveParts(parts).map((group, i) => (
+      {groupConsecutive(foldQuietRuns(parts, expanded)).map((group, i) => (
         <box key={group.key} width="100%" paddingTop={i === 0 ? 0 : 1}>
-          {group.parts.map((part, j) => {
+          {group.items.map((item) => {
+            if (item.kind === "fold") {
+              return (
+                <box
+                  key={item.key}
+                  border={["left"]}
+                  borderColor={colors.thinkingBorder}
+                  customBorderChars={{
+                    ...EmptyBorder,
+                    vertical: "│",
+                  }}
+                  width="100%"
+                  paddingX={2}
+                >
+                  <text attributes={TextAttributes.DIM}>
+                    <em fg={colors.info}>Explored:</em> {item.summary} · ctrl+o shows each
+                  </text>
+                </box>
+              );
+            }
+
+            const part = item.part;
+            const j = item.index;
             if (part.type === "reasoning") {
               return (
                 <box
@@ -134,7 +169,8 @@ export function BotMessage({
             if (part.type === "text") {
               return (
                 <box key={`text-${j}`} paddingX={3} width="100%">
-                  <text>{part.text}</text>
+                  {/* The model writes markdown. While its last block is still arriving it is not final. */}
+                  <markdown content={part.text} syntaxStyle={style} streaming={streaming && j === lastIndex} />
                 </box>
               );
             }

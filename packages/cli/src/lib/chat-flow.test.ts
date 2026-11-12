@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isIdle, shellCommandOf, shellMessageText, shellRecord, withUnsent } from "./chat-flow";
+import { isIdle, readyToName, shellCommandOf, shellMessageText, shellRecord, withUnsent } from "./chat-flow";
 
 describe("shellCommandOf", () => {
   test("a line starting with ! is a command of the operator's own", () => {
@@ -79,4 +79,36 @@ describe("withUnsent", () => {
     expect(withUnsent(messages, 4, new Set()).map((m) => m.id)).toEqual(["u2"]);
     expect(withUnsent(messages, 0, new Set(["u1"])).map((m) => m.id)).toEqual(["u1"]);
   });
+});
+
+// --- naming a new conversation ---------------------------------------------
+
+const said = (role: string, text: string, metadata?: { shell?: unknown; note?: unknown }) => ({
+  id: crypto.randomUUID(), role, parts: [{ type: "text", text }], ...(metadata ? { metadata } : {}),
+});
+
+test("a conversation can be named once something was asked and the reply is over", () => {
+  const asked = [said("user", "Find the login bug.")];
+  const answered = [...asked, said("assistant", "Looking.")];
+
+  expect(readyToName([], "ready")).toBe(false);
+  expect(readyToName(asked, "submitted")).toBe(false);
+  expect(readyToName(answered, "streaming")).toBe(false);
+  expect(readyToName(answered, "ready")).toBe(true);
+});
+
+test("a reply waiting on a tool is not over yet", () => {
+  const waiting = [
+    said("user", "Find the login bug."),
+    { id: "a", role: "assistant", parts: [{ type: "tool-readFile", state: "input-available" }] },
+  ];
+
+  expect(readyToName(waiting, "ready")).toBe(false);
+});
+
+test("a command the operator ran, or a note added for them, is not something asked", () => {
+  const onlyTheirs = [said("user", "$ git status", { shell: { command: "git status" } }), said("user", "Undone.", { note: true }), said("assistant", "Noted.")];
+
+  expect(readyToName(onlyTheirs, "ready")).toBe(false);
+  expect(readyToName([said("user", "Fix it."), ...onlyTheirs], "ready")).toBe(true);
 });

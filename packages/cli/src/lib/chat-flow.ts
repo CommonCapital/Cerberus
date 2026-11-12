@@ -44,8 +44,8 @@ export function shellMessageText(record: ShellRecord): string {
   );
 }
 
-type Part = { type: string; state?: string };
-type Msg = { id: string; role: string; parts: readonly Part[] };
+type Part = { type: string; state?: string; text?: string };
+type Msg = { id: string; role: string; parts: readonly Part[]; metadata?: { shell?: unknown; note?: unknown } };
 
 /**
  * Whether the conversation is at rest: no reply is being produced, and the
@@ -70,4 +70,17 @@ export function withUnsent<T extends { id: string }>(messages: readonly T[], ind
   let start = index;
   while (start > 0 && unsent.has(messages[start - 1]!.id)) start--;
   return messages.slice(start, index + 1);
+}
+
+/**
+ * Whether a new conversation can be given its name: the operator has asked
+ * something (a command they ran or a note added for them is not a prompt),
+ * the agent has replied, and the reply is over.
+ */
+export function readyToName(messages: readonly Msg[], status: string): boolean {
+  if (!isIdle(messages, status)) return false;
+  const asked = messages.some(
+    (m) => m.role === "user" && !m.metadata?.shell && !m.metadata?.note && m.parts.some((p) => p.type === "text" && (p.text ?? "").trim().length > 0),
+  );
+  return asked && messages.at(-1)?.role === "assistant";
 }

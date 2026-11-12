@@ -324,6 +324,10 @@ export const cerberus = {
   /** Summarises the earlier part of a chat now; the model gets the summary in its place from the next reply on. */
   compactSession: (sessionId: string, model?: string) =>
     request<{ messages: number; summary: string; model: string }>("POST", `/sessions/${sessionId}/compact`, model ? { model } : {}),
+  /** Has the model of the last reply name the conversation from its first prompt. */
+  nameSession: (sessionId: string) => request<{ title: string; model: string }>("POST", `/sessions/${sessionId}/title`),
+  /** Names the conversation as the operator says. */
+  renameSession: (sessionId: string, title: string) => request<{ title: string }>("PUT", `/sessions/${sessionId}/title`, { title }),
   scans: () => request<ScanSummary[]>("GET", "/scans"),
   scan: (id: string) => request<ScanDetail>("GET", `/scans/${id}`),
   /** Records the operator's decision on a finding, with the reason. It applies to that finding in later scans too. */

@@ -37,6 +37,8 @@ public static class Endpoints
         sessions.MapGet("/{id}", GetSession);
         sessions.MapPost("/", CreateSession);
         sessions.MapPost("/{id}/compact", CompactSession);
+        sessions.MapPost("/{id}/title", WriteSessionTitle);
+        sessions.MapPut("/{id}/title", SetSessionTitle);
 
         var settings = app.MapGroup("/settings/keys").AddEndpointFilter<RequireAuthFilter>();
         settings.MapGet("/", ListApiKeys);
@@ -716,6 +718,61 @@ public static class Endpoints
         return Results.Json(new { messages = compaction.Messages, summary = compaction.Summary, model });
     }
 
+    /// <summary>
+    /// Has the model name the session from its first prompt. Asked for by the client once the
+    /// first reply is in; a title that cannot be written leaves the session named as it was.
+    /// </summary>
+    private static async Task<IResult> WriteSessionTitle(
+        string id, CompactRequest? body, HttpContext http, CerberusDbContext db, ApiKeyService keys, SessionTitler titler, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
+        if (session is null) return Results.Json(new { error = "Session not found" }, statusCode: 404);
+
+        var messages = ParseStoredMessages(session.Messages)
+            .Select(m => System.Text.Json.Nodes.JsonNode.Parse(m.GetRawText()) as System.Text.Json.Nodes.JsonObject)
+            .Where(m => m is not null).Select(m => m!).ToList();
+        // The model that wrote the last reply, unless another is named: no new provider sees the message.
+        var model = body?.Model ?? messages.Select(m => m["metadata"]?["model"]?.GetValue<string>()).LastOrDefault(m => m is not null);
+        if (model is null || !ModelRegistry.IsSupported(model))
+        {
+            return Results.Json(new { error = "model is required and must be a supported model id" }, statusCode: 400);
+        }
+        if (SessionTitler.FirstPrompt(messages) is not { } prompt)
+        {
+            return Results.Json(new { error = "There is nothing to name the session after yet." }, statusCode: 409);
+        }
+
+        string? title;
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(TimeSpan.FromSeconds(60));   // a title is not worth waiting long for
+            title = await titler.WriteAsync(prompt, model, await keys.ResolveCredentialsAsync(userId, ct), limit.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Results.Json(new { error = $"The title could not be written: {(ex is OperationCanceledException ? "the model took too long." : ex.Message)}" }, statusCode: 502);
+        }
+        if (title is null) return Results.Json(new { error = "The model returned nothing usable as a title." }, statusCode: 502);
+
+        // Only the title: a reply being stored at the same moment must not be overwritten with what was read above.
+        await db.Sessions.Where(s => s.Id == id && s.UserId == userId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Title, title), ct);
+        return Results.Json(new { title, model });
+    }
+
+    /// <summary>Names the session as the operator says.</summary>
+    private static async Task<IResult> SetSessionTitle(string id, CreateSessionRequest body, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        if (SessionTitler.CleanManual(body.Title) is not { } title)
+        {
+            return Results.Json(new { error = $"A title is one line of at most {SessionTitler.MaxManualLength} characters." }, statusCode: 400);
+        }
+        var changed = await db.Sessions.Where(s => s.Id == id && s.UserId == userId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Title, title), ct);
+        return changed == 0 ? Results.Json(new { error = "Session not found" }, statusCode: 404) : Results.Json(new { title });
+    }
+
     private static async Task<IResult> CreateSession(CreateSessionRequest body, HttpContext http, CerberusDbContext db, CancellationToken ct)
     {
         var userId = UserId(http);
@@ -723,7 +780,7 @@ public static class Endpoints
         {
             return Results.Json(new { error = "Invalid request body" }, statusCode: 400);
         }
-        var session = new Session { UserId = userId, Title = body.Title };
+        var session = new Session { UserId = userId, Title = SessionTitler.Initial(body.Title) };
         db.Sessions.Add(session);
         await db.SaveChangesAsync(ct);
 
