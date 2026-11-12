@@ -17,6 +17,8 @@ import {
   RunsDialogContent,
   ScanDialogContent,
   SessionsDialogContent,
+  ForkDialogContent,
+  RenameDialogContent,
   ThemeDialogContent,
 } from "../dialogs";
 import type { Command } from "./types";
@@ -24,6 +26,8 @@ import type { Command } from "./types";
 import { performLogin } from "../../lib/oauth";
 import { cerberus } from "../../lib/cerberus/api";
 import { requestUndo, type UndoKind } from "../../lib/undo-events";
+import { saveTranscript } from "../../lib/session-housekeeping";
+import { transcriptIo } from "../../lib/session-housekeeping-io";
 import type { CommandContext } from "./types";
 
 /** "/undo" and "/redo": asked of the conversation on screen, which carries it out. */
@@ -266,6 +270,47 @@ export const COMMANDS: Command[] = [
         title: "Sessions",
         children: <SessionsDialogContent />,
       })
+    },
+  },
+  {
+    name: "fork",
+    description: "Copy this conversation, whole or up to an earlier reply, and carry on in the copy",
+    value: "/fork",
+    action: (ctx) => {
+      if (!ctx.sessionId) {
+        ctx.toast.show({ variant: "error", message: "Open a conversation first; /fork copies the one you are in." });
+        return;
+      }
+      ctx.dialog.open({ title: "Fork this conversation", children: <ForkDialogContent sessionId={ctx.sessionId} /> });
+    },
+  },
+  {
+    name: "rename",
+    description: "Give this conversation a name of your own",
+    value: "/rename",
+    action: (ctx) => {
+      if (!ctx.sessionId) {
+        ctx.toast.show({ variant: "error", message: "Open a conversation first; /rename names the one you are in." });
+        return;
+      }
+      ctx.dialog.open({ title: "Rename this conversation", children: <RenameDialogContent sessionId={ctx.sessionId} /> });
+    },
+  },
+  {
+    name: "export",
+    description: "Save this conversation as a Markdown file in the current directory",
+    value: "/export",
+    action: async (ctx) => {
+      if (!ctx.sessionId) {
+        ctx.toast.show({ variant: "error", message: "Open a conversation first; /export saves the one you are in." });
+        return;
+      }
+      try {
+        const path = await saveTranscript(ctx.sessionId, transcriptIo);
+        ctx.toast.show({ variant: "info", message: `Saved to ${path}. Credential-shaped values are masked.` });
+      } catch (problem) {
+        ctx.toast.show({ variant: "error", message: problem instanceof Error ? problem.message : "Could not export the conversation" });
+      }
     },
   },
   {

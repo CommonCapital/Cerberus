@@ -172,7 +172,7 @@ public static class Sarif
             ["invocations"] = new JsonArray(new JsonObject
             {
                 ["executionSuccessful"] = true,
-                ["endTimeUtc"] = finishedAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["endTimeUtc"] = Cerberus.Data.StoredTime.Utc(finishedAt).ToString("yyyy-MM-ddTHH:mm:ssZ"),
             }),
             ["results"] = results,
             ["properties"] = properties,
