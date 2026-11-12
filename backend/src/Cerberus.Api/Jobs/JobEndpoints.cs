@@ -13,7 +13,9 @@ public sealed record SubmitJobRequest(
     string? Type, string? Path, bool? Sca, string? EngagementId, string? CatalogId, string? ScanId,
     string? Model, int? MaxFindings, bool? IncludeTestsAndDocs, string? Exclusions, List<string>? Catalogs,
     int? MaxSteps = null, string? Instructions = null, string? AgentModel = null,
-    string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null, List<string>? Agents = null);
+    string? AssessmentId = null, int? MaxControls = null, List<string>? ControlIds = null, List<string>? Agents = null,
+    // sast, threat-model: let the agent ask questions on the public internet (needs the server's web access switched on).
+    bool? Research = null);
 
 public sealed record JobMessageRequest(string? Text);
 
@@ -65,8 +67,8 @@ public static class JobEndpoints
 
     private static Task<IResult> Submit(
         SubmitJobRequest body, HttpContext http, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct) =>
-        SubmitAsync(UserId(http), body, db, audit, bus, options, catalogs, events, policy, ct);
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, CancellationToken ct) =>
+        SubmitAsync(UserId(http), body, db, audit, bus, options, catalogs, events, policy, web, ct);
 
     /// <summary>
     /// Accepts a job for a user: validation, engagement scope, the permission policy, then the queue or an approval
@@ -75,7 +77,7 @@ public static class JobEndpoints
     /// <param name="accepted">Called with the job (and the approval it waits for, if any) once it has been stored.</param>
     internal static async Task<IResult> SubmitAsync(
         string userId, SubmitJobRequest body, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, CancellationToken ct,
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, CancellationToken ct,
         Action<Job, ApprovalRequest?>? accepted = null)
     {
         var type = string.IsNullOrWhiteSpace(body.Type) ? JobTypes.Scan : body.Type.Trim().ToLowerInvariant();
@@ -90,6 +92,25 @@ public static class JobEndpoints
         ApprovalNeed? approvalNeed = null;
         ApprovalNeed? planNeed = null;
         var sendsCodeOut = false;
+
+        // Research on the internet: only for the agents that can use it, and only where the installation allows it.
+        var research = body.Research == true;
+        if (research && type is not (JobTypes.Sast or JobTypes.ThreatModel))
+        {
+            return BadRequest("research applies to sast and threat-model jobs.");
+        }
+        if (research && !web.Enabled)
+        {
+            return BadRequest("Research on the internet is switched off on this server (CERBERUS_WEB=on turns it on).");
+        }
+        ApprovalNeed? researchNeed = research
+            ? new ApprovalNeed(
+                ActionKinds.UseTheInternet,
+                $"Let the agent ask questions on the public internet while it works on \"{targetPath}\"",
+                $"The agent may ask up to {Web.Research.MaxQuestionsPerRun} questions. Each is checked before it leaves — a question containing a credential, " +
+                "an e-mail address, an internal address, a name from the engagement or what looks like code is not sent — and is answered by a separate " +
+                "researcher that sees only the question, never the code. Every question sent is shown on the run.")
+            : null;
 
         if (type == JobTypes.Review)
         {
@@ -163,7 +184,7 @@ public static class JobEndpoints
                 return BadRequest($"instructions must be at most {Agents.SastAgent.MaxInstructions} characters");
             }
             var sast = new Agents.SastJobParameters(body.Model, body.MaxSteps ?? Agents.SastAgent.DefaultSteps,
-                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim());
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research);
             parameters = JsonSerializer.Serialize(sast, JobTypes.Json);
 
             var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
@@ -197,7 +218,7 @@ public static class JobEndpoints
                 return BadRequest($"instructions must be at most {Agents.ThreatModelAgent.MaxInstructions} characters");
             }
             var threatModel = new Agents.ThreatModelJobParameters(body.Model, body.MaxSteps ?? Agents.ThreatModelAgent.DefaultSteps,
-                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim());
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research);
             parameters = JsonSerializer.Serialize(threatModel, JobTypes.Json);
 
             var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
@@ -374,6 +395,7 @@ public static class JobEndpoints
         var involved = new List<string> { ActionKinds.RunJob };
         if (planNeed is not null) involved.Add(ActionKinds.RunPlan);
         if (approvalNeed is not null || sendsCodeOut) involved.Add(ActionKinds.SendCodeToCloudModel);
+        if (researchNeed is not null) involved.Add(ActionKinds.UseTheInternet);
         var unapproved = permissions.Unapproved(involved);
 
         if (unapproved.Count == 0)
@@ -383,7 +405,7 @@ public static class JobEndpoints
             if (skipped.Count > 0)
             {
                 await audit.AppendAsync(userId, "approval.auto", AuditOutcome.Allowed,
-                    $"Not asked: \"{(planNeed ?? approvalNeed)!.Title}\" is always allowed by the {permissionScope} permissions ({string.Join(", ", skipped)}).",
+                    $"Not asked: \"{(planNeed ?? approvalNeed ?? researchNeed)!.Title}\" is always allowed by the {permissionScope} permissions ({string.Join(", ", skipped)}).",
                     engagementId, targetPath, tier, ct);
             }
             approvalNeed = null;
@@ -396,7 +418,19 @@ public static class JobEndpoints
                 Kind = unapproved.Contains(ActionKinds.SendCodeToCloudModel) ? ActionKinds.SendCodeToCloudModel : unapproved[^1],
             };
         }
-        else if (!unapproved.Contains(ActionKinds.SendCodeToCloudModel))
+        else if (unapproved.Contains(ActionKinds.SendCodeToCloudModel))
+        {
+            // One request for everything the run needs consent for: the cloud model, and the internet if that is asked too.
+            if (researchNeed is not null && unapproved.Contains(ActionKinds.UseTheInternet))
+            {
+                approvalNeed = approvalNeed! with { Detail = approvalNeed.Detail + "\n\nAlso: " + researchNeed.Title + ". " + researchNeed.Detail };
+            }
+        }
+        else if (unapproved.Contains(ActionKinds.UseTheInternet))
+        {
+            approvalNeed = researchNeed;
+        }
+        else
         {
             approvalNeed = new ApprovalNeed(
                 ActionKinds.RunJob,

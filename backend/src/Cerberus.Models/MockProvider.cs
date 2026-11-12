@@ -121,6 +121,11 @@ public sealed partial class MockProvider : IModelProvider
 
         (string Tool, object Input)? call = lastUser switch
         {
+            // A researcher (internet tools, no file tools): search if it can, else fetch the page the question names or a manual page.
+            _ when request.Tools.Any(t => t.Name == "webFetch") && request.Tools.All(t => t.Name != "readFile") =>
+                request.Tools.Any(t => t.Name == "webSearch")
+                    ? ("webSearch", new { query = lastUser.Length <= 100 ? lastUser : lastUser[..100] })
+                    : ("webFetch", new { url = UrlIn().Match(lastUser) is { Success: true } named ? named.Value : "https://docs.python.org/3/library/pickle.html" }),
             // "delegate: <task>" → hand the task to a helper, named by its first words.
             _ when DelegatePattern().Match(lastUser) is { Success: true } m => ("task", new
             {
@@ -232,6 +237,12 @@ public sealed partial class MockProvider : IModelProvider
             }
         }
 
+        // Allowed to ask the internet: one general question, with nothing of the code in it.
+        if (read.Count > 0 && request.Tools.Any(t => t.Name == "research") && calls.All(c => c.Name != "research"))
+        {
+            return ("research", new { question = "Is it safe to call pickle.loads on data from outside in Python?" }, null);
+        }
+
         // Before closing: leave one note for the next run, if it can.
         if (read.Count > 0 && request.Tools.Any(t => t.Name == "remember") && calls.All(c => c.Name != "remember"))
         {
@@ -331,6 +342,9 @@ public sealed partial class MockProvider : IModelProvider
 
     [GeneratedRegex(@"^skills about (.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex SkillsPattern();
+
+    [GeneratedRegex(@"https?://[^\s""'<>]+")]
+    private static partial Regex UrlIn();
 
     [GeneratedRegex(@"^delegate:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex DelegatePattern();

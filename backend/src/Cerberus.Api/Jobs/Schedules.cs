@@ -182,7 +182,7 @@ public sealed class ScheduleRunner(IServiceScopeFactory scopes, AuditLog audit, 
             schedule.UserId, request, services.GetRequiredService<CerberusDbContext>(), services.GetRequiredService<AuditLog>(),
             services.GetRequiredService<IMessageBus>(), services.GetRequiredService<JobOptions>(),
             services.GetRequiredService<Compliance.CatalogLoader>(), services.GetRequiredService<JobEvents>(),
-            services.GetRequiredService<RunPolicy>(), ct,
+            services.GetRequiredService<RunPolicy>(), services.GetRequiredService<Web.WebOptions>(), ct,
             accepted: (j, a) => (job, approval) = (j, a));
 
         if (job is null)

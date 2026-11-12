@@ -141,6 +141,16 @@ Everything a model does here — chat, triage, the agents — runs on the model 
 - A name the server cannot place — `mistral`, say — is refused rather than guessed: write `ollama:mistral`.
 - **Check a model before trusting it with a review:** `dotnet run --project backend/src/Cerberus.Api -- smoke-llm <model>` tells you whether it can call tools at all.
 
+### Letting an agent look things up on the internet
+
+Off by default. An agent that has read your code knows things that must not be typed into a search box, so internet access is built so that the code cannot ride along:
+
+- **Switch it on for the server:** `CERBERUS_WEB=on`. For searching, also point it at a SearXNG instance you run yourself (`CERBERUS_SEARXNG_URL`); without one the researcher can fetch pages it is pointed at, but not search.
+- **Ask for it per run:** `cerberus run sast . --model <id> --research` (also `threat-model`). The run waits for your approval ("use the internet"); "always allow" stops the asking.
+- **What happens:** the agent can ask up to three questions. Each is checked before it leaves — one that contains a credential, an e-mail address, an internal address, a name from your engagement or what looks like code is not sent, and the run says so. A separate researcher that sees only the question, never the code, looks it up. Its answer comes back marked as outside information the agent must weigh and not obey. Every question that was sent is shown on the run.
+- **What the server will not fetch:** anything on a private network — this machine, your LAN, cloud metadata addresses — however the address is written, including through a redirect or a name that resolves there. Check with `dotnet Cerberus.Api.dll web-check <url>`.
+- The guard is a set of patterns. It stops the obvious ways for something to leak, not every way; use local models and leave research off for code that must not be hinted at.
+
 ### 4. Security runs from the CLI
 
 With the backend and the CLI running, `/login`, and:
