@@ -37,6 +37,16 @@ const deps: HeadlessDeps = {
   cancel: (id) => cerberus.cancelJob(id),
   sarif: (source) => cerberus.sarif(source.kind, source.id),
   report: reportOf,
+  screenshots: async (jobId) => {
+    const kept = await cerberus.artifacts(jobId);
+    return Promise.all(kept.map(async (artifact) => ({ name: artifact.name, source: artifact.source, bytes: await cerberus.artifactBytes(artifact.id) })));
+  },
+  writeBytes: (path, bytes) => {
+    const full = resolve(process.cwd(), path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, bytes);
+    return full;
+  },
   write: (path, content) => {
     const full = resolve(process.cwd(), path);
     mkdirSync(dirname(full), { recursive: true });

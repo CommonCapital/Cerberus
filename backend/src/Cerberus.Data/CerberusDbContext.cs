@@ -25,6 +25,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<CodeChunk> CodeChunks => Set<CodeChunk>();
     public DbSet<OperatorQuestion> OperatorQuestions => Set<OperatorQuestion>();
     public DbSet<Schedule> Schedules => Set<Schedule>();
+    public DbSet<RunArtifact> RunArtifacts => Set<RunArtifact>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

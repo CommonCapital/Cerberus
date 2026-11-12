@@ -374,6 +374,15 @@ export const cerberus = {
     request<{ id: string; title: string }>("POST", `/sessions/${sessionId}/fork`, options),
   /** The conversation as a Markdown document, credentials masked. */
   exportSession: (sessionId: string) => download(`/sessions/${sessionId}/export`),
+  /** What a run kept besides its findings: the screenshots its researcher took. */
+  artifacts: (jobId: string) =>
+    request<{ id: string; name: string; contentType: string; source: string; size: number; createdAt: string }[]>("GET", `/jobs/${jobId}/artifacts`),
+  artifactBytes: async (id: string): Promise<Uint8Array> => {
+    const auth = getAuth();
+    const response = await fetch(`${baseUrl()}/artifacts/${id}`, { headers: auth ? { Authorization: `Bearer ${auth.token}` } : {} });
+    if (!response.ok) throw new ApiError(`The screenshot could not be fetched (${response.status})`, response.status);
+    return new Uint8Array(await response.arrayBuffer());
+  },
   /** What can be chosen as a model: every provider, its models, and whether it is ready to use. */
   models: () => request<ModelListing>("GET", "/models"),
   /** Which API providers have a key stored for this operator. A key itself is never returned. */

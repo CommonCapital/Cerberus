@@ -35,6 +35,8 @@ services:
       # also set CERBERUS_SEARXNG_URL so the researcher can search and not only fetch.
       CERBERUS_WEB: ${CERBERUS_WEB:-off}
       CERBERUS_SEARXNG_URL: ${CERBERUS_SEARXNG_URL:-}
+      # A browser for the researcher (needs Chromium in the image — see backend/Dockerfile — and CERBERUS_WEB=on).
+      CERBERUS_BROWSER: ${CERBERUS_BROWSER:-off}
       # Comma-separated names that must never appear in anything sent to the internet.
       CERBERUS_EGRESS_BLOCKED_TERMS: ${CERBERUS_EGRESS_BLOCKED_TERMS:-}
       # Uncomment to change behaviour (see backend/README.md):

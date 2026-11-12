@@ -132,6 +132,12 @@ builder.Services.AddSingleton(new Cerberus.Api.Web.WebOptions(
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
 builder.Services.AddSingleton<Cerberus.Api.Web.IWebFetcher, Cerberus.Api.Web.SafeFetcher>();
 builder.Services.AddSingleton<Cerberus.Api.Web.IWebSearch, Cerberus.Api.Web.SearxngSearch>();
+// A browser for the researcher: its own switch on top of web access, an empty profile per page, one way out.
+builder.Services.AddSingleton(new Cerberus.Api.Web.BrowserOptions(
+    Enabled: Environment.GetEnvironmentVariable("CERBERUS_BROWSER") == "on",
+    Path: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_PATH"),
+    NoSandbox: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_NO_SANDBOX") == "true"));
+builder.Services.AddSingleton<Cerberus.Api.Web.IAgentBrowser, Cerberus.Api.Web.ChromeBrowser>();
 builder.Services.AddSingleton<Cerberus.Api.Web.ResearchTools>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
@@ -154,6 +160,15 @@ if (args is ["web-check", ..])
     return await Cerberus.Api.Health.ServiceCommands.WebCheckAsync(
         app.Services.GetRequiredService<Cerberus.Api.Web.IWebFetcher>(), app.Services.GetRequiredService<Cerberus.Api.Web.WebOptions>(),
         args.ElementAtOrDefault(1), Console.Out, CancellationToken.None);
+}
+
+// `browser-check <url> [screens] [file.png]`: open one page in the agents' browser, scroll, and optionally save the screenshot.
+if (args is ["browser-check", ..])
+{
+    return await Cerberus.Api.Health.ServiceCommands.BrowserCheckAsync(
+        app.Services.GetRequiredService<Cerberus.Api.Web.IAgentBrowser>(), app.Services.GetRequiredService<Cerberus.Api.Web.BrowserOptions>(),
+        args.ElementAtOrDefault(1), int.TryParse(args.ElementAtOrDefault(2), out var screens) ? screens : 0, args.ElementAtOrDefault(3),
+        Console.Out, CancellationToken.None);
 }
 
 // `smoke-llm <model>`: can this model do what the agents need? Keys come from the environment; nothing is served.
@@ -200,6 +215,7 @@ app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapScheduleEndpoints();
 app.MapModelEndpoints();
+Cerberus.Api.Web.ArtifactEndpoints.MapArtifactEndpoints(app);
 app.MapReviewEndpoints();
 Cerberus.Api.Reports.SarifEndpoints.MapSarifEndpoints(app);
 Cerberus.Api.Agents.AgentRunEndpoints.MapAgentRunEndpoints(app);

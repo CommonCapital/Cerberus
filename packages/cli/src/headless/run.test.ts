@@ -57,6 +57,7 @@ function harness(script: Script, change: Partial<HeadlessDeps> = {}) {
     approved: [] as string[],
     cancelled: [] as string[],
     written: [] as { path: string; content: string }[],
+    pictures: [] as { path: string; size: number }[],
     stopped: 0,
     timeout: null as (() => void) | null,
     timeoutCalledOff: false,
@@ -75,6 +76,11 @@ function harness(script: Script, change: Partial<HeadlessDeps> = {}) {
     report: async () => null,
     write: (path, content) => {
       seen.written.push({ path, content });
+      return `/work/${path}`;
+    },
+    screenshots: async () => [],
+    writeBytes: (path, bytes) => {
+      seen.pictures.push({ path, size: bytes.length });
       return `/work/${path}`;
     },
     out: (line) => void seen.out.push(line),
@@ -371,4 +377,35 @@ test("a result that cannot be collected does not pass the build", async () => {
 
   expect(await runHeadless(options("run scan svc"), deps)).toBe(EXIT.notFinished);
   expect(seen.log.at(-1)).toBe("Scan job-1234 finished, but its result could not be collected: Request failed (500)");
+});
+
+test("the screenshots a run kept are saved where asked, named by number and page", async () => {
+  const { deps, seen } = harness((emit) => emit(view({ job: job("Succeeded", { type: "sast" }) })), {
+    screenshots: async (jobId) => {
+      expect(jobId).toBe("job-12345678-abcd");
+      return [
+        { name: "pickle — Python object serialization", source: "https://docs.python.org/3/library/pickle.html", bytes: new Uint8Array([1, 2, 3]) },
+        { name: "", source: "https://example.org/", bytes: new Uint8Array([4, 5]) },
+      ];
+    },
+  });
+
+  const code = await runHeadless(options("run sast svc --model m --research --screenshots shots --fail-on none"), deps);
+
+  expect(code).toBe(EXIT.ok);
+  expect(seen.pictures).toEqual([
+    { path: "shots/01-pickle-python-object-serialization.png", size: 3 },
+    { path: "shots/02-page.png", size: 2 },
+  ]);
+  expect(seen.out).toContain("2 screenshots saved to shots");
+  expect(seen.log).toContain("[screenshot] /work/shots/01-pickle-python-object-serialization.png — https://docs.python.org/3/library/pickle.html");
+});
+
+test("a run that kept no screenshots says so", async () => {
+  const { deps, seen } = harness((emit) => emit(view({ job: job("Succeeded", { type: "sast" }) })));
+
+  await runHeadless(options("run sast svc --model m --screenshots shots --fail-on none"), deps);
+
+  expect(seen.pictures).toEqual([]);
+  expect(seen.out).toContain("The run kept no screenshots.");
 });
