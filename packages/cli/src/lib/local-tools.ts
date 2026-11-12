@@ -239,7 +239,16 @@ export async function runCommand(command: string, options: { timeout?: number; b
   };
 }
 
-export async function executeLocalTool(toolName: string, input: unknown, mode: ModeType) {
+/**
+ * @param onChange Told about every file the call wrote, with its content before
+ * (null if it did not exist) and after — what an undo needs.
+ */
+export async function executeLocalTool(
+  toolName: string,
+  input: unknown,
+  mode: ModeType,
+  onChange?: (change: { path: string; before: string | null; after: string }) => void,
+) {
   if (mode === Mode.PLAN && !["readFile", "listDirectory", "glob", "grep"].includes(toolName)) {
     throw new Error(`Tool ${toolName} is not available in PLAN mode`);
   }
@@ -334,6 +343,7 @@ export async function executeLocalTool(toolName: string, input: unknown, mode: M
       const previous = await readFile(resolved, "utf-8").catch(() => null);
       await mkdir(dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
+      onChange?.({ path: relative(cwd, resolved), before: previous, after: content });
       return {
         success: true as const,
         path: relative(cwd, resolved),
@@ -350,6 +360,7 @@ export async function executeLocalTool(toolName: string, input: unknown, mode: M
       const { result, replacements, matched } = replaceExact(content, oldString, newString, replaceAll ?? false);
 
       await writeFile(resolved, result, "utf-8");
+      onChange?.({ path: relative(cwd, resolved), before: content, after: result });
       return {
         success: true as const,
         path: relative(cwd, resolved),

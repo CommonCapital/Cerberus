@@ -22,6 +22,15 @@ import type { Command } from "./types";
 
 import { performLogin } from "../../lib/oauth";
 import { cerberus } from "../../lib/cerberus/api";
+import { requestUndo, type UndoKind } from "../../lib/undo-events";
+import type { CommandContext } from "./types";
+
+/** "/undo" and "/redo": asked of the conversation on screen, which carries it out. */
+const undoOrRedo = (kind: UndoKind) => (ctx: CommandContext) => {
+  if (!ctx.sessionId || !requestUndo(ctx.sessionId, kind)) {
+    ctx.toast.show({ variant: "error", message: `Open the conversation whose changes you want to ${kind}; /${kind} works on the one you are in.` });
+  }
+};
 import { clearAuth } from "../../lib/auth";
 
 export const COMMANDS: Command[] = [
@@ -53,6 +62,18 @@ export const COMMANDS: Command[] = [
         ctx.toast.show({ variant: "error", message: problem instanceof Error ? problem.message : "Could not compact the conversation" });
       }
     },
+  },
+  {
+    name: "undo",
+    description: "Put back the files the agent changed in its last turn",
+    value: "/undo",
+    action: undoOrRedo("undo"),
+  },
+  {
+    name: "redo",
+    description: "Re-apply the changes you just undid",
+    value: "/redo",
+    action: undoOrRedo("redo"),
   },
   {
     name: "agents",

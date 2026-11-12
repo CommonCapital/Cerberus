@@ -16,6 +16,8 @@ import { describeCompaction, describeRetry, useChat } from "../hooks/use-chat";
 import { TaskStrip } from "../components/task-strip";
 import { latestTasks } from "../lib/task-list";
 import { isIdle, shellCommandOf } from "../lib/chat-flow";
+import { onUndoRequest } from "../lib/undo-events";
+import { describeOutcome, journalFor } from "../lib/undo-journal";
 import { ShellMessage } from "../components/messages/shell-message";
 import { usePromptConfig } from "../providers/prompt-config";
 import type { Message } from "../hooks/use-chat";
@@ -44,6 +46,16 @@ function ChatMessage(
 ) {
   if (msg.role === "user" && msg.metadata?.shell) {
     return <ShellMessage record={msg.metadata.shell} />;
+  }
+
+  // Something done outside the chat that the agent is told about (an undo): shown as a remark, not as a prompt.
+  if (msg.role === "user" && msg.metadata?.note) {
+    const text = msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("");
+    return (
+      <box paddingX={3} width="100%">
+        <text attributes={TextAttributes.DIM}>↺ {text}</text>
+      </box>
+    );
   }
 
   if (msg.role === "user") {
@@ -77,7 +89,7 @@ function SessionChat({
   const { mode, model } = usePromptConfig();
   const { isTopLayer } = useKeyboardLayer();
   const { ask, denyAll } = useToolPermission();
-  const { messages, status, submit, abort, interrupt, error, retry, compacted, runShell } = useChat(
+  const { messages, status, submit, abort, interrupt, error, retry, compacted, runShell, addNote } = useChat(
     session.id,
     initialMessages,
     ask,
@@ -102,6 +114,34 @@ function SessionChat({
     setQueued(rest);
     void submit({ userText: next!, mode, model });
   }, [idle, queued, error, submit, mode, model]);
+
+  // "/undo" and "/redo" for this conversation: carried out here, where it is known whether the agent is at rest.
+  const undoState = useRef({ idle, mode, model });
+  undoState.current = { idle, mode, model };
+  useEffect(
+    () =>
+      onUndoRequest(session.id, (kind) => {
+        const now = undoState.current;
+        if (!now.idle) {
+          toast.show({ variant: "error", message: `Wait for the reply to end before you ${kind}.` });
+          return;
+        }
+        try {
+          const outcome = journalFor(session.id)[kind](process.cwd());
+          if (outcome === null) {
+            toast.show({ variant: "info", message: kind === "undo" ? "Nothing to undo: the agent has changed no files here." : "Nothing to redo." });
+            return;
+          }
+          toast.show({ variant: outcome.restored.length > 0 ? "info" : "error", message: describeOutcome(kind, outcome) });
+          // The agent still believes its changes stand; it is told with the next prompt.
+          if (outcome.restored.length > 0) addNote(describeOutcome(kind, outcome, true), now.mode, now.model);
+        } catch (problem) {
+          toast.show({ variant: "error", message: problem instanceof Error ? problem.message : `Could not ${kind}` });
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session.id],
+  );
 
   const handleSubmit = (text: string) => {
     const command = shellCommandOf(text);
