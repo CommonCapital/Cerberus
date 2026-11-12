@@ -56,6 +56,12 @@ public sealed class ApiHost : IDisposable
     public ScriptedProvider Cloud { get; } = new(Cerberus.Core.Models.ModelProvider.Anthropic,
         _ => """{"verdict":"true_positive","reasoning":"Reviewed remotely.","remediation":"Fix it."}""");
 
+    /// <summary>Stands in for the DeepSeek API; records every request that would have left the machine.</summary>
+    public ScriptedProvider DeepSeek { get; } = new(Cerberus.Core.Models.ModelProvider.DeepSeek, _ => "Answered by the DeepSeek stand-in.");
+
+    /// <summary>Stands in for the local model server's list of installed models; null means it does not answer.</summary>
+    public FakeLocalModels LocalModels { get; } = new();
+
     /// <summary>Stands in for the embedding model; records what it was asked to embed.</summary>
     public WordEmbedder Embedder { get; } = new();
 
@@ -85,11 +91,17 @@ public sealed class ApiHost : IDisposable
                 foreach (var real in services.Where(d =>
                              d.ImplementationType == typeof(Cerberus.Models.AnthropicProvider) ||
                              d.ImplementationType == typeof(Cerberus.Models.OpenAiProvider) ||
+                             d.ImplementationType == typeof(Cerberus.Models.DeepSeekProvider) ||
                              d.ImplementationType == typeof(Cerberus.Models.OllamaProvider)).ToList())
                 {
                     services.Remove(real);
                 }
                 services.AddSingleton<Cerberus.Core.Models.IModelProvider>(Cloud);
+                services.AddSingleton<Cerberus.Core.Models.IModelProvider>(DeepSeek);
+
+                // Which local models are installed is scripted too: no test asks a model server.
+                services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.ILocalModelCatalog)));
+                services.AddSingleton<Cerberus.Api.ILocalModelCatalog>(LocalModels);
                 services.AddSingleton<Cerberus.Core.Models.IModelProvider>(
                     new ScriptedProvider(Cerberus.Core.Models.ModelProvider.OpenAI, _ => throw new InvalidOperationException("not used")));
                 // Ollama model ids are served by a rule-following stand-in that can call tools
@@ -169,6 +181,13 @@ public sealed class ApiHost : IDisposable
         _factory.Dispose();
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
+}
+
+public sealed class FakeLocalModels : Cerberus.Api.ILocalModelCatalog
+{
+    public IReadOnlyList<string>? Installed { get; set; } = ["llama3.1:latest", "nomic-chat:1b", "qwen2.5-coder:7b"];
+
+    public Task<IReadOnlyList<string>?> InstalledAsync(CancellationToken ct) => Task.FromResult(Installed);
 }
 
 public sealed class FakeOwnershipProbe : Cerberus.Authorization.IOwnershipProbe

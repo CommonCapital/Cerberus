@@ -40,7 +40,7 @@ public sealed class AnthropicProvider(HttpClient httpClient) : IModelProvider
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException(
-                "No Anthropic API key. Set ANTHROPIC_API_KEY or use a local Ollama model.");
+                "No Anthropic API key. Add one (/keys in the CLI), set ANTHROPIC_API_KEY, or use a local Ollama model.");
         }
 
         var client = new AnthropicClient { ApiKey = apiKey, HttpClient = httpClient };
@@ -206,8 +206,18 @@ public sealed class AnthropicProvider(HttpClient httpClient) : IModelProvider
         return parameters;
     }
 
-    /// <summary>Claude 4.6 and later take adaptive thinking; Haiku 4.5 and older do not.</summary>
-    public static bool UsesAdaptiveThinking(string modelId) =>
-        !modelId.StartsWith("claude-haiku-4", StringComparison.Ordinal) &&
-        !modelId.StartsWith("claude-3", StringComparison.Ordinal);
+    /// <summary>
+    /// Claude 4.6 and later take adaptive thinking; 4.5 and older do not (they are sent no thinking setting).
+    /// Read from the version in the id — "claude-opus-5-5", "claude-haiku-4-5", "claude-3-5-sonnet-…" — so that
+    /// any Claude model can be named, not only the listed ones. An id with no version in it is taken to be new.
+    /// </summary>
+    public static bool UsesAdaptiveThinking(string modelId)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(modelId, @"^claude-(?:[a-z]+-)?(\d+)(?:-(\d+))?");
+        if (!match.Success) return true;
+        var major = int.Parse(match.Groups[1].Value);
+        // A long number after the major version is a release date ("claude-sonnet-4-20250514"), not a minor version.
+        var minor = match.Groups[2].Success && match.Groups[2].Value.Length <= 2 ? int.Parse(match.Groups[2].Value) : 0;
+        return major > 4 || (major == 4 && minor >= 6);
+    }
 }

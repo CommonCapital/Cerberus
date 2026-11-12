@@ -389,7 +389,7 @@ public class SastAgentApiTests(ApiHost host)
         var (other, _) = await host.NewUserAsync();
 
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "app" })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "app", model = "gpt-0" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "app", model = "no-such-model" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "app", model = "llama3.1", maxSteps = 51 })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "app", model = "llama3.1", instructions = new string('x', 2001) })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "sast", path = "../x", model = "llama3.1" })).StatusCode);

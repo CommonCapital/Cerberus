@@ -1,4 +1,5 @@
 import { clearAuth, getAuth } from "../auth";
+import type { ModelListing } from "../model-choices";
 import { explainSubmitError, getCurrentEngagement, setCurrentEngagement, underEngagement } from "./engagement";
 
 // Client for the Cerberus (.NET) backend's job, approval and question
@@ -373,6 +374,12 @@ export const cerberus = {
     request<{ id: string; title: string }>("POST", `/sessions/${sessionId}/fork`, options),
   /** The conversation as a Markdown document, credentials masked. */
   exportSession: (sessionId: string) => download(`/sessions/${sessionId}/export`),
+  /** What can be chosen as a model: every provider, its models, and whether it is ready to use. */
+  models: () => request<ModelListing>("GET", "/models"),
+  /** Which API providers have a key stored for this operator. A key itself is never returned. */
+  apiKeys: () => request<{ provider: string; hasKey: boolean }[]>("GET", "/settings/keys"),
+  setApiKey: (provider: string, apiKey: string) => request<unknown>("PUT", "/settings/keys", { provider, apiKey }),
+  removeApiKey: (provider: string) => request<unknown>("DELETE", `/settings/keys/${provider}`),
   /** Recurring runs: each is a job request and how often the server submits it. */
   schedules: () => request<ScheduleInfo[]>("GET", "/schedules"),
   createSchedule: (schedule: { name: string | null; every: string; job: SubmitJob }) => request<ScheduleInfo>("POST", "/schedules", schedule),

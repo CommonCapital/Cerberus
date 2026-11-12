@@ -194,7 +194,7 @@ public class CompactionApiTests(ApiHost host)
 
         // Straight away again: only the exchanges that are always kept are left in full, so there is nothing more to do.
         Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/sessions/{session}/compact", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/sessions/{session}/compact", new { model = "gpt-0" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/sessions/{session}/compact", new { model = "no-such-model" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/sessions/{session}/compact", null)).StatusCode);
     }
 }

@@ -1,3 +1,4 @@
+import { readPreferences, savePreference } from "../../lib/preferences";
 import { createContext, useContext, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { 
@@ -31,7 +32,12 @@ type PromptConfigProviderProps = {
 
 export function PromptConfigProvider({ children }: PromptConfigProviderProps) {
   const [mode, setMode] = useState<ModeType>(Mode.BUILD);
-  const [model, setModel] = useState<SupportedChatModelId>(DEFAULT_CHAT_MODEL_ID);
+  // The model chosen last time is the model this time.
+  const [model, setModelState] = useState<SupportedChatModelId>(() => readPreferences().model || DEFAULT_CHAT_MODEL_ID);
+  const setModel = useCallback((next: SupportedChatModelId) => {
+    setModelState(next);
+    savePreference("model", next);
+  }, []);
 
   const toggleMode = useCallback(() => {
     setMode((m) => (m === Mode.BUILD ? Mode.PLAN : Mode.BUILD));

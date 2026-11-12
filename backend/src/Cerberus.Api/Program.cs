@@ -48,11 +48,13 @@ Cerberus.Api.Health.HealthEndpoints.AddReadiness(builder.Services, keyRingPath);
 builder.Services.AddSingleton<HttpClient>();
 builder.Services.AddSingleton<IModelProvider, AnthropicProvider>();
 builder.Services.AddSingleton<IModelProvider, OpenAiProvider>();
+builder.Services.AddSingleton<IModelProvider, DeepSeekProvider>();
 builder.Services.AddSingleton<IModelProvider, OllamaProvider>();
 builder.Services.AddSingleton<IModelProvider, MockProvider>();
 // A passing provider failure (overloaded, rate-limited, network) is retried with backoff before it ends a reply.
 builder.Services.AddSingleton(RetryPolicy.Standard);
 builder.Services.AddSingleton<IModelProviderResolver, ModelProviderResolver>();
+builder.Services.AddSingleton<ILocalModelCatalog, OllamaCatalog>();
 
 builder.Services.AddSignalR();
 
@@ -144,7 +146,7 @@ if (args is ["smoke-llm", ..])
         app.Services.GetRequiredService<Cerberus.Api.Agents.AgentLoop>(), args.ElementAtOrDefault(1),
         new ModelCredentials(
             Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"), Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
-            Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")),
+            Environment.GetEnvironmentVariable("OLLAMA_BASE_URL"), Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY")),
         Console.Out, CancellationToken.None);
 }
 
@@ -180,6 +182,7 @@ app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 app.MapScheduleEndpoints();
+app.MapModelEndpoints();
 app.MapReviewEndpoints();
 Cerberus.Api.Reports.SarifEndpoints.MapSarifEndpoints(app);
 Cerberus.Api.Agents.AgentRunEndpoints.MapAgentRunEndpoints(app);

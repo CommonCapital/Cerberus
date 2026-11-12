@@ -235,7 +235,7 @@ public class ReviewApiTests(ApiHost host)
         var (other, _) = await host.NewUserAsync();
 
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", catalogs = new[] { "nope" } })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", model = "gpt-nonexistent" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", model = "no-such-model" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "../x" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/jobs", new { type = "review", path = "app", exclusions = "maybe" })).StatusCode);
 

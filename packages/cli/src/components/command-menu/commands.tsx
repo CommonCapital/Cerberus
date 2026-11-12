@@ -1,4 +1,3 @@
-import { SUPPORTED_CHAT_MODELS } from "@cerberus/shared";
 import { 
   AgentsDialogContent,
   ModelsDialogContent,
@@ -16,6 +15,7 @@ import {
   ReviewDialogContent,
   RunsDialogContent,
   SchedulesDialogContent,
+  KeysDialogContent,
   ScanDialogContent,
   SessionsDialogContent,
   ForkDialogContent,
@@ -94,18 +94,21 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "models",
-    description: "Select AI model for generation",
+    description: "Choose the model: Claude, GPT or DeepSeek by API, or a local one from Ollama",
     value: "/models",
     action: (ctx) => {
       ctx.dialog.open({
         title: "Select Model",
-        children: (
-          <ModelsDialogContent
-            models={SUPPORTED_CHAT_MODELS.map((model) => model.id)}
-            onSelectModel={ctx.setModel}
-          />
-        ),
+        children: <ModelsDialogContent onSelectModel={ctx.setModel} />,
       })
+    },
+  },
+  {
+    name: "keys",
+    description: "See which API providers have a key stored, or remove one",
+    value: "/keys",
+    action: (ctx) => {
+      ctx.dialog.open({ title: "API keys", children: <KeysDialogContent /> });
     },
   },
   {

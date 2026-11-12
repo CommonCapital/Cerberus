@@ -389,7 +389,7 @@ public class ChatApiTests(ApiHost host)
         Assert.Equal(HttpStatusCode.BadRequest, await Post(new { id = session, mode = "BUILD", model = Model }));
         Assert.Equal(HttpStatusCode.BadRequest, await Post(new { id = session, messages = new[] { new { role = "user" } }, mode = "BUILD", model = Model }));
         Assert.Equal(HttpStatusCode.BadRequest, await Post(new { id = session, messages = new[] { message }, mode = "DESTROY", model = Model }));
-        Assert.Equal(HttpStatusCode.BadRequest, await Post(new { id = session, messages = new[] { message }, mode = "BUILD", model = "gpt-0" }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Post(new { id = session, messages = new[] { message }, mode = "BUILD", model = "no-such-model" }));
         Assert.Equal(HttpStatusCode.NotFound, await Post(new { id = "missing", messages = new[] { message }, mode = "BUILD", model = Model }));
         Assert.Equal(HttpStatusCode.Unauthorized, (await host.CreateClient().PostAsJsonAsync("/chat", new { })).StatusCode);
 

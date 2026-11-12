@@ -31,14 +31,9 @@ export type ModelCredentials = {
   ollamaBaseUrl?: string;
 };
 
-const ANTHROPIC_PROVIDER_OPTIONS: Partial<Record<AnthropicModelId, ProviderOptions>> = {
-  "claude-opus-4-6": {
-    anthropic: { thinking: { type: "enabled", budgetTokens: 10000 } },
-  },
-  "claude-sonnet-4-6": {
-    anthropic: { thinking: { type: "enabled", budgetTokens: 10000 } },
-  },
-};
+// The current Claude models think adaptively when nothing is said about thinking, and reject a
+// fixed thinking budget — so no thinking option is sent for any of them.
+const ANTHROPIC_PROVIDER_OPTIONS: Partial<Record<AnthropicModelId, ProviderOptions>> = {};
 
 const OPENAI_PROVIDER_OPTIONS: Partial<Record<OpenAIModelId, ProviderOptions>> = {
   "gpt-5.4": {

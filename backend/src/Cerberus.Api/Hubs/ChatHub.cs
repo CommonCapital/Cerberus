@@ -59,7 +59,7 @@ public sealed class ChatHub(IModelProviderResolver resolver) : Hub
         }
         if (string.IsNullOrWhiteSpace(request.Model) || !ModelRegistry.IsSupported(request.Model))
         {
-            throw new HubException("model must be a supported model id.");
+            throw new HubException("model must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:).");
         }
 
         var http = Context.GetHttpContext() ?? throw new HubException("The connection is gone.");

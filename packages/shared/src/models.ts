@@ -13,27 +13,35 @@ type SupportedChatModelDefinition = {
 
 export const SUPPORTED_CHAT_MODELS = [
   {
-    id: "claude-sonnet-4-6",
+    id: "claude-opus-5-5",
     provider: "anthropic",
     pricing: {
-      inputUsdPerMillionTokens: 3,
-      outputUsdPerMillionTokens: 15,
+      inputUsdPerMillionTokens: 4,
+      outputUsdPerMillionTokens: 20,
     },
   },
   {
-    id: "claude-haiku-4-5",
+    id: "claude-sonnet-5-5",
     provider: "anthropic",
     pricing: {
-      inputUsdPerMillionTokens: 1,
-      outputUsdPerMillionTokens: 5,
+      inputUsdPerMillionTokens: 2,
+      outputUsdPerMillionTokens: 10,
     },
   },
   {
-    id: "claude-opus-4-6",
+    id: "claude-haiku-5-5",
     provider: "anthropic",
     pricing: {
-      inputUsdPerMillionTokens: 5,
-      outputUsdPerMillionTokens: 25,
+      inputUsdPerMillionTokens: 0.1,
+      outputUsdPerMillionTokens: 0.5,
+    },
+  },
+  {
+    id: "claude-fable-5-2",
+    provider: "anthropic",
+    pricing: {
+      inputUsdPerMillionTokens: 8,
+      outputUsdPerMillionTokens: 40,
     },
   },
   {
@@ -80,10 +88,15 @@ export const SUPPORTED_CHAT_MODELS = [
 ] as const satisfies readonly SupportedChatModelDefinition[];
 
 export type SupportedChatModel = (typeof SUPPORTED_CHAT_MODELS)[number];
-export type SupportedChatModelId = SupportedChatModel["id"];
+/**
+ * A model id. Any model of a supported provider can be chosen — a listed id, or `provider:model`
+ * (`anthropic:`, `openai:`, `deepseek:`, `ollama:`) — so this is a string, not the list above.
+ * The server decides what it accepts and says what is installed and ready (`GET /models`).
+ */
+export type SupportedChatModelId = string;
 
 export function findSupportedChatModel(modelId: string) {
   return SUPPORTED_CHAT_MODELS.find((model) => model.id === modelId);
 }
 
-export const DEFAULT_CHAT_MODEL_ID: SupportedChatModelId = "claude-opus-4-6";
+export const DEFAULT_CHAT_MODEL_ID: SupportedChatModelId = "claude-opus-5-5";

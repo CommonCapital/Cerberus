@@ -699,7 +699,7 @@ public static class Endpoints
         var model = body?.Model ?? messages.Select(m => m["metadata"]?["model"]?.GetValue<string>()).LastOrDefault(m => m is not null);
         if (model is null || !ModelRegistry.IsSupported(model))
         {
-            return Results.Json(new { error = "model is required and must be a supported model id" }, statusCode: 400);
+            return Results.Json(new { error = "model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:)" }, statusCode: 400);
         }
 
         Compaction? compaction;
@@ -740,7 +740,7 @@ public static class Endpoints
         var model = body?.Model ?? messages.Select(m => m["metadata"]?["model"]?.GetValue<string>()).LastOrDefault(m => m is not null);
         if (model is null || !ModelRegistry.IsSupported(model))
         {
-            return Results.Json(new { error = "model is required and must be a supported model id" }, statusCode: 400);
+            return Results.Json(new { error = "model is required and must be a listed model or provider:model (anthropic:, openai:, deepseek: or ollama:)" }, statusCode: 400);
         }
         if (SessionTitler.FirstPrompt(messages) is not { } prompt)
         {
@@ -911,7 +911,7 @@ public static class Endpoints
         if (string.IsNullOrWhiteSpace(body.Model) || !ModelRegistry.IsSupported(body.Model))
         {
             http.Response.StatusCode = 400;
-            await http.Response.WriteAsJsonAsync(new { error = $"Unsupported model: {body.Model}" }, ct);
+            await http.Response.WriteAsJsonAsync(new { error = $"Unsupported model: {body.Model}. Give {ModelRegistry.Accepted}." }, ct);
             return;
         }
 

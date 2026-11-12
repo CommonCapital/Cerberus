@@ -9,7 +9,8 @@ public sealed record ChatMessage(string Role, string Content);
 public sealed record ModelCredentials(
     string? AnthropicApiKey = null,
     string? OpenAiApiKey = null,
-    string? OllamaBaseUrl = null);
+    string? OllamaBaseUrl = null,
+    string? DeepSeekApiKey = null);
 
 public sealed record ChatCompletionRequest(
     string ModelId,

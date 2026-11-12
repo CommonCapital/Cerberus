@@ -59,7 +59,7 @@ PLAN.md          # Full architecture and build roadmap
 
 - [Bun](https://bun.sh) (for the TypeScript CLI + server)
 - [.NET 10 SDK](https://dotnet.microsoft.com) (for the backend)
-- Optional: [Ollama](https://ollama.com) for fully-local models, and/or your own Anthropic/OpenAI API keys
+- A model to answer: [Ollama](https://ollama.com) for fully-local models, and/or your own API key for Claude (Anthropic), GPT (OpenAI) or DeepSeek
 
 ### 1. Configure
 
@@ -122,6 +122,24 @@ docker compose run --rm cli
 ```
 
 `docker-compose.yml` runs the backend, with the CLI, Ollama, RabbitMQ and Redis as opt-in profiles. **These files were written without starting Docker** — expect small fixes on the first run (PLAN.md §15).
+
+### Choosing a model
+
+Everything a model does here — chat, triage, the agents — runs on the model you choose, and you can choose any model of four providers:
+
+| Provider | Needs | Listed models | Any other model |
+|---|---|---|---|
+| Claude (Anthropic API) | your API key | `claude-opus-5-5` (default), `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-2` | `anthropic:<model>` |
+| GPT (OpenAI API) | your API key | `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano` | `openai:<model>` |
+| DeepSeek (DeepSeek API) | your API key | `deepseek-chat`, `deepseek-reasoner` | `deepseek:<model>` |
+| Ollama (local) | the model pulled: `ollama pull <model>` | whatever is installed | `ollama:<model>`, e.g. `ollama:qwen2.5-coder:7b` |
+
+- **`/models`** in the CLI lists them: what can be used right now first, with why each can or cannot (your key, the server's key, needs a key, installed locally). Type to narrow the list, or type any `provider:model`. Your choice is remembered.
+- **Keys** are set from a terminal, never typed on screen: `cerberus key set anthropic` (or `openai`, `deepseek`). It takes the key from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` if that is set, from a pipe, or asks without showing it. The server keeps it encrypted, for your account only. `cerberus key list` and `/keys` show which providers have one; `cerberus key remove <provider>` deletes it. A key written on the command line is refused, so it cannot end up in your shell's history.
+- **`cerberus models`** prints the same list from a terminal.
+- **Local means local.** A local model keeps the code under review on your machine. Any API model sends it to that provider, so runs that send code out ask for your approval first — DeepSeek like the others.
+- A name the server cannot place — `mistral`, say — is refused rather than guessed: write `ollama:mistral`.
+- **Check a model before trusting it with a review:** `dotnet run --project backend/src/Cerberus.Api -- smoke-llm <model>` tells you whether it can call tools at all.
 
 ### 4. Security runs from the CLI
 
