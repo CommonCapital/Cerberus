@@ -470,3 +470,33 @@ public class Session
     /// </summary>
     public string? ParentId { get; set; }
 }
+
+/// <summary>
+/// A recurring run: a job request and how often to submit it. Firing a
+/// schedule submits the request as its owner — nothing about consent or scope
+/// is stored here; the same checks apply as when the owner asks by hand.
+/// </summary>
+public class Schedule
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string JobType { get; set; } = string.Empty;
+    public string TargetPath { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+
+    /// <summary>The job request (JSON), exactly as it is submitted each time.</summary>
+    public string Request { get; set; } = "{}";
+    public int IntervalMinutes { get; set; }
+    public bool Enabled { get; set; } = true;
+    public DateTime NextRunAt { get; set; }
+    public DateTime? LastRunAt { get; set; }
+    public string? LastJobId { get; set; }
+
+    /// <summary>What became of the last firing, in a sentence.</summary>
+    public string? LastOutcome { get; set; }
+
+    /// <summary>Firings in a row that the server refused; a schedule is paused when it only keeps failing.</summary>
+    public int Refusals { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

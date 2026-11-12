@@ -109,7 +109,7 @@ const list = (value: string) => value.split(",").map((part) => part.trim()).filt
 export function parseArgs(argv: string[]): Parsed {
   const [command, ...rest] = argv;
   if (command === "help" || command === "--help" || command === "-h") return { kind: "help" };
-  if (command !== "run") return usage(`Unknown command "${command ?? ""}". The only command is "run"; without arguments the interactive CLI starts.`);
+  if (command !== "run") return usage(`Unknown command "${command ?? ""}". The commands are "run" and "schedule"; without arguments the interactive CLI starts.`);
 
   const positional: string[] = [];
   const values = new Map<string, string>();

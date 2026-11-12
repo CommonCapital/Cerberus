@@ -182,6 +182,16 @@ In GitHub Actions, for example:
 
 `nightcode run --help` lists every option.
 
+### 6. Recurring runs
+
+```bash
+nightcode schedule add scan . --every 1d --name "Nightly scan"
+```
+
+- A schedule is a job, written as for `nightcode run`, and how often to start it: `45m`, `6h`, `1d`, `1w` (at least 15 minutes). `schedule list` shows what runs when and how the last run went; `schedule run <id>` starts one now; `pause`, `resume` and `remove` do what they say. An id can be shortened to its first characters. In the CLI, `/schedules` lists them and Enter pauses or resumes one.
+- **Each run is checked like one you start yourself.** If your permission settings say a run needs approval, the scheduled run waits for you — the CLI shows it among the runs waiting — and the schedule does not start another one while it waits. To let it run unattended, answer the approval with "always allow" (or set it in `/permissions`). There is no separate approval for schedules.
+- Runs do not pile up: if the previous run is still going when the next is due, that one is skipped. After the server was down, a schedule runs once, not once for every run it missed. A schedule the server refuses three times in a row is paused and says why.
+
 ## Local-first by design
 
 No Clerk, no Polar, no hosted Postgres. Authorization is self-hosted (email/password sessions), the database is local SQLite, models run via your own keys or local Ollama, and (per the roadmap) tool execution runs in a self-hosted sandbox. Azure is an optional production deploy target behind the same interfaces, never a requirement to run.
