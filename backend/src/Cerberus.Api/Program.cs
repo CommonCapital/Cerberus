@@ -15,6 +15,14 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
+// Modes of this binary other than serving (see ServiceCommands). `health` is what a container's healthcheck runs.
+if (args is ["health", ..])
+{
+    using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    var url = args.ElementAtOrDefault(1) ?? $"http://localhost:{Environment.GetEnvironmentVariable("PORT") ?? "3000"}";
+    return await Cerberus.Api.Health.ServiceCommands.HealthAsync(url, Console.Out, probe, CancellationToken.None);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // --- Database: local SQLite (no hosted Postgres) ---------------------------
@@ -34,6 +42,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(keyRingPath))
     .SetApplicationName("Cerberus");
 builder.Services.AddScoped<ApiKeyService>();
+Cerberus.Api.Health.HealthEndpoints.AddReadiness(builder.Services, keyRingPath);
 
 // --- Model providers (user-supplied keys / local Ollama) -------------------
 builder.Services.AddSingleton<HttpClient>();
@@ -125,6 +134,17 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 
 var app = builder.Build();
 
+// `smoke-llm <model>`: can this model do what the agents need? Keys come from the environment; nothing is served.
+if (args is ["smoke-llm", ..])
+{
+    return await Cerberus.Api.Health.ServiceCommands.SmokeAsync(
+        app.Services.GetRequiredService<Cerberus.Api.Agents.AgentLoop>(), args.ElementAtOrDefault(1),
+        new ModelCredentials(
+            Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"), Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
+            Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")),
+        Console.Out, CancellationToken.None);
+}
+
 // Errors are JSON, as clients of this API expect: a request that cannot be read is a
 // 400 "Invalid request body", and anything unexpected is a 500 without internals.
 app.Use(async (context, next) =>
@@ -174,6 +194,7 @@ var port = Environment.GetEnvironmentVariable("PORT") ?? "3000";
 // so the port can be published — and publishes it to localhost only (docker-compose.yml).
 var bind = Environment.GetEnvironmentVariable("CERBERUS_BIND") ?? "localhost";
 app.Run($"http://{bind}:{port}");
+return 0;
 
 static int EnvInt(string name, int fallback) =>
     int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : fallback;

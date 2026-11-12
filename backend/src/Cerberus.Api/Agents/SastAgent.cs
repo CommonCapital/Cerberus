@@ -134,9 +134,9 @@ public sealed partial class SastAgentRunner(
                 parameters.Model, credentials, SastAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
                 SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
                 tools, maxSteps, reporter, ct, messages.Take);
-            if (outcome.HitStepLimit)
+            if (outcome.StopNote(maxSteps, "the review may be incomplete") is { } stopped)
             {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; the review may be incomplete." });
+                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
             }
             await reporter.StepAsync("review", title, StepStatus.Completed);
         }
@@ -154,7 +154,7 @@ public sealed partial class SastAgentRunner(
             run.FindingCount = findings.Count;
             run.Steps = outcome?.Steps ?? 0;
             run.ToolCalls = outcome?.ToolCalls ?? 0;
-            run.Complete = outcome is { HitStepLimit: false };
+            run.Complete = outcome is { StoppedEarly: false };
             db.AgentRuns.Add(run);
             await db.SaveChangesAsync(CancellationToken.None);
 

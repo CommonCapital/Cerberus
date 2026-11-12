@@ -19,16 +19,28 @@ public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool 
 /// </summary>
 public sealed class JobWorker(
     IMessageBus bus, IServiceScopeFactory scopes, JobCancellationRegistry registry,
-    JobOptions options, JobEvents events, RunStream stream, OperatorDesk desk, ILogger<JobWorker> logger) : BackgroundService
+    JobOptions options, JobEvents events, RunStream stream, OperatorDesk desk, ILogger<JobWorker> logger,
+    Cerberus.Api.Health.WorkerHealth health) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverAsync(stoppingToken);
+        try
+        {
+            await RecoverAsync(stoppingToken);
 
-        var consumers = Enumerable.Range(0, options.Concurrency)
-            .Select(_ => ConsumeAsync(stoppingToken))
-            .ToArray();
-        await Task.WhenAll(consumers);
+            var consumers = Enumerable.Range(0, options.Concurrency)
+                .Select(_ => ConsumeAsync(stoppingToken))
+                .ToArray();
+            health.StartedAt = DateTime.UtcNow;
+            await Task.WhenAll(consumers);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Without this worker jobs would be accepted and never run: readiness must say so.
+            health.Fault = ex.GetType().Name;
+            logger.LogCritical(ex, "The job worker stopped.");
+            throw;
+        }
     }
 
     /// <summary>

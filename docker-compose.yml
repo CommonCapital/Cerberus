@@ -43,10 +43,11 @@ services:
       # CERBERUS_TARGET at any directory you are authorized to test.
       - ${CERBERUS_TARGET:-.}:/workspace:ro
     healthcheck:
-      # The runtime image has no curl; bash can open a TCP connection itself.
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
+      # The server binary checks itself: its "health" mode asks /health/ready and exits 0 when the
+      # service is ready (healthy or degraded), 1 when something it cannot work without is missing.
+      test: ["CMD", "dotnet", "Cerberus.Api.dll", "health"]
       interval: 10s
-      timeout: 3s
+      timeout: 8s
       retries: 5
       start_period: 15s
 

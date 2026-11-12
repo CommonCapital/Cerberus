@@ -157,9 +157,9 @@ public sealed class ThreatModelAgentRunner(
                 parameters.Model, credentials, ThreatModelAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
                 ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
                 tools, maxSteps, reporter, ct, messages.Take);
-            if (outcome.HitStepLimit)
+            if (outcome.StopNote(maxSteps, "the threat model may be incomplete") is { } stopped)
             {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; the threat model may be incomplete." });
+                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
             }
             await reporter.StepAsync("threat-model", title, StepStatus.Completed);
         }
@@ -172,7 +172,7 @@ public sealed class ThreatModelAgentRunner(
             run.FindingCount = threats.Count;
             run.Steps = outcome?.Steps ?? 0;
             run.ToolCalls = outcome?.ToolCalls ?? 0;
-            run.Complete = outcome is { HitStepLimit: false };
+            run.Complete = outcome is { StoppedEarly: false };
             run.Report = ThreatModelReport.Write(job.TargetPath, parameters.Model, components, threats, run.Summary, run.Complete, DateTime.UtcNow);
             db.AgentRuns.Add(run);
             await db.SaveChangesAsync(CancellationToken.None);
