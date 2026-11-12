@@ -7,16 +7,28 @@ using Microsoft.AspNetCore.SignalR;
 namespace Cerberus.Api.Hubs;
 
 /// <summary>
-/// Chat text streaming over SignalR (<c>/hub/chat</c>): streams a model's text
-/// deltas to the caller. A plain-text alternative to the HTTP <c>/chat</c>
-/// endpoint, which is what the CLI uses and which carries tool calls.
-/// A client connects with its bearer token, exactly as for <c>/hub/jobs</c>;
-/// a connection without a valid session is dropped and can call nothing.
-/// The model runs with the caller's own stored keys.
+/// The conversation's hub (<c>/hub/chat</c>). A client connects with its bearer token, exactly as for
+/// <c>/hub/jobs</c>; a connection without a valid session is dropped, joins nothing and can call nothing.
+/// <para>
+/// A signed-in connection joins its user's group and from then on receives that user's turns — and only
+/// those — as they are answered (PLAN.md §22): <see cref="ChatEvent"/> for each piece of a reply,
+/// <see cref="ChatTurn"/> when a turn starts or ends. Requests do not come in here: a turn is submitted
+/// over HTTP (<c>POST /chat/turns</c>), queued, and answered by a worker. What a client missed while it
+/// was away it reads over HTTP by sequence number.
+/// </para>
+/// <see cref="Stream"/> remains as a plain-text way to talk to a model directly, without tools or storage.
 /// </summary>
 public sealed class ChatHub(IModelProviderResolver resolver) : Hub
 {
     private const string UserIdItem = "userId";
+
+    /// <summary>One piece of a turn's reply: <c>{ turnId, sessionId, sequence, chunk }</c>, the chunk as in the UI message stream.</summary>
+    public const string ChatEvent = "chatEvent";
+
+    /// <summary>A turn started or ended: <c>{ turnId, sessionId, state, error, replyStored, lastSequence, … }</c>.</summary>
+    public const string ChatTurn = "chatTurn";
+
+    public static string GroupFor(string userId) => $"user:{userId}";
 
     /// <summary>Upper bounds on what one call may send to a model.</summary>
     public const int MaxMessages = 200;
@@ -41,6 +53,8 @@ public sealed class ChatHub(IModelProviderResolver resolver) : Hub
         }
 
         Context.Items[UserIdItem] = userId;
+        // The group is the user's own: which group a connection joins is decided by its token and nothing else.
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupFor(userId), Context.ConnectionAborted);
         await base.OnConnectedAsync();
     }
 

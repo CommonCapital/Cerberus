@@ -67,12 +67,14 @@ public sealed class JobWorker(
                 .SetProperty(q => q.Status, QuestionStatus.Cancelled)
                 .SetProperty(q => q.ResolvedAt, now), ct);
 
+        // Published again whatever the queue: a durable queue may still hold them, and a second message
+        // for a job is harmless — a job that is no longer queued is not started.
         var queued = await db.Jobs.AsNoTracking()
             .Where(j => j.State == nameof(JobState.Queued))
             .OrderBy(j => j.CreatedAt)
-            .Select(j => j.Id)
+            .Select(j => new { j.Id, j.UserId })
             .ToListAsync(ct);
-        foreach (var id in queued) await bus.PublishAsync(new JobMessage(id), ct);
+        foreach (var job in queued) await bus.PublishAsync(WorkQueues.Jobs, new WorkMessage(job.Id, job.UserId), ct);
 
         if (interrupted + queued.Count > 0)
         {
@@ -85,16 +87,24 @@ public sealed class JobWorker(
     {
         try
         {
-            await foreach (var message in bus.ConsumeAsync(stoppingToken))
+            await foreach (var delivery in bus.ConsumeAsync(WorkQueues.Jobs, stoppingToken))
             {
+                var message = delivery.Message;
                 try
                 {
-                    await ProcessAsync(message.JobId, stoppingToken);
+                    await ProcessAsync(message, stoppingToken);
+                    // Only now: the job has reached a final state, or was never this message's to start.
+                    await delivery.DoneAsync();
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    // One broken job must not take the consumer down.
-                    logger.LogError(ex, "Job {JobId} failed outside its executor.", message.JobId);
+                    throw;   // shutting down: not acknowledged, so a durable queue hands it out again
+                }
+                catch (Exception ex)
+                {
+                    // One broken job must not take the consumer down, nor come back for ever.
+                    logger.LogError(ex, "Job {JobId} failed outside its executor.", message.Id);
+                    await delivery.DoneAsync();
                 }
             }
         }
@@ -104,15 +114,22 @@ public sealed class JobWorker(
         }
     }
 
-    private async Task ProcessAsync(string jobId, CancellationToken stoppingToken)
+    private async Task ProcessAsync(WorkMessage message, CancellationToken stoppingToken)
     {
+        var jobId = message.Id;
         using var scope = scopes.CreateScope();
         var services = scope.ServiceProvider;
         var db = services.GetRequiredService<CerberusDbContext>();
         var audit = services.GetRequiredService<AuditLog>();
 
         var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
-        if (job is null || job.State != nameof(JobState.Queued)) return;   // cancelled while waiting
+        if (job is null || job.State != nameof(JobState.Queued)) return;   // cancelled while waiting, or delivered twice
+        if (job.UserId != message.UserId)
+        {
+            // The message names another user than the job belongs to: not something this service publishes.
+            logger.LogWarning("A queue message for job {JobId} named a user the job does not belong to; it was not run.", jobId);
+            return;
+        }
 
         // A job that needed the operator's consent runs only if it was given.
         if (job.ApprovalId is not null)

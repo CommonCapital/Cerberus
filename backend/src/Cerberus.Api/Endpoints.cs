@@ -892,109 +892,26 @@ public static class Endpoints
 
     // --- chat (AI-SDK UI message stream) ------------------------------------
 
-    private static async Task StreamChat(
-        UiChatRequest body, HttpContext http, CerberusDbContext db, ChatRunner runner,
-        ApiKeyService keys, ChatCompactor compactor, ChatLimits limits, CancellationToken ct)
+    private static async Task StreamChat(UiChatRequest body, HttpContext http, ChatService chat, CancellationToken ct)
     {
-        var userId = UserId(http);
-
-        // Same request contract as the TypeScript server: id, at least one well-formed
-        // message, a mode of BUILD or PLAN, and a supported model.
-        var mode = body.Mode?.Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(body.Id) || body.Messages is not { Count: > 0 } ||
-            !body.Messages.All(UiMessages.IsValid) || !ChatTools.IsValidMode(mode))
+        // Checked and prepared before a single byte of the stream: a refusal is an ordinary JSON error.
+        var (problem, prepared) = await chat.PrepareAsync(UserId(http), body, ct);
+        if (prepared is null)
         {
-            http.Response.StatusCode = 400;
-            await http.Response.WriteAsJsonAsync(new { error = "Invalid request body" }, ct);
+            http.Response.StatusCode = problem!.Status;
+            await http.Response.WriteAsJsonAsync(new { error = problem.Error }, ct);
             return;
-        }
-        if (string.IsNullOrWhiteSpace(body.Model) || !ModelRegistry.IsSupported(body.Model))
-        {
-            http.Response.StatusCode = 400;
-            await http.Response.WriteAsJsonAsync(new { error = $"Unsupported model: {body.Model}. Give {ModelRegistry.Accepted}." }, ct);
-            return;
-        }
-
-        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == body.Id && s.UserId == userId, ct);
-        if (session is null)
-        {
-            http.Response.StatusCode = 404;
-            await http.Response.WriteAsJsonAsync(new { error = "Session not found" }, ct);
-            return;
-        }
-
-        // A helper only ever looks: whatever mode the request names, it gets the read-only tools.
-        var helper = session.ParentId is not null;
-        if (helper) mode = ChatTools.ModePlan;
-
-        // Incoming messages replace stored ones with the same id, and are stamped with the mode and model in use.
-        var messages = UiMessages.Merge(ParseStoredMessages(session.Messages), body.Messages);
-        var incomingIds = body.Messages.Select(m => m.GetProperty("id").GetString()).ToHashSet();
-        foreach (var message in messages.Where(m => incomingIds.Contains(UiMessages.IdOf(m))))
-        {
-            var metadata = message["metadata"] as System.Text.Json.Nodes.JsonObject ?? [];
-            metadata["mode"] = mode;
-            metadata["model"] = body.Model;
-            message["metadata"] = metadata;
-        }
-
-        var credentials = await keys.ResolveCredentialsAsync(userId, ct);
-        // What the operator asked to be remembered: their instructions and their notes about no target in particular.
-        var memory = await Memory.PromptSectionAsync(db, userId, engagementId: null, targetPath: null, ct);
-
-        // Compaction: a new user message on a conversation that is about to outgrow the model's window
-        // has its earlier part summarised first. A reply in progress (tool results coming back) is never interrupted for it.
-        var notices = new List<(string Kind, object Data)>();
-        if (UiMessages.RoleOf(messages[^1]) == "user" &&
-            ChatCompactor.IsDue(messages, session.Summary, session.SummarizedThrough, body.Model, limits))
-        {
-            try
-            {
-                if (await compactor.CompactAsync(messages, session.Summary, session.SummarizedThrough, body.Model, credentials, ct) is { } compaction)
-                {
-                    session.Summary = compaction.Summary;
-                    session.SummarizedThrough = compaction.Through;
-                    await db.SaveChangesAsync(ct);
-                    notices.Add(("compaction", new { messages = compaction.Messages }));
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // The reply is attempted anyway; if the conversation really is too long, the provider will say so.
-                http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Chat").LogWarning(ex, "Could not compact session {SessionId}.", session.Id);
-            }
         }
 
         UiMessageStreamWriter.ApplyHeaders(http.Response);
-        var result = await runner.RunAsync(
-            new UiMessageStreamWriter(http.Response),
-            new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection(),
-                session.Summary, session.SummarizedThrough, notices, session.Tasks,
-                Delegation: body.Subagents == true, Helper: helper), ct);
-
-        // The task list is kept as soon as it changes — also when the reply is waiting on client tools:
-        // the continuation is a new request and must find the list as the model left it.
-        if (result.Tasks is not null)
-        {
-            session.Tasks = result.Tasks;
-            if (!result.Complete) await db.SaveChangesAsync(CancellationToken.None);
-        }
-
-        // Stored only once the reply is whole. While tool calls are waiting for the
-        // client, the client holds the message and sends it back with the results.
-        if (result.Complete)
-        {
-            session.Messages = JsonSerializer.Serialize(result.Messages, JsonOptions);
-            session.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(CancellationToken.None);
-        }
+        await chat.RunAsync(prepared, new UiMessageStreamWriter(http.Response), ct);
     }
 
     // --- helpers ------------------------------------------------------------
 
     private static string UserId(HttpContext http) => (string)http.Items[RequireAuthFilter.UserIdItem]!;
 
-    private static List<JsonElement> ParseStoredMessages(string json)
+    internal static List<JsonElement> ParseStoredMessages(string json)
     {
         try
         {

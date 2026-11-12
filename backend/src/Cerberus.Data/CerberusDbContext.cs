@@ -16,6 +16,8 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<ApprovalRequest> ApprovalRequests => Set<ApprovalRequest>();
     public DbSet<JobEvent> JobEvents => Set<JobEvent>();
+    public DbSet<ChatTurn> ChatTurns => Set<ChatTurn>();
+    public DbSet<ChatTurnEvent> ChatTurnEvents => Set<ChatTurnEvent>();
     public DbSet<PermissionSetting> PermissionSettings => Set<PermissionSetting>();
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
@@ -145,6 +147,19 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
+        });
+
+        modelBuilder.Entity<ChatTurn>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.State });
+            e.HasIndex(x => new { x.SessionId, x.CreatedAt });
+        });
+
+        modelBuilder.Entity<ChatTurnEvent>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.TurnId, x.Sequence }).IsUnique();
         });
 
         modelBuilder.Entity<ApprovalRequest>(e =>

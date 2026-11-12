@@ -161,17 +161,25 @@ public class InProcMessageBusTests
     public async Task Each_message_is_delivered_once_in_order()
     {
         var bus = new InProcMessageBus();
-        foreach (var id in new[] { "a", "b", "c" }) await bus.PublishAsync(new JobMessage(id));
+        foreach (var id in new[] { "a", "b", "c" }) await bus.PublishAsync(WorkQueues.Jobs, new WorkMessage(id, "user-1"));
+        await bus.PublishAsync(WorkQueues.ChatTurns, new WorkMessage("turn", "user-2"));
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var received = new List<string>();
-        await foreach (var message in bus.ConsumeAsync(cts.Token))
+        var received = new List<WorkMessage>();
+        await foreach (var delivery in bus.ConsumeAsync(WorkQueues.Jobs, cts.Token))
         {
-            received.Add(message.JobId);
+            received.Add(delivery.Message);
+            await delivery.DoneAsync();
             if (received.Count == 3) break;
         }
 
-        Assert.Equal(["a", "b", "c"], received);
+        // In order, each with the user it belongs to — and nothing of the other queue.
+        Assert.Equal([new WorkMessage("a", "user-1"), new WorkMessage("b", "user-1"), new WorkMessage("c", "user-1")], received);
+        await foreach (var delivery in bus.ConsumeAsync(WorkQueues.ChatTurns, cts.Token))
+        {
+            Assert.Equal(new WorkMessage("turn", "user-2"), delivery.Message);
+            break;
+        }
     }
 
     [Fact]
@@ -187,9 +195,9 @@ public class InProcMessageBusTests
         {
             try
             {
-                await foreach (var message in bus.ConsumeAsync(cts.Token))
+                await foreach (var delivery in bus.ConsumeAsync(WorkQueues.Jobs, cts.Token))
                 {
-                    received.Add(message.JobId);
+                    received.Add(delivery.Message.Id);
                     if (Interlocked.Decrement(ref remaining) == 0) done.TrySetResult();
                 }
             }
@@ -197,7 +205,7 @@ public class InProcMessageBusTests
         }
 
         var consumers = new[] { Consume(), Consume(), Consume() };
-        for (var i = 0; i < 100; i++) await bus.PublishAsync(new JobMessage(i.ToString()));
+        for (var i = 0; i < 100; i++) await bus.PublishAsync(WorkQueues.Jobs, new WorkMessage(i.ToString(), "user-1"));
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cts.Cancel();
         await Task.WhenAll(consumers);

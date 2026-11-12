@@ -239,6 +239,51 @@ public class ApprovalRequest
 /// a finding, model text. Ordered per job by <see cref="Sequence"/>, so a
 /// client can replay a run and continue live from where it left off.
 /// </summary>
+/// <summary>
+/// One request to the chat agent, accepted and queued (PLAN.md §22): whose it is, which conversation, what was
+/// asked, and how far it got. The reply is its events; once the reply is whole it is also in the session.
+/// </summary>
+public class ChatTurn
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Queued, Running, Completed, Failed or Cancelled.</summary>
+    public string State { get; set; } = "Queued";
+
+    /// <summary>The chat request as it was accepted, as JSON.</summary>
+    public string Request { get; set; } = "{}";
+
+    /// <summary>The sequence number of the last event of the reply.</summary>
+    public long LastSequence { get; set; }
+
+    /// <summary>
+    /// The reply is whole and in the session. False while it stopped at tool calls the client has to run
+    /// (the client then sends the next turn with their results), and for a reply that failed or was stopped.
+    /// </summary>
+    public bool ReplyStored { get; set; }
+    public string? Error { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+}
+
+/// <summary>One piece of a turn's reply, in order. Kept for a while so a client can read what it missed.</summary>
+public class ChatTurnEvent
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string TurnId { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+
+    /// <summary>1-based position in the turn's reply.</summary>
+    public long Sequence { get; set; }
+
+    /// <summary>The piece itself: one chunk of the UI message stream, as JSON.</summary>
+    public string Chunk { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; }
+}
+
 public class JobEvent
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");

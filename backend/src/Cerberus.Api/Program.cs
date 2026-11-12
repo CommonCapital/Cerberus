@@ -80,6 +80,15 @@ builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
+// A conversation over the queue: a turn is accepted, queued under its user's id, answered by a worker and delivered over SignalR.
+builder.Services.AddScoped<Cerberus.Api.Chat.ChatService>();
+builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatTurnOptions(
+    Concurrency: Math.Clamp(EnvInt("CERBERUS_CHAT_CONCURRENCY", 4), 1, 64),
+    PerUser: Math.Clamp(EnvInt("CERBERUS_CHAT_PER_USER", 2), 1, 16),
+    Timeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_CHAT_TURN_TIMEOUT_SECONDS", 900))));
+builder.Services.AddSingleton<Cerberus.Api.Chat.TurnRegistry>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatWorkerHealth>();
+builder.Services.AddHostedService<Cerberus.Api.Chat.ChatTurnWorker>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatCompactor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.SessionTitler>();
 builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatLimits
@@ -231,6 +240,7 @@ using (var scope = app.Services.CreateScope())
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
+Cerberus.Api.Chat.ChatTurnEndpoints.MapChatTurnEndpoints(app);
 app.MapScheduleEndpoints();
 app.MapModelEndpoints();
 Cerberus.Api.Web.ArtifactEndpoints.MapArtifactEndpoints(app);

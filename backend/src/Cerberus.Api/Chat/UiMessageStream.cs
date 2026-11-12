@@ -10,8 +10,36 @@ namespace Cerberus.Api.Chat;
 /// `data: {json}\n\n`, and the stream ends with `data: [DONE]\n\n`. Required
 /// response headers are applied by <see cref="ApplyHeaders"/>.
 /// </summary>
-public sealed class UiMessageStreamWriter(HttpResponse response)
+public sealed class UiMessageStreamWriter
 {
+    private readonly Func<string, CancellationToken, Task> _chunk;
+    private readonly Func<CancellationToken, Task> _done;
+
+    /// <summary>Writes the stream as the body of an HTTP response.</summary>
+    public UiMessageStreamWriter(HttpResponse response)
+    {
+        _chunk = async (json, ct) =>
+        {
+            await response.WriteAsync($"data: {json}\n\n", ct);
+            await response.Body.FlushAsync(ct);
+        };
+        _done = async ct =>
+        {
+            await response.WriteAsync("data: [DONE]\n\n", ct);
+            await response.Body.FlushAsync(ct);
+        };
+    }
+
+    /// <summary>
+    /// Hands each chunk — the same JSON an HTTP client would get — to something else: the delivery of a
+    /// queued turn, which numbers it, pushes it and stores it. The end of the stream is the turn's own end.
+    /// </summary>
+    public UiMessageStreamWriter(Func<string, CancellationToken, Task> chunk)
+    {
+        _chunk = chunk;
+        _done = _ => Task.CompletedTask;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -85,16 +113,7 @@ public sealed class UiMessageStreamWriter(HttpResponse response)
     public Task ErrorAsync(string errorText, CancellationToken ct) =>
         WriteChunkAsync(new { type = "error", errorText }, ct);
 
-    public async Task DoneAsync(CancellationToken ct)
-    {
-        await response.WriteAsync("data: [DONE]\n\n", ct);
-        await response.Body.FlushAsync(ct);
-    }
+    public Task DoneAsync(CancellationToken ct) => _done(ct);
 
-    private async Task WriteChunkAsync(object chunk, CancellationToken ct)
-    {
-        var json = JsonSerializer.Serialize(chunk, JsonOptions);
-        await response.WriteAsync($"data: {json}\n\n", ct);
-        await response.Body.FlushAsync(ct);
-    }
+    private Task WriteChunkAsync(object chunk, CancellationToken ct) => _chunk(JsonSerializer.Serialize(chunk, JsonOptions), ct);
 }
