@@ -24,6 +24,9 @@ export type HeadlessDeps = {
   report: (job: Job) => Promise<string | null>;
   /** Writes a file and returns the path it was written to. */
   write: (path: string, content: string) => string;
+  /** The screenshots a run kept, with their bytes. */
+  screenshots: (jobId: string) => Promise<{ name: string; source: string; bytes: Uint8Array }[]>;
+  writeBytes: (path: string, bytes: Uint8Array) => string;
   /** The result: stdout. */
   out: (line: string) => void;
   /** Progress and problems: stderr. */
@@ -43,6 +46,9 @@ const LABEL: Record<string, string> = {
 
 /** The same, in the middle of a sentence. */
 const lower = (label: string) => (label.startsWith("SAST") ? label : label.toLowerCase());
+
+/** A page title as part of a file name: letters, digits and dashes, not too long. */
+const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "page";
 
 const short = (id: string) => id.slice(0, 8);
 const message = (problem: unknown) => (problem instanceof Error ? problem.message : String(problem));
@@ -200,7 +206,7 @@ export async function runHeadless(options: RunOptions, deps: HeadlessDeps): Prom
     return EXIT.notFinished;
   }
 
-  const files: { sarif?: string; report?: string } = {};
+  const files: { sarif?: string; report?: string; screenshots?: string[] } = {};
   let summary: Summary | null = null;
   try {
     const source = sarifSourceOf(job);
@@ -208,6 +214,13 @@ export async function runHeadless(options: RunOptions, deps: HeadlessDeps): Prom
       const log = await deps.sarif(source);
       summary = summarize(readSarif(log), { includeTests: options.includeTests });
       if (options.sarif) files.sarif = deps.write(options.sarif, `${JSON.stringify(log, null, 2)}\n`);
+    }
+    if (options.screenshots) {
+      const shots = await deps.screenshots(job.id);
+      files.screenshots = shots.map((shot, index) =>
+        deps.writeBytes(`${options.screenshots}/${String(index + 1).padStart(2, "0")}-${slug(shot.name)}.png`, shot.bytes),
+      );
+      for (const [index, shot] of shots.entries()) say(`[screenshot] ${files.screenshots[index]} — ${shot.source}`);
     }
     if (options.report) {
       const report = await deps.report(job);
@@ -257,6 +270,11 @@ export async function runHeadless(options: RunOptions, deps: HeadlessDeps): Prom
   }
   if (files.sarif) deps.out(`SARIF written to ${files.sarif}`);
   if (files.report) deps.out(`Report written to ${files.report}`);
+  if (files.screenshots) {
+    deps.out(files.screenshots.length > 0
+      ? `${plural(files.screenshots.length, "screenshot")} saved to ${options.screenshots}`
+      : "The run kept no screenshots.");
+  }
 
   if (summary) {
     if (options.failOn === "none") {

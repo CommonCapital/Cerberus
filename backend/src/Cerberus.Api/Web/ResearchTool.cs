@@ -140,7 +140,8 @@ public sealed class ResearchTool(
 }
 
 /// <summary>Builds the research tool for one job — or nothing, where the installation has the internet switched off.</summary>
-public sealed class ResearchTools(WebOptions options, IWebFetcher fetcher, IWebSearch search, AgentLoop loop)
+public sealed class ResearchTools(
+    WebOptions options, IWebFetcher fetcher, IWebSearch search, AgentLoop loop, IAgentBrowser browser, BrowserOptions browserOptions)
 {
     public bool Enabled => options.Enabled;
 
@@ -166,6 +167,24 @@ public sealed class ResearchTools(WebOptions options, IWebFetcher fetcher, IWebS
         var guard = new EgressGuard(terms, options.BlockedTerms);
         List<IAgentTool> web = [new WebFetchTool(fetcher, guard)];
         if (!string.IsNullOrWhiteSpace(options.SearchUrl)) web.Add(new WebSearchTool(search, guard));
+        if (browserOptions.Enabled)
+        {
+            // Screenshots are kept with the run, a few at most.
+            var kept = 0;
+            web.Add(new BrowseTool(browser, guard, async (name, source, png) =>
+            {
+                if (kept >= BrowseTool.MaxScreenshotsPerRun) return null;
+                kept++;
+                var artifact = new RunArtifact
+                {
+                    JobId = job.Id, UserId = job.UserId, Source = source, Data = png, Size = png.Length,
+                    Name = name.Length <= 120 ? name : name[..120],
+                };
+                db.RunArtifacts.Add(artifact);
+                await db.SaveChangesAsync(ct);
+                return artifact.Id;
+            }, reporter));
+        }
         return new ResearchTool(loop, model, credentials, web, guard, reporter);
     }
 }

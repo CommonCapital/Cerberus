@@ -40,6 +40,15 @@ COPY security-skills/LICENSE ./security-skills/LICENSE
 
 # /data holds everything that must survive the container: the SQLite database
 # and the key ring that encrypts stored API keys. /workspace is the code to scan.
+# Optional: a browser for the researcher (CERBERUS_BROWSER=on). It adds several hundred megabytes, so it is
+# left out unless asked for: docker compose build --build-arg WITH_BROWSER=true api
+# Not built or run when this was written (PLAN.md §15). If Chromium refuses to start as this non-root user
+# for want of user namespaces, the choice is the host's seccomp profile or CERBERUS_BROWSER_NO_SANDBOX=true.
+ARG WITH_BROWSER=false
+RUN if [ "$WITH_BROWSER" = "true" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 RUN mkdir -p /data /workspace && chown -R "$APP_UID" /data
 VOLUME ["/data"]
 

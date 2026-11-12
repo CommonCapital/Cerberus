@@ -122,10 +122,13 @@ public sealed partial class MockProvider : IModelProvider
         (string Tool, object Input)? call = lastUser switch
         {
             // A researcher (internet tools, no file tools): search if it can, else fetch the page the question names or a manual page.
+            // With a search service it searches; else it opens a page — in the browser if it has one, scrolling a screen down.
             _ when request.Tools.Any(t => t.Name == "webFetch") && request.Tools.All(t => t.Name != "readFile") =>
                 request.Tools.Any(t => t.Name == "webSearch")
                     ? ("webSearch", new { query = lastUser.Length <= 100 ? lastUser : lastUser[..100] })
-                    : ("webFetch", new { url = UrlIn().Match(lastUser) is { Success: true } named ? named.Value : "https://docs.python.org/3/library/pickle.html" }),
+                    : request.Tools.Any(t => t.Name == "browse")
+                        ? ("browse", new { url = UrlIn().Match(lastUser) is { Success: true } shown ? shown.Value : "https://docs.python.org/3/library/pickle.html", scroll = 1 })
+                        : ("webFetch", new { url = UrlIn().Match(lastUser) is { Success: true } named ? named.Value : "https://docs.python.org/3/library/pickle.html" }),
             // "delegate: <task>" → hand the task to a helper, named by its first words.
             _ when DelegatePattern().Match(lastUser) is { Success: true } m => ("task", new
             {

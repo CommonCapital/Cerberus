@@ -500,3 +500,19 @@ public class Schedule
     public int Refusals { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>Something a run produced besides its findings — a screenshot its researcher took of a page it relied on.</summary>
+public class RunArtifact
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string JobId { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "image/png";
+
+    /// <summary>Where it came from: the page's address.</summary>
+    public string Source { get; set; } = string.Empty;
+    public byte[] Data { get; set; } = [];
+    public int Size { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

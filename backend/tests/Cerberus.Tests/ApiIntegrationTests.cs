@@ -42,8 +42,12 @@ public sealed class ApiHost : IDisposable
         // Internet access is on in the test host — and every page and search result is scripted (FakeWeb): nothing is fetched.
         Environment.SetEnvironmentVariable("CERBERUS_WEB", "on");
         Environment.SetEnvironmentVariable("CERBERUS_SEARXNG_URL", "http://search.invalid");
+        Environment.SetEnvironmentVariable("CERBERUS_BROWSER", "on");
 
         _factory = NewFactory();
+        // Started now, while the settings above are in place: a variant started by a test changes and then clears
+        // one of them, and a host that only started afterwards would read the cleared value.
+        _factory.CreateClient().Dispose();
     }
 
     /// <summary>The model behind the "echo" model id: calls a deserialization finding real, anything else harmless.</summary>
@@ -64,6 +68,9 @@ public sealed class ApiHost : IDisposable
 
     /// <summary>Stands in for the internet: records what was asked of it and answers from a script.</summary>
     public FakeWeb Web { get; } = new();
+
+    /// <summary>Stands in for the browser: no browser is started by any test.</summary>
+    public FakeBrowser Browser { get; } = new();
 
     /// <summary>Stands in for the local model server's list of installed models; null means it does not answer.</summary>
     public FakeLocalModels LocalModels { get; } = new();
@@ -110,6 +117,8 @@ public sealed class ApiHost : IDisposable
                 services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.Web.IWebSearch)));
                 services.AddSingleton<Cerberus.Api.Web.IWebFetcher>(Web);
                 services.AddSingleton<Cerberus.Api.Web.IWebSearch>(Web);
+                services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.Web.IAgentBrowser)));
+                services.AddSingleton<Cerberus.Api.Web.IAgentBrowser>(Browser);
 
                 // Which local models are installed is scripted too: no test asks a model server.
                 services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.ILocalModelCatalog)));
@@ -128,6 +137,8 @@ public sealed class ApiHost : IDisposable
     /// </summary>
     public WebApplicationFactory<Program> StartVariant(string variable, string value)
     {
+        // Put back afterwards as it was — not cleared: the host's own settings must be there for the next variant too.
+        var before = Environment.GetEnvironmentVariable(variable);
         Environment.SetEnvironmentVariable(variable, value);
         try
         {
@@ -137,7 +148,7 @@ public sealed class ApiHost : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable(variable, null);
+            Environment.SetEnvironmentVariable(variable, before);
         }
     }
 
@@ -214,6 +225,22 @@ public sealed class FakeWeb : Cerberus.Api.Web.IWebFetcher, Cerberus.Api.Web.IWe
         Searched.Enqueue(query);
         return Task.FromResult<IReadOnlyList<Cerberus.Api.Web.SearchHit>>(
             [new("pickle — Python object serialization", "https://docs.python.org/3/library/pickle.html", "Warning: the pickle module is not secure. " + PageText)]);
+    }
+}
+
+public sealed class FakeBrowser : Cerberus.Api.Web.IAgentBrowser
+{
+    /// <summary>The first bytes of a PNG file, enough to be recognised as one.</summary>
+    public static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4];
+
+    public ConcurrentQueue<(string Url, int Scroll, bool Screenshot)> Opened { get; } = new();
+
+    public Task<Cerberus.Api.Web.BrowsedPage> OpenAsync(string url, int scroll, bool screenshot, CancellationToken ct)
+    {
+        Opened.Enqueue((url, scroll, screenshot));
+        return Task.FromResult(new Cerberus.Api.Web.BrowsedPage(
+            url, "pickle — Python object serialization", "Warning: the pickle module is not secure.", false,
+            screenshot ? Png : null, $"screen {scroll + 1} of 9", []));
     }
 }
 

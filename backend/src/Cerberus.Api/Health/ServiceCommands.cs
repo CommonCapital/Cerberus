@@ -123,6 +123,47 @@ public static class ServiceCommands
         }
     }
 
+    /// <summary>
+    /// `browser-check &lt;url&gt; [screens] [file.png]`: opens one page in the agents' browser — same rules, same
+    /// refusals — scrolls, and says what it saw; with a file name it saves the screenshot there. For the operator
+    /// who has switched the browser on and wants to see that it works and what it will not open.
+    /// </summary>
+    public static async Task<int> BrowserCheckAsync(
+        Web.IAgentBrowser browser, Web.BrowserOptions options, string? url, int scroll, string? saveTo, TextWriter output, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            output.WriteLine("Name the page to open: browser-check <https url> [screens to scroll] [file.png]");
+            return Usage;
+        }
+        output.WriteLine(options.Enabled
+            ? "The browser is ON for agents (CERBERUS_BROWSER=on)."
+            : "The browser is OFF for agents on this server (set CERBERUS_BROWSER=on, and CERBERUS_WEB=on). The check below still runs.");
+        if (new Web.EgressGuard().Refuse(url) is { } why)
+        {
+            output.WriteLine($"Refused before anything was opened: the address contains {why}.");
+            return Failed;
+        }
+        try
+        {
+            var page = await browser.OpenAsync(url, scroll, saveTo is not null, ct);
+            output.WriteLine($"Opened {page.Url}: \"{page.Title}\", {page.Position}, {page.Text.Length} characters of text{(page.Truncated ? " (cut)" : "")}.");
+            foreach (var line in page.Text.Split('\n').Where(l => l.Trim().Length > 0).Take(3)) output.WriteLine($"  {(line.Length <= 120 ? line : line[..120] + "…")}");
+            foreach (var refused in page.Refused) output.WriteLine($"Not allowed out: {refused}");
+            if (saveTo is not null && page.Screenshot is { } png)
+            {
+                await File.WriteAllBytesAsync(saveTo, png, ct);
+                output.WriteLine($"Screenshot saved to {Path.GetFullPath(saveTo)} ({png.Length / 1024} KB).");
+            }
+            return Ok;
+        }
+        catch (Web.WebAccessException ex)
+        {
+            output.WriteLine($"Not opened: {ex.Message}.");
+            return Failed;
+        }
+    }
+
     public const string SmokeTask = "read the file smoke.txt and reply with the word it contains";
 
     /// <summary>

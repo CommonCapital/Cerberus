@@ -11,6 +11,9 @@ public static class RunEventTypes
     /// <summary>The job changed state. Data: the job, as <c>GET /jobs/{id}</c> returns it.</summary>
     public const string State = "state";
 
+    /// <summary>Something the run kept besides its findings (a screenshot): its id, name and source.</summary>
+    public const string Artifact = "artifact";
+
     /// <summary>The run's plan: every step it intends to take, in order. Data: <c>{ steps: [{ id, title }] }</c>.</summary>
     public const string Plan = "plan";
 

@@ -20,6 +20,8 @@ export type RunOptions = {
   includeTests: boolean;
   sarif: string | null;
   report: string | null;
+  /** A directory for the screenshots the run's researcher took. */
+  screenshots: string | null;
   json: boolean;
   quiet: boolean;
   /** Kinds of action approved in advance, by name. Anything else that needs approval stops the run. */
@@ -48,6 +50,7 @@ Result
   --include-tests         also count findings in tests and documentation
   --sarif <file>          write the findings as SARIF 2.1.0 (scan, review, sast)
   --report <file>         write the written report as Markdown (review, sast, threat-model)
+  --screenshots <dir>     save the screenshots the run's researcher took (sast, threat-model with --research)
   --json                  print the result as one JSON object
   --quiet                 no progress on stderr
 
@@ -83,7 +86,7 @@ Exit codes
   64  the command line is wrong`;
 
 const VALUE_FLAGS = new Set([
-  "--fail-on", "--sarif", "--report", "--model", "--agent-model", "--agents", "--catalogs",
+  "--fail-on", "--sarif", "--report", "--screenshots", "--model", "--agent-model", "--agents", "--catalogs",
   "--exclusions", "--max-steps", "--instructions", "--engagement", "--approve", "--timeout", "--server",
 ]);
 const SWITCHES = new Set(["--include-tests", "--json", "--quiet", "--no-sca", "--research"]);
@@ -101,6 +104,7 @@ const JOB_FLAGS: Record<string, RunType[]> = {
   "--research": ["sast", "threat-model"],
   "--sarif": ["scan", "review", "sast"],
   "--report": ["review", "sast", "threat-model"],
+  "--screenshots": ["sast", "threat-model"],
   "--fail-on": ["scan", "review", "sast"],
   "--include-tests": ["scan", "review", "sast"],
 };
@@ -223,6 +227,7 @@ export function parseArgs(argv: string[]): Parsed {
       includeTests: switches.has("--include-tests"),
       sarif: values.get("--sarif") ?? null,
       report: values.get("--report") ?? null,
+      screenshots: values.get("--screenshots") ?? null,
       json: switches.has("--json"),
       quiet: switches.has("--quiet"),
       approve: values.has("--approve") ? list(values.get("--approve")!) : [],
