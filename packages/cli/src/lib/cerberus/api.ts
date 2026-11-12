@@ -243,6 +243,8 @@ export type SubmitJob =
   | { type: "triage"; scanId: string; model: string; maxFindings?: number }
   /** The SAST agent: a model reads the code under `path` and reports vulnerabilities. */
   | { type: "sast"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string }
+  /** Builds or refreshes the semantic index of the code under `path`, with the server's local embedding model. */
+  | { type: "index"; path: string; engagementId?: string }
   /** The threat-model agent: a model maps the components and threats of the code under `path` and writes them up. */
   | { type: "threat-model"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string }
   /** The evidence agent: a model suggests answers for controls of an assessment the scanner could not judge. */

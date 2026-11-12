@@ -21,6 +21,8 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
     public DbSet<MemoryNote> MemoryNotes => Set<MemoryNote>();
     public DbSet<FindingDecision> FindingDecisions => Set<FindingDecision>();
+    public DbSet<CodeIndex> CodeIndexes => Set<CodeIndex>();
+    public DbSet<CodeChunk> CodeChunks => Set<CodeChunk>();
     public DbSet<OperatorQuestion> OperatorQuestions => Set<OperatorQuestion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -110,6 +112,18 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
         {
             e.HasKey(d => d.Id);
             e.HasIndex(d => new { d.UserId, d.Fingerprint }).IsUnique();
+        });
+
+        modelBuilder.Entity<CodeIndex>(e =>
+        {
+            e.HasKey(i => i.Id);
+            e.HasIndex(i => new { i.UserId, i.TargetPath, i.Model }).IsUnique();
+        });
+
+        modelBuilder.Entity<CodeChunk>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => c.IndexId);
         });
 
         modelBuilder.Entity<PermissionSetting>(e =>

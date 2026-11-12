@@ -19,15 +19,19 @@ export const AgentReviewDialogContent = ({ model }: { model: string }) => <Targe
 /** Asks which code the model should build a threat model of, and starts the threat-model agent with it. */
 export const ThreatModelDialogContent = ({ model }: { model: string }) => <TargetDialog type="threat-model" model={model} />;
 
+/** Asks which code to index for search by meaning, and starts the indexing job. */
+export const IndexDialogContent = () => <TargetDialog type="index" />;
+
 const HINT = {
   scan: "enter to scan · secrets, weak crypto, injection sinks, vulnerable dependencies",
   sast: "enter to start · the model reads the code (read-only) and reports what it finds; change it with /models",
   "threat-model": "enter to start · the model maps components and threats (STRIDE) and writes them up; change it with /models",
+  index: "enter to index · a local embedding model reads the code so agents can search it by meaning; nothing leaves this machine",
 };
 
-const LABEL = { scan: "scan", sast: "code review", "threat-model": "threat model" };
+const LABEL = { scan: "scan", sast: "code review", "threat-model": "threat model", index: "indexing" };
 
-const TargetDialog = ({ type, model }: { type: "scan" | "sast" | "threat-model"; model?: string }) => {
+const TargetDialog = ({ type, model }: { type: "scan" | "sast" | "threat-model" | "index"; model?: string }) => {
   const inputRef = useRef<InputRenderable>(null);
   const [starting, setStarting] = useState(false);
   const { close } = useDialog();

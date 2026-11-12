@@ -152,7 +152,7 @@ public static class EvidenceAgent
 /// </summary>
 public sealed class EvidenceAgentRunner(
     AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions,
-    SkillLibrary skills, CatalogLoader catalogs, OperatorInbox inbox)
+    SkillLibrary skills, CatalogLoader catalogs, OperatorInbox inbox, Search.CodeSearch search)
 {
     public async Task<int> RunAsync(Job job, EvidenceJobParameters parameters, IRunReporter reporter, CancellationToken ct)
     {
@@ -191,9 +191,11 @@ public sealed class EvidenceAgentRunner(
                 await db.SaveChangesAsync(CancellationToken.None);
                 await reporter.EventAsync(RunEventTypes.Suggestion, suggestion);
             });
+        var semantic = await search.ToolForAsync(job.UserId, assessment.TargetPath, ct);
         IReadOnlyList<IAgentTool> tools =
         [
             .. CodeTools.For(workspace),
+            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
             suggest,
             new SastAgentRunner.RememberTool(db, audit, job),
             new SastAgentRunner.SkillTool(ChatTools.SearchSkills, skills),
@@ -207,7 +209,7 @@ public sealed class EvidenceAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, assessment.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, EvidenceAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                EvidenceAgent.Task(assessment.TargetPath, catalog.Name, controls, scale, maxSteps),
+                EvidenceAgent.Task(assessment.TargetPath, catalog.Name, controls, scale, maxSteps) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
                 tools, maxSteps, reporter, ct, messages.Take);
             if (outcome.HitStepLimit)
             {

@@ -406,6 +406,44 @@ public class FindingDecision
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// A semantic index of one target: its code cut into chunks, each with a
+/// vector from an embedding model. Only locations and vectors are stored —
+/// the code itself stays in its files.
+/// </summary>
+public class CodeIndex
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public string? EngagementId { get; set; }
+
+    /// <summary>Normalized path of the target under the scan root; empty for the scan root itself.</summary>
+    public string TargetPath { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public int Dimensions { get; set; }
+    public int FileCount { get; set; }
+    public int ChunkCount { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class CodeChunk
+{
+    public long Id { get; set; }
+    public string IndexId { get; set; } = string.Empty;
+
+    /// <summary>Relative to the index's target.</summary>
+    public string File { get; set; } = string.Empty;
+
+    /// <summary>Hash of the file's content when it was indexed: tells a changed file from an unchanged one.</summary>
+    public string FileHash { get; set; } = string.Empty;
+    public int StartLine { get; set; }
+    public int EndLine { get; set; }
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The vector, normalized, as little-endian floats.</summary>
+    public byte[] Embedding { get; set; } = [];
+}
+
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
 public class Session
 {

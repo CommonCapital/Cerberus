@@ -16,6 +16,7 @@ const KIND: Record<string, string> = {
   sast: "Code review",
   evidence: "Evidence run",
   "threat-model": "Threat model",
+  index: "Indexing",
 };
 
 export const describeJob = (job: Pick<Job, "type" | "targetPath">) => `${KIND[job.type] ?? job.type} of ${job.targetPath}`;
