@@ -150,6 +150,14 @@ Off by default. An agent that has read your code knows things that must not be t
 - **What happens:** the agent can ask up to three questions. Each is checked before it leaves — one that contains a credential, an e-mail address, an internal address, a name from your engagement or what looks like code is not sent, and the run says so. A separate researcher that sees only the question, never the code, looks it up. Its answer comes back marked as outside information the agent must weigh and not obey. Every question that was sent is shown on the run.
 - **What the server will not fetch:** anything on a private network — this machine, your LAN, cloud metadata addresses — however the address is written, including through a redirect or a name that resolves there. Check with `dotnet Cerberus.Api.dll web-check <url>`.
 - **A browser, if you switch it on:** `CERBERUS_BROWSER=on` (with Chrome or Chromium installed; `CERBERUS_BROWSER_PATH` if it is somewhere unusual) lets the researcher open a page in a real browser, scroll it, and read it as it is rendered — for pages that build themselves with scripts. It keeps a screenshot of what it saw with the run; `cerberus run sast . --model <id> --research --screenshots shots` saves them. The browser starts empty for every page and is thrown away afterwards: none of your own browser's sign-ins or history is involved. It opens https pages on the public internet only, and so does everything a page tries to load. It looks; it does not click or type. Check with `dotnet Cerberus.Api.dll browser-check <url> [screens] [file.png]`.
+- **Outside tool servers (MCP), if you configure them:** name the servers in a JSON file and point `CERBERUS_MCP_CONFIG` at it — an advisory database, your documentation, a ticket system:
+
+  ```json
+  { "servers": [ { "name": "docs", "url": "https://example.org/mcp",
+                   "headers": { "Authorization": "env:DOCS_MCP_TOKEN" }, "tools": ["search"] } ] }
+  ```
+
+  A header value written `env:NAME` is read from the environment, so no token sits in the file. With `tools`, exactly those tools are used; without it, only the tools the server itself marks read-only. The tools go to the researcher only — the agent that never sees the code — everything it sends them is checked like a question to the internet, and what comes back is marked as outside information. A run with `--research` then also asks for "use MCP servers" (`--approve use-mcp-servers`). `cerberus mcp` shows which servers answer and exactly which tools agents get; `dotnet Cerberus.Api.dll mcp-check` does the same on the server and can call one tool. Servers work with the internet switched off too. Servers over HTTP only; a server that needs a browser sign-in (OAuth) is not supported yet.
 - The guard is a set of patterns. It stops the obvious ways for something to leak, not every way; use local models and leave research off for code that must not be hinted at.
 
 ### 4. Security runs from the CLI

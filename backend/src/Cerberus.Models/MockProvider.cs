@@ -121,6 +121,9 @@ public sealed partial class MockProvider : IModelProvider
 
         (string Tool, object Input)? call = lastUser switch
         {
+            // A researcher that was given a tool of an outside (MCP) server asks that server first, with the question as its text arguments.
+            _ when request.Tools.FirstOrDefault(t => t.Name.StartsWith("mcp_", StringComparison.Ordinal)) is { } outside && request.Tools.All(t => t.Name != "readFile") =>
+                (outside.Name, OutsideArguments(outside, lastUser)),
             // A researcher (internet tools, no file tools): search if it can, else fetch the page the question names or a manual page.
             // With a search service it searches; else it opens a page — in the browser if it has one, scrolling a screen down.
             _ when request.Tools.Any(t => t.Name == "webFetch") && request.Tools.All(t => t.Name != "readFile") =>
@@ -348,6 +351,24 @@ public sealed partial class MockProvider : IModelProvider
 
     [GeneratedRegex(@"https?://[^\s""'<>]+")]
     private static partial Regex UrlIn();
+
+    /// <summary>The question, under every text argument the tool requires (or its first text argument, if it requires none).</summary>
+    private static Dictionary<string, object> OutsideArguments(ToolDefinition tool, string question)
+    {
+        var text = question.Length <= 100 ? question : question[..100];
+        var arguments = new Dictionary<string, object>();
+        if (!tool.InputSchema.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object) return arguments;
+        bool IsText(JsonElement schema) => schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "string";
+        var required = tool.InputSchema.TryGetProperty("required", out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.String).Select(r => r.GetString()!).ToHashSet()
+            : [];
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (required.Contains(property.Name) && IsText(property.Value)) arguments[property.Name] = text;
+        }
+        if (arguments.Count == 0 && properties.EnumerateObject().FirstOrDefault(p => IsText(p.Value)) is { Name: { } first }) arguments[first] = text;
+        return arguments;
+    }
 
     [GeneratedRegex(@"^delegate:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex DelegatePattern();

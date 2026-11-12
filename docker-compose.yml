@@ -39,6 +39,9 @@ services:
       CERBERUS_BROWSER: ${CERBERUS_BROWSER:-off}
       # Comma-separated names that must never appear in anything sent to the internet.
       CERBERUS_EGRESS_BLOCKED_TERMS: ${CERBERUS_EGRESS_BLOCKED_TERMS:-}
+      # Outside tool servers (MCP) for the researcher: mount a JSON file and name it here (see README.md).
+      # Tokens belong in the environment, referenced from the file as "env:NAME".
+      # CERBERUS_MCP_CONFIG: /config/mcp.json
       # Uncomment to change behaviour (see backend/README.md):
       # CERBERUS_REQUIRE_ENGAGEMENT: "true"
       # CERBERUS_JOB_TIMEOUT_SECONDS: "600"

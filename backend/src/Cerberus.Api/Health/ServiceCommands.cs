@@ -16,6 +16,8 @@ namespace Cerberus.Api.Health;
 /// <item><c>smoke-llm &lt;model&gt;</c> — checks that a model can do what the
 /// agents need of it: call a tool with valid arguments, and use the result.
 /// The acceptance test for a newly configured local model or API key.</item>
+/// <item><c>web-check</c>, <c>browser-check</c>, <c>mcp-check</c> — try what agents use to look things up
+/// outside: fetch a page, open one in the browser, reach the configured MCP servers.</item>
 /// </list>
 /// </summary>
 public static class ServiceCommands
@@ -160,6 +162,83 @@ public static class ServiceCommands
         catch (Web.WebAccessException ex)
         {
             output.WriteLine($"Not opened: {ex.Message}.");
+            return Failed;
+        }
+    }
+
+    /// <summary>
+    /// `mcp-check [server [tool [json-arguments]]]`: reaches the configured MCP servers and shows what an agent
+    /// would be shown of each — which tools, and why the others are withheld. With a tool named, calls it once,
+    /// through the same check of the arguments an agent's call goes through.
+    /// </summary>
+    public static async Task<int> McpCheckAsync(
+        Web.IMcpServers servers, Web.WebOptions web, string? only, string? tool, string? arguments, TextWriter output, CancellationToken ct)
+    {
+        foreach (var problem in servers.Problems) output.WriteLine($"Configuration: {problem}.");
+        if (servers.Names.Count == 0)
+        {
+            output.WriteLine("No MCP servers are configured. Name them in a JSON file and point CERBERUS_MCP_CONFIG at it:");
+            output.WriteLine("""  { "servers": [ { "name": "docs", "url": "https://example.org/mcp", "headers": { "Authorization": "env:DOCS_MCP_TOKEN" }, "tools": ["search"] } ] }""");
+            return servers.Problems.Count > 0 ? Failed : Usage;
+        }
+        if (only is not null && !servers.Names.Contains(only, StringComparer.OrdinalIgnoreCase))
+        {
+            output.WriteLine($"No server named \"{only}\" is configured. Configured: {string.Join(", ", servers.Names)}");
+            return Usage;
+        }
+
+        var states = (await servers.StatesAsync(refresh: true, ct)).Where(s => only is null || s.Name.Equals(only, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var state in states)
+        {
+            if (!state.Reachable)
+            {
+                output.WriteLine($"{state.Name} ({state.Address}): NOT AVAILABLE — {state.Problem}{(state.Detail is { Length: > 0 } said ? $" (the server said: {said})" : "")}.");
+                continue;
+            }
+            output.WriteLine($"{state.Name} ({state.Address}): ok — \"{state.ServerName}\", protocol {state.Protocol}, " +
+                             $"{state.Exposed.Count} tool(s) for agents, {state.Withheld.Count} withheld.");
+            foreach (var exposed in state.Exposed) output.WriteLine($"  + {exposed.ModelName}  (the server's {exposed.Tool})");
+            foreach (var withheld in state.Withheld) output.WriteLine($"  - {withheld.Tool}: {withheld.Why}");
+        }
+        if (tool is null) return states.All(s => s.Reachable) ? Ok : Failed;
+
+        var target = states.Single();
+        if (!target.Reachable) return Failed;
+        if (target.Exposed.FirstOrDefault(t => t.Tool == tool || t.ModelName == tool) is not { } chosen)
+        {
+            output.WriteLine($"\"{tool}\" is not a tool agents may use on {target.Name}.");
+            return Usage;
+        }
+        JsonElement input;
+        try
+        {
+            input = JsonDocument.Parse(string.IsNullOrWhiteSpace(arguments) ? "{}" : arguments).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            output.WriteLine("The arguments are not valid JSON. Example: mcp-check docs search '{\"query\":\"rate limiting\"}'");
+            return Usage;
+        }
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            output.WriteLine("The arguments must be a JSON object.");
+            return Usage;
+        }
+        if (Web.McpAgentTool.Refuse(input, new Web.EgressGuard(blocked: web.BlockedTerms)) is { } why)
+        {
+            output.WriteLine($"Refused before anything was sent: an argument contains {why}.");
+            return Failed;
+        }
+        try
+        {
+            var result = await servers.CallAsync(target.Name, chosen.Tool, input, ct);
+            output.WriteLine($"Called {chosen.Tool}: {(result.IsError ? "the tool reported a failure" : "ok")}, {result.Text.Length} characters.");
+            foreach (var line in result.Text.Split('\n').Where(l => l.Trim().Length > 0).Take(5)) output.WriteLine($"  {(line.Length <= 160 ? line : line[..160] + "…")}");
+            return result.IsError ? Failed : Ok;
+        }
+        catch (Web.McpException ex)
+        {
+            output.WriteLine($"No result: {ex.Message}{(ex.Detail is { Length: > 0 } said ? $" (the server said: {said})" : "")}.");
             return Failed;
         }
     }

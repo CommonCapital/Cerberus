@@ -72,6 +72,9 @@ public sealed class ApiHost : IDisposable
     /// <summary>Stands in for the browser: no browser is started by any test.</summary>
     public FakeBrowser Browser { get; } = new();
 
+    /// <summary>Stands in for the installation's MCP servers: none unless a test adds one. No test reaches a real server.</summary>
+    public FakeMcp Mcp { get; } = new();
+
     /// <summary>Stands in for the local model server's list of installed models; null means it does not answer.</summary>
     public FakeLocalModels LocalModels { get; } = new();
 
@@ -119,6 +122,8 @@ public sealed class ApiHost : IDisposable
                 services.AddSingleton<Cerberus.Api.Web.IWebSearch>(Web);
                 services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.Web.IAgentBrowser)));
                 services.AddSingleton<Cerberus.Api.Web.IAgentBrowser>(Browser);
+                services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.Web.IMcpServers)));
+                services.AddSingleton<Cerberus.Api.Web.IMcpServers>(Mcp);
 
                 // Which local models are installed is scripted too: no test asks a model server.
                 services.Remove(services.Single(d => d.ServiceType == typeof(Cerberus.Api.ILocalModelCatalog)));
@@ -241,6 +246,57 @@ public sealed class FakeBrowser : Cerberus.Api.Web.IAgentBrowser
         return Task.FromResult(new Cerberus.Api.Web.BrowsedPage(
             url, "pickle — Python object serialization", "Warning: the pickle module is not secure.", false,
             screenshot ? Png : null, $"screen {scroll + 1} of 9", []));
+    }
+}
+
+public sealed class FakeMcp : Cerberus.Api.Web.IMcpServers
+{
+    private readonly object _lock = new();
+    private List<Cerberus.Api.Web.McpServerState> _servers = [];
+
+    public ConcurrentQueue<(string Server, string Tool, string Arguments)> Called { get; } = new();
+    public Func<string, string, Cerberus.Api.Web.McpCallResult> Answer { get; set; } = (server, tool) => new($"{server}/{tool} answered.", false);
+
+    /// <summary>Configures servers until the returned handle is disposed.</summary>
+    public IDisposable With(params Cerberus.Api.Web.McpServerState[] servers)
+    {
+        lock (_lock) _servers = [.. servers];
+        return new Reset(this);
+    }
+
+    private sealed class Reset(FakeMcp owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner._lock) owner._servers = [];
+        }
+    }
+
+    /// <summary>A reachable server with one tool agents may use, <c>search(query)</c>.</summary>
+    public static Cerberus.Api.Web.McpServerState Server(string name, params string[] withheld) => new(
+        name, $"https://{name}.example/mcp", true, null, null, $"{name} server", "2025-06-18",
+        [new(name, "search", $"mcp_{name}_search", $"The tool \"search\" of the outside server \"{name}\".",
+            JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}""").RootElement.Clone())],
+        [.. withheld.Select(tool => new Cerberus.Api.Web.WithheldTool(tool, "the server does not mark it read-only; name it under \"tools\" to allow it"))]);
+
+    private List<Cerberus.Api.Web.McpServerState> Now()
+    {
+        lock (_lock) return _servers;
+    }
+
+    public IReadOnlyList<string> Names => Now().Select(s => s.Name).ToList();
+    public IReadOnlyList<string> Problems { get; set; } = [];
+    public IReadOnlyList<Cerberus.Api.Web.McpServerState> Known => Now();
+    public Task<IReadOnlyList<Cerberus.Api.Web.McpServerState>> StatesAsync(bool refresh, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<Cerberus.Api.Web.McpServerState>>(Now());
+
+    public Task<Cerberus.Api.Web.McpCallResult> CallAsync(string server, string tool, JsonElement arguments, CancellationToken ct)
+    {
+        var state = Now().FirstOrDefault(s => s.Name == server) ?? throw new Cerberus.Api.Web.McpException("no server of that name is configured");
+        if (!state.Reachable) throw new Cerberus.Api.Web.McpException(state.Problem ?? "it could not be reached");
+        if (state.Exposed.All(t => t.Tool != tool)) throw new Cerberus.Api.Web.McpException("that tool is not one agents may use");
+        Called.Enqueue((server, tool, arguments.GetRawText()));
+        return Task.FromResult(Answer(server, tool));
     }
 }
 

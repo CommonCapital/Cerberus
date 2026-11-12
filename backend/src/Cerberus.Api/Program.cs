@@ -138,6 +138,11 @@ builder.Services.AddSingleton(new Cerberus.Api.Web.BrowserOptions(
     Path: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_PATH"),
     NoSandbox: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_NO_SANDBOX") == "true"));
 builder.Services.AddSingleton<Cerberus.Api.Web.IAgentBrowser, Cerberus.Api.Web.ChromeBrowser>();
+// MCP servers: named in a file by the administrator; their allowed tools go to the researcher, nowhere else.
+builder.Services.AddSingleton(Cerberus.Api.Web.McpOptions.Load(
+    Environment.GetEnvironmentVariable("CERBERUS_MCP_CONFIG"), Environment.GetEnvironmentVariable));
+builder.Services.AddSingleton<Cerberus.Api.Web.IMcpServers, Cerberus.Api.Web.McpServers>();
+builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Health.McpCheck>();
 builder.Services.AddSingleton<Cerberus.Api.Web.ResearchTools>();
 builder.Services.AddSingleton<RunStream>();
 builder.Services.AddSingleton<JobEvents>();
@@ -169,6 +174,14 @@ if (args is ["browser-check", ..])
         app.Services.GetRequiredService<Cerberus.Api.Web.IAgentBrowser>(), app.Services.GetRequiredService<Cerberus.Api.Web.BrowserOptions>(),
         args.ElementAtOrDefault(1), int.TryParse(args.ElementAtOrDefault(2), out var screens) ? screens : 0, args.ElementAtOrDefault(3),
         Console.Out, CancellationToken.None);
+}
+
+// `mcp-check [server [tool [json-arguments]]]`: reach the configured MCP servers, show what agents would see, optionally call one tool.
+if (args is ["mcp-check", ..])
+{
+    return await Cerberus.Api.Health.ServiceCommands.McpCheckAsync(
+        app.Services.GetRequiredService<Cerberus.Api.Web.IMcpServers>(), app.Services.GetRequiredService<Cerberus.Api.Web.WebOptions>(),
+        args.ElementAtOrDefault(1), args.ElementAtOrDefault(2), args.ElementAtOrDefault(3), Console.Out, CancellationToken.None);
 }
 
 // `smoke-llm <model>`: can this model do what the agents need? Keys come from the environment; nothing is served.
@@ -216,6 +229,7 @@ app.MapJobEndpoints();
 app.MapScheduleEndpoints();
 app.MapModelEndpoints();
 Cerberus.Api.Web.ArtifactEndpoints.MapArtifactEndpoints(app);
+Cerberus.Api.Web.McpEndpoints.MapMcpEndpoints(app);
 app.MapReviewEndpoints();
 Cerberus.Api.Reports.SarifEndpoints.MapSarifEndpoints(app);
 Cerberus.Api.Agents.AgentRunEndpoints.MapAgentRunEndpoints(app);

@@ -67,8 +67,8 @@ public static class JobEndpoints
 
     private static Task<IResult> Submit(
         SubmitJobRequest body, HttpContext http, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, CancellationToken ct) =>
-        SubmitAsync(UserId(http), body, db, audit, bus, options, catalogs, events, policy, web, ct);
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, Web.IMcpServers mcp, CancellationToken ct) =>
+        SubmitAsync(UserId(http), body, db, audit, bus, options, catalogs, events, policy, web, mcp, ct);
 
     /// <summary>
     /// Accepts a job for a user: validation, engagement scope, the permission policy, then the queue or an approval
@@ -77,7 +77,7 @@ public static class JobEndpoints
     /// <param name="accepted">Called with the job (and the approval it waits for, if any) once it has been stored.</param>
     internal static async Task<IResult> SubmitAsync(
         string userId, SubmitJobRequest body, CerberusDbContext db, AuditLog audit,
-        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, CancellationToken ct,
+        IMessageBus bus, JobOptions options, Compliance.CatalogLoader catalogs, JobEvents events, RunPolicy policy, Web.WebOptions web, Web.IMcpServers mcp, CancellationToken ct,
         Action<Job, ApprovalRequest?>? accepted = null)
     {
         var type = string.IsNullOrWhiteSpace(body.Type) ? JobTypes.Scan : body.Type.Trim().ToLowerInvariant();
@@ -99,11 +99,20 @@ public static class JobEndpoints
         {
             return BadRequest("research applies to sast and threat-model jobs.");
         }
-        if (research && !web.Enabled)
+        if (research && !web.Enabled && mcp.Names.Count == 0)
         {
             return BadRequest("Research on the internet is switched off on this server (CERBERUS_WEB=on turns it on).");
         }
-        ApprovalNeed? researchNeed = research
+        // The servers the installation has configured come with research: the same researcher uses them, under a consent of their own.
+        ApprovalNeed? mcpNeed = research && mcp.Names.Count > 0
+            ? new ApprovalNeed(
+                ActionKinds.UseMcpServers,
+                $"Let the agent's researcher use the outside servers configured here ({string.Join(", ", mcp.Names)}) while it works on \"{targetPath}\"",
+                "The researcher is a separate agent that sees only the agent's question, never the code. It may call the tools of these servers that are " +
+                "allowed here — the ones the administrator named, or the ones a server marks read-only. Everything it sends is checked like a research " +
+                "question before it leaves, and every call is shown on the run.")
+            : null;
+        ApprovalNeed? researchNeed = research && web.Enabled
             ? new ApprovalNeed(
                 ActionKinds.UseTheInternet,
                 $"Let the agent ask questions on the public internet while it works on \"{targetPath}\"",
@@ -396,7 +405,14 @@ public static class JobEndpoints
         if (planNeed is not null) involved.Add(ActionKinds.RunPlan);
         if (approvalNeed is not null || sendsCodeOut) involved.Add(ActionKinds.SendCodeToCloudModel);
         if (researchNeed is not null) involved.Add(ActionKinds.UseTheInternet);
+        if (mcpNeed is not null) involved.Add(ActionKinds.UseMcpServers);
         var unapproved = permissions.Unapproved(involved);
+        // What research still needs consent for: the internet, the configured servers, or both.
+        var researchAsks = new List<ApprovalNeed>();
+        if (researchNeed is not null && unapproved.Contains(ActionKinds.UseTheInternet)) researchAsks.Add(researchNeed);
+        if (mcpNeed is not null && unapproved.Contains(ActionKinds.UseMcpServers)) researchAsks.Add(mcpNeed);
+        static string Also(string detail, IEnumerable<ApprovalNeed> more) =>
+            detail + string.Concat(more.Select(need => "\n\nAlso: " + need.Title + ". " + need.Detail));
 
         if (unapproved.Count == 0)
         {
@@ -405,7 +421,7 @@ public static class JobEndpoints
             if (skipped.Count > 0)
             {
                 await audit.AppendAsync(userId, "approval.auto", AuditOutcome.Allowed,
-                    $"Not asked: \"{(planNeed ?? approvalNeed ?? researchNeed)!.Title}\" is always allowed by the {permissionScope} permissions ({string.Join(", ", skipped)}).",
+                    $"Not asked: \"{(planNeed ?? approvalNeed ?? researchNeed ?? mcpNeed)!.Title}\" is always allowed by the {permissionScope} permissions ({string.Join(", ", skipped)}).",
                     engagementId, targetPath, tier, ct);
             }
             approvalNeed = null;
@@ -420,15 +436,12 @@ public static class JobEndpoints
         }
         else if (unapproved.Contains(ActionKinds.SendCodeToCloudModel))
         {
-            // One request for everything the run needs consent for: the cloud model, and the internet if that is asked too.
-            if (researchNeed is not null && unapproved.Contains(ActionKinds.UseTheInternet))
-            {
-                approvalNeed = approvalNeed! with { Detail = approvalNeed.Detail + "\n\nAlso: " + researchNeed.Title + ". " + researchNeed.Detail };
-            }
+            // One request for everything the run needs consent for: the cloud model, and what research is asked for too.
+            approvalNeed = approvalNeed! with { Detail = Also(approvalNeed.Detail, researchAsks) };
         }
-        else if (unapproved.Contains(ActionKinds.UseTheInternet))
+        else if (researchAsks.Count > 0)
         {
-            approvalNeed = researchNeed;
+            approvalNeed = researchAsks[0] with { Detail = Also(researchAsks[0].Detail, researchAsks.Skip(1)) };
         }
         else
         {
