@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, type RefObject } from "react";
 
 import { TextAttributes } from "@opentui/core";
 
@@ -9,6 +9,8 @@ import type { TextareaRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import type { KeyBinding } from "@opentui/core";
 import { useLocation, useNavigate } from "react-router";
+import { expandSubmission, loadCustomCommands } from "../lib/custom-commands";
+import { builtInCommandNames, setCustomCommands } from "./command-menu/filter-commands";
 import { EmptyBorder } from "./border";
 import { StatusBar } from "./status-bar";
 import { CommandMenu } from "./command-menu";
@@ -278,6 +280,17 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
 
   const renderer = useRenderer();
   const navigate = useNavigate();
+  // The project's and the user's own slash commands (prompt files), read once when the input appears.
+  const customCommands = useMemo(() => {
+    const commands = loadCustomCommands(process.cwd(), undefined, builtInCommandNames());
+    setCustomCommands(commands.map((command) => ({
+      name: command.name,
+      description: `${command.description} (${command.source === "project" ? "this project" : "yours"})`,
+      value: `/${command.name}`,
+    })));
+    return commands;
+  }, []);
+
   // The chat the operator is in, if any: commands that act on "this conversation" need it.
   const sessionId = useLocation().pathname.match(/^\/sessions\/([^/]+)$/)?.[1];
   const toast = useToast();
@@ -355,9 +368,10 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     const text = textarea.plainText.trim();
     if (text.length === 0) return;
 
-    onSubmit(text);
+    // "/name arguments" for a custom command is sent as that command's prompt, filled in.
+    onSubmit(expandSubmission(text, customCommands) ?? text);
     textarea.setText("");
-  }, [disabled, onSubmit])
+  }, [disabled, onSubmit, customCommands])
 
   const handleMentionExecute = useCallback((index: number) => {
     const textarea = textareaRef.current;

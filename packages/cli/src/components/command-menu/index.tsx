@@ -8,8 +8,9 @@ const MAX_VISIBLE_ITEMS = 8;
 
 // Align all command names in a fixed-width column so their descriptions
 // start at the same horizontal position for a clean tabular look.
-// The width adjusts to accommodate the longest command name.
-const COMMAND_COL_WIDTH = Math.max(...COMMANDS.map((cmd) => cmd.name.length)) + 4;
+// The width adjusts to accommodate the longest command name shown.
+const columnWidth = (commands: { name: string }[]) =>
+  Math.max(...COMMANDS.map((cmd) => cmd.name.length), ...commands.map((cmd) => cmd.name.length)) + 4;
 
 type CommandMenuProps = {
   query: string;
@@ -29,6 +30,7 @@ export function CommandMenu({
   const { colors } = useTheme();
   const filtered = getFilteredCommands(query);
   const visibleHeight = Math.min(filtered.length, MAX_VISIBLE_ITEMS);
+  const COMMAND_COL_WIDTH = columnWidth(filtered);
 
   if (filtered.length === 0) {
     return (

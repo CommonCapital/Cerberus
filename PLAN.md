@@ -559,7 +559,7 @@ Compared on 2026-11-12 against `github.com/yumiaura/opencode` (a fork of the ope
 | Undo | A snapshot of the files before each step; `/undo`, `/redo`; a diff of the whole session | ⬜ **Undo / redo.** |
 | Tasks | A `todo` tool the model keeps, shown in a sidebar | ⬜ A task list in chat (jobs already have one). |
 | Sub-agents in chat | A `subagent` tool: child sessions (general, explore), foreground or background | ⬜ Chat cannot delegate; our agents run as jobs. |
-| Custom commands and agents | Markdown files with frontmatter: `commands/*.md` (`$ARGUMENTS`, `` !`cmd` ``), `agents/*.md` | ⬜ **Custom slash commands** from a project directory; custom agents. |
+| Custom commands and agents | Markdown files with frontmatter: `commands/*.md` (`$ARGUMENTS`, `` !`cmd` ``), `agents/*.md` | ✅ **Custom slash commands:** a Markdown file in `.cerberus/commands/` (also `.opencode/commands/`, `.claude/commands/`; from the working directory up to the repository root) or in `~/.nightcode/commands/` becomes `/its-name`; optional frontmatter `description:`; `$ARGUMENTS` and `$1`…`$9` are filled from what is typed after the name. Built-in names cannot be taken. A command only produces the operator's message — the `` !`cmd` `` shell injection of opencode is deliberately not supported (a repository's file would run commands unasked). ⬜ Custom agents; per-command model or mode. |
 | Prompt input | `!` runs a shell command directly; large pastes collapsed; history, drafts; queued prompts while busy | ⬜ `!` shell mode; paste collapsing; queued prompts. |
 | Session housekeeping | Titles written by a model; fork; export | ⬜ Auto-titles; fork; export. |
 | Resilience | Retry with backoff and `retry-after`, shown as a countdown; retries for an hour when offline | ✅ Every provider call is retried on a passing failure (429, 408, 5xx, 529, dropped connection, timeout) before output starts: up to 5 times, 2 s doubling to 30 s, honouring `Retry-After` up to a minute. Announced in the chat and on a job's run. ⬜ A failure after output has started still ends the reply; no long offline wait. |
@@ -567,7 +567,7 @@ Compared on 2026-11-12 against `github.com/yumiaura/opencode` (a fork of the ope
 | Extending | Plugins with hooks (`tool.execute.before/after`, `permission.evaluate`, …); MCP servers; web fetch and search | ⬜ Not planned before v1: each is a new way for untrusted input to reach an agent with tools, and needs its own threat model first. |
 | Notifications | Desktop notifications and sounds | 🟡 Notices inside the CLI. ⬜ Outside it. |
 
-**Order for the open items**, by what an operator feels first: custom slash commands → `!` shell mode and queued prompts → undo/redo → task list in chat → headless mode → auto-titles, markdown and folding.
+**Order for the open items**, by what an operator feels first: `!` shell mode and queued prompts → undo/redo → task list in chat → headless mode → auto-titles, markdown and folding.
 
 ---
 
