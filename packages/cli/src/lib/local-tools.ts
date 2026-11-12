@@ -204,6 +204,41 @@ export function changeSummary(before: string, after: string): { diff: string; ad
   return { diff: shown.join("\n"), added: added.length, removed: removed.length };
 }
 
+export type CommandResult = { stdout: string; stderr: string; exitCode: number; timedOut?: true; note?: string };
+
+/**
+ * Runs a shell command in the project directory and returns what it printed
+ * (long output is cut in the middle and saved whole to a file) and how it
+ * ended. Used for the agent's `bash` tool and for a command the operator
+ * types themself with "!".
+ */
+export async function runCommand(command: string, options: { timeout?: number; byAgent: boolean }): Promise<CommandResult> {
+  const timeout = Math.min(Math.max(options.timeout ?? DEFAULT_TIMEOUT, 1000), MAX_TIMEOUT);
+  const proc = Bun.spawn(["bash", "-c", command], {
+    cwd: resolveInsideCwd(".").resolved,
+    stdout: "pipe",
+    stderr: "pipe",
+    // AGENT=1 lets scripts tell they are being run by an agent and not by a person.
+    env: { ...process.env, TERM: "dumb", ...(options.byAgent ? { AGENT: "1" } : {}) },
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, timeout);
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  const exitCode = await proc.exited;
+  clearTimeout(timer);
+  return {
+    stdout: fitOutput(stdout, saveOutput),
+    stderr: fitOutput(stderr, saveOutput),
+    exitCode,
+    ...(timedOut
+      ? { timedOut: true as const, note: `Stopped after ${Math.round(timeout / 1000)} s. Pass a longer timeout (up to ${MAX_TIMEOUT / 1000} s) if the command needs it.` }
+      : {}),
+  };
+}
+
 export async function executeLocalTool(toolName: string, input: unknown, mode: ModeType) {
   if (mode === Mode.PLAN && !["readFile", "listDirectory", "glob", "grep"].includes(toolName)) {
     throw new Error(`Tool ${toolName} is not available in PLAN mode`);
@@ -326,33 +361,7 @@ export async function executeLocalTool(toolName: string, input: unknown, mode: M
     }
     case "bash": {
       const parsed = toolInputSchemas.bash.parse(input);
-      const timeout = Math.min(Math.max(parsed.timeout ?? DEFAULT_TIMEOUT, 1000), MAX_TIMEOUT);
-      const proc = Bun.spawn(["bash", "-c", parsed.command], {
-        cwd: resolveInsideCwd(".").resolved,
-        stdout: "pipe",
-        stderr: "pipe",
-        // AGENT=1 lets scripts tell they are being run by an agent and not by a person.
-        env: { ...process.env, TERM: "dumb", AGENT: "1" },
-      });
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, timeout);
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      const exitCode = await proc.exited;
-      clearTimeout(timer);
-      return {
-        stdout: fitOutput(stdout, saveOutput),
-        stderr: fitOutput(stderr, saveOutput),
-        exitCode,
-        ...(timedOut
-          ? { timedOut: true as const, note: `Stopped after ${Math.round(timeout / 1000)} s. Pass a longer timeout (up to ${MAX_TIMEOUT / 1000} s) if the command needs it.` }
-          : {}),
-      };
+      return runCommand(parsed.command, { timeout: parsed.timeout, byAgent: true });
     }
     default:
       throw new Error(`Unknown tool: ${toolName}`);
