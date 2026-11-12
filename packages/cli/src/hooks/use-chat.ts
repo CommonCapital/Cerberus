@@ -12,6 +12,7 @@ import { apiClient } from "../lib/api-client";
 import { getAuth } from "../lib/auth";
 import { executeLocalTool, runCommand } from "../lib/local-tools";
 import { shellMessageText, shellRecord, withUnsent, type ShellRecord } from "../lib/chat-flow";
+import { journalFor } from "../lib/undo-journal";
 import { projectContext } from "../lib/project-context";
 import { cerberus } from "../lib/cerberus/api";
 import {
@@ -43,6 +44,8 @@ export type ChatMessageMetadata = {
   usage?: LanguageModelUsage;
   /** Set on a message that records a command the operator ran themself with "!". */
   shell?: ShellRecord;
+  /** Set on a message in which the CLI tells the agent, for the operator, about something done outside the chat (an undo). */
+  note?: true;
 };
 
 type ChatTools = {
@@ -157,7 +160,16 @@ export function useChat(
         }
 
         try {
-          const output = await executeLocalTool(toolCall.toolName, toolCall.input, mode);
+          // Every file the agent writes is recorded with what it replaced, under the turn it belongs to: that is what /undo puts back.
+          const turn =
+            chat.messages.findLast((m) => m.role === "user" && !m.metadata?.shell && !m.metadata?.note)?.id ?? "start";
+          const output = await executeLocalTool(toolCall.toolName, toolCall.input, mode, (change) => {
+            try {
+              journalFor(sessionId).record(turn, process.cwd(), change);
+            } catch {
+              // Not being able to keep a copy must not fail the edit itself; that change simply cannot be undone.
+            }
+          });
           chat.addToolOutput({ tool, toolCallId: toolCall.toolCallId, output });
         } catch (error) {
           fail(error instanceof Error ? error.message : String(error));
@@ -198,6 +210,15 @@ export function useChat(
         { id, role: "user", parts: [{ type: "text", text: shellMessageText(record) }], metadata: { mode, model, shell: record } },
       ]);
       return record;
+    },
+    /** Adds a line the agent should know about — said for the operator — to go out with the next prompt. */
+    addNote: (text: string, mode: ModeType, model: SupportedChatModelId) => {
+      const id = crypto.randomUUID();
+      unsentRef.current.add(id);
+      chat.setMessages((current) => [
+        ...current,
+        { id, role: "user", parts: [{ type: "text", text }], metadata: { mode, model, note: true } },
+      ]);
     },
     abort: chat.stop,
     interrupt: chat.stop,
