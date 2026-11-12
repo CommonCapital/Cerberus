@@ -35,6 +35,15 @@ mock.module("../lib/cerberus/api", () => ({
   },
 }));
 
+// Nothing is fetched from a server or written to disk: the screen's export goes through these.
+mock.module("../lib/cerberus/export-io", () => ({
+  sarifIo: {
+    fetch: async (source: { kind: string; id: string }) => { calls.push(`sarif ${source.kind} ${source.id}`); return { version: "2.1.0", runs: [] }; },
+    write: (path: string) => { calls.push(`write ${path}`); },
+    directory: () => "/work",
+  },
+}));
+
 const { Run } = await import("./run");
 const { useParams } = await import("react-router");
 
@@ -222,4 +231,22 @@ test("a finished threat model, like a finished review, loads and shows its repor
 
   expect(calls).toEqual(["agentRun run-8"]);
   expect(ui.captureCharFrame()).toContain("# Threat model of `svc`");
+});
+
+test("s saves a finished scan's findings as a SARIF file and says where; other runs do not offer it", async () => {
+  const ui = (current = await screen());
+  await ui.show(view([["state", job("Running")]]));
+  expect(ui.captureCharFrame()).not.toContain("save findings as SARIF");
+  ui.mockInput.pressKey("s");
+  await ui.settle();
+  expect(calls).toEqual([]);
+
+  await ui.show(view([["state", job("Running")], ["state", { ...job("Succeeded"), resultId: "scan-42" }]]));
+  expect(ui.captureCharFrame()).toContain("s save findings as SARIF");
+  ui.mockInput.pressKey("s");
+  await ui.settle();
+  await ui.settle();
+
+  expect(calls).toEqual(["sarif scans scan-42", "write /work/cerberus-scan-scan-42.sarif"]);
+  expect(ui.captureCharFrame()).toContain("Saved /work/cerberus-scan-scan-42.sarif");
 });

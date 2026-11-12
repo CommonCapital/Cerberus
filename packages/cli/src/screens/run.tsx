@@ -4,6 +4,8 @@ import { TextAttributes, type InputRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { RunView } from "../components/run-view";
 import { cerberus } from "../lib/cerberus/api";
+import { saveSarif, sarifSourceOf } from "../lib/cerberus/export";
+import { sarifIo } from "../lib/cerberus/export-io";
 import { followRun } from "../lib/cerberus/follow";
 import { canBeSteered, emptyRun, isFinished, type RunView as RunViewModel } from "../lib/cerberus/run-state";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
@@ -112,6 +114,15 @@ export function Run() {
       return;
     }
 
+    if (key.name === "s" && view.job && sarifSourceOf(view.job)) {
+      const job = view.job;
+      void act(async () => {
+        const path = await saveSarif(job, sarifIo);
+        show({ variant: "info", message: `Saved ${path}` });
+      });
+      return;
+    }
+
     if (key.name === "o" && assessmentId) {
       navigate(`/assessments/${assessmentId}`);
       return;
@@ -142,6 +153,12 @@ export function Run() {
       <box flexShrink={0} flexDirection="row" gap={1} height={1}>
         <text>{composing ? "enter" : "esc"}</text>
         <text attributes={TextAttributes.DIM}>{composing ? "send · esc discard" : "back"}</text>
+        {!composing && sarifSourceOf(view.job) ? (
+          <>
+            <text>s</text>
+            <text attributes={TextAttributes.DIM}>save findings as SARIF</text>
+          </>
+        ) : null}
         {!composing && assessmentId ? (
           <>
             <text>o</text>
