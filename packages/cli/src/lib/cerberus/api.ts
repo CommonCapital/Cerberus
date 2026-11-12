@@ -239,6 +239,29 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+/** A response body that is not JSON: a file the server builds (a transcript). */
+async function download(path: string): Promise<string> {
+  const auth = getAuth();
+  let response: Response;
+  try {
+    response = await fetch(baseUrl() + path, { headers: auth ? { Authorization: `Bearer ${auth.token}` } : {} });
+  } catch {
+    throw new ApiError(`Cannot reach the server at ${baseUrl()}. Is the backend running?`, 0);
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try {
+      const data = JSON.parse(text) as { error?: unknown };
+      if (typeof data.error === "string") message = data.error;
+    } catch {
+      // Not JSON: the status says enough.
+    }
+    throw new ApiError(message, response.status);
+  }
+  return text;
+}
+
 export type SubmitJob =
   | { type: "scan"; path: string; sca?: boolean; exclusions?: "ask" | "honour" | "ignore"; engagementId?: string }
   | { type: "assess"; catalogId: string; path?: string; scanId?: string; sca?: boolean; engagementId?: string }
@@ -328,6 +351,13 @@ export const cerberus = {
   nameSession: (sessionId: string) => request<{ title: string; model: string }>("POST", `/sessions/${sessionId}/title`),
   /** Names the conversation as the operator says. */
   renameSession: (sessionId: string, title: string) => request<{ title: string }>("PUT", `/sessions/${sessionId}/title`, { title }),
+  /** A conversation with its messages. */
+  session: (sessionId: string) => request<{ id: string; title: string; messages: unknown[] }>("GET", `/sessions/${sessionId}`),
+  /** A copy of the conversation — whole, or up to the reply `through` — to carry on differently. */
+  forkSession: (sessionId: string, options: { through?: string; title?: string } = {}) =>
+    request<{ id: string; title: string }>("POST", `/sessions/${sessionId}/fork`, options),
+  /** The conversation as a Markdown document, credentials masked. */
+  exportSession: (sessionId: string) => download(`/sessions/${sessionId}/export`),
   scans: () => request<ScanSummary[]>("GET", "/scans"),
   scan: (id: string) => request<ScanDetail>("GET", `/scans/${id}`),
   /** Records the operator's decision on a finding, with the reason. It applies to that finding in later scans too. */

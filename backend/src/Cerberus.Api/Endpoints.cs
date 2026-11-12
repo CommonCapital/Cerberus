@@ -39,6 +39,8 @@ public static class Endpoints
         sessions.MapPost("/{id}/compact", CompactSession);
         sessions.MapPost("/{id}/title", WriteSessionTitle);
         sessions.MapPut("/{id}/title", SetSessionTitle);
+        sessions.MapPost("/{id}/fork", ForkSession);
+        sessions.MapGet("/{id}/export", ExportSession);
 
         var settings = app.MapGroup("/settings/keys").AddEndpointFilter<RequireAuthFilter>();
         settings.MapGet("/", ListApiKeys);
@@ -761,6 +763,89 @@ public static class Endpoints
         // Only the title: a reply being stored at the same moment must not be overwritten with what was read above.
         await db.Sessions.Where(s => s.Id == id && s.UserId == userId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Title, title), ct);
         return Results.Json(new { title, model });
+    }
+
+    /// <summary>
+    /// A copy of the conversation to carry on differently: the whole of it, or up to one of its replies.
+    /// The original is untouched. The copy is the operator's own session, also when the original was a helper's.
+    /// </summary>
+    private static async Task<IResult> ForkSession(string id, ForkSessionRequest? body, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var session = await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
+        if (session is null) return Results.Json(new { error = "Session not found" }, statusCode: 404);
+
+        var messages = ParseStoredMessages(session.Messages)
+            .Select(m => System.Text.Json.Nodes.JsonNode.Parse(m.GetRawText()) as System.Text.Json.Nodes.JsonObject)
+            .Where(m => m is not null).Select(m => m!).ToList();
+
+        var whole = true;
+        if (body?.Through is { } through)
+        {
+            var index = messages.FindIndex(m => UiMessages.IdOf(m) == through);
+            // A fork ends where the agent had finished speaking: cut after a prompt, it would hold a question nobody answered.
+            if (index < 0 || UiMessages.RoleOf(messages[index]) != "assistant")
+            {
+                return Results.Json(new { error = "through must be the id of one of the session's replies." }, statusCode: 400);
+            }
+            whole = index == messages.Count - 1;
+            messages = messages.Take(index + 1).ToList();
+        }
+
+        string title;
+        if (body?.Title is not null)
+        {
+            if (SessionTitler.CleanManual(body.Title) is not { } named)
+            {
+                return Results.Json(new { error = $"A title is one line of at most {SessionTitler.MaxManualLength} characters." }, statusCode: 400);
+            }
+            title = named;
+        }
+        else
+        {
+            const string suffix = " (fork)";
+            var original = session.Title.EndsWith(suffix, StringComparison.Ordinal) ? session.Title[..^suffix.Length] : session.Title;
+            title = (original.Length + suffix.Length <= SessionTitler.MaxManualLength ? original : original[..(SessionTitler.MaxManualLength - suffix.Length)]) + suffix;
+        }
+
+        // The summary stands in for messages up to a point; it is carried over only if the fork still contains that point.
+        var summarised = session.SummarizedThrough is { } point && messages.Any(m => UiMessages.IdOf(m) == point);
+        var fork = new Session
+        {
+            UserId = userId,
+            Title = title,
+            Messages = JsonSerializer.Serialize(messages, JsonOptions),
+            Summary = summarised ? session.Summary : null,
+            SummarizedThrough = summarised ? session.SummarizedThrough : null,
+            // The task list is the agent's state at the end of the conversation; an earlier point never had this list.
+            Tasks = whole ? session.Tasks : null,
+        };
+        db.Sessions.Add(fork);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new
+        {
+            fork.Id, fork.UserId, fork.Title, fork.CreatedAt, fork.UpdatedAt,
+            messages = ParseStoredMessages(fork.Messages),
+            summarizedThrough = fork.SummarizedThrough,
+            tasks = Cerberus.Api.Chat.TaskList.Read(fork.Tasks),
+            parentId = (string?)null,
+            forkedFrom = session.Id,
+        }, statusCode: 201);
+    }
+
+    /// <summary>The conversation as a Markdown file (see <see cref="SessionExport"/>).</summary>
+    private static async Task<IResult> ExportSession(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    {
+        var userId = UserId(http);
+        var session = await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
+        if (session is null) return Results.Json(new { error = "Session not found" }, statusCode: 404);
+
+        var messages = ParseStoredMessages(session.Messages)
+            .Select(m => System.Text.Json.Nodes.JsonNode.Parse(m.GetRawText()) as System.Text.Json.Nodes.JsonObject)
+            .Where(m => m is not null).Select(m => m!).ToList();
+        var markdown = SessionExport.Markdown(session, messages, DateTime.UtcNow);
+        return Results.File(Encoding.UTF8.GetBytes(markdown), SessionExport.ContentType, SessionExport.FileName(session));
     }
 
     /// <summary>Names the session as the operator says.</summary>

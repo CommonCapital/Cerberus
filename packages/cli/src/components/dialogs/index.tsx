@@ -1,5 +1,6 @@
 export { ThemeDialogContent } from "./theme-dialog";
 export { SessionsDialogContent } from "./sessions-dialog";
+export { ForkDialogContent, RenameDialogContent } from "./session-dialogs";
 export { AgentsDialogContent } from "./agents-dialog";
 export { ModelsDialogContent } from "./models-dialog";
 export { AgentReviewDialogContent, IndexDialogContent, ScanDialogContent, ThreatModelDialogContent } from "./scan-dialog";

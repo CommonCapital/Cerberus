@@ -5,6 +5,10 @@ public sealed record CredentialsRequest(string Email, string Password);
 /// <param name="ParentId">For a helper's conversation: the session whose agent delegated to it.</param>
 public sealed record CreateSessionRequest(string? Title, string? ParentId = null);
 
+/// <param name="Title">The fork's title; default: the original's, marked as a fork.</param>
+/// <param name="Through">Id of the reply the fork ends with; default: the whole conversation.</param>
+public sealed record ForkSessionRequest(string? Title = null, string? Through = null);
+
 /// <param name="Model">The model that writes the summary; default: the one that wrote the session's last reply.</param>
 public sealed record CompactRequest(string? Model);
 

@@ -34,6 +34,9 @@ public class SarifWriterTests
         Assert.Equal("Cerberus", run.GetProperty("tool").GetProperty("driver").GetProperty("name").GetString());
         Assert.Equal("cerberus/scan/scan-1", run.GetProperty("automationDetails").GetProperty("id").GetString());
         Assert.Equal("2026-11-12T09:30:00Z", run.GetProperty("invocations")[0].GetProperty("endTimeUtc").GetString());
+        // A time as the database hands it back (no kind) is the same instant, not shifted by the machine's offset.
+        var fromDatabase = Parse(Sarif.Log(Sarif.ScanRun("scan-1", "app", DateTime.SpecifyKind(When, DateTimeKind.Unspecified), false, findings, [])));
+        Assert.Equal("2026-11-12T09:30:00Z", fromDatabase.GetProperty("runs")[0].GetProperty("invocations")[0].GetProperty("endTimeUtc").GetString());
         Assert.False(run.GetProperty("properties").GetProperty("dependencyCheckCompleted").GetBoolean());
 
         var rules = run.GetProperty("tool").GetProperty("driver").GetProperty("rules").EnumerateArray().ToList();
