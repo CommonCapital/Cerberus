@@ -15,7 +15,9 @@ import { useToast } from "../providers/toast";
 import { describeCompaction, describeRetry, useChat } from "../hooks/use-chat";
 import { TaskStrip } from "../components/task-strip";
 import { latestTasks } from "../lib/task-list";
-import { isIdle, shellCommandOf } from "../lib/chat-flow";
+import { isIdle, readyToName, shellCommandOf } from "../lib/chat-flow";
+import { toggleToolCalls } from "../lib/tool-fold-state";
+import { cerberus } from "../lib/cerberus/api";
 import { onUndoRequest } from "../lib/undo-events";
 import { describeOutcome, journalFor } from "../lib/undo-journal";
 import { ShellMessage } from "../components/messages/shell-message";
@@ -40,8 +42,10 @@ const sessionLocationSchema = z.object({
 });
 
 function ChatMessage(
-  { msg }: {
-    msg: Message
+  { msg, streaming = false }: {
+    msg: Message;
+    /** The reply is still being written. */
+    streaming?: boolean;
   }
 ) {
   if (msg.role === "user" && msg.metadata?.shell) {
@@ -73,7 +77,7 @@ function ChatMessage(
       model={msg.metadata?.model ?? "unknown"}
       mode={msg.metadata?.mode ?? "BUILD"}
       durationMs={msg.metadata?.durationMs}
-      streaming={false}
+      streaming={streaming}
     />
   );
 };
@@ -114,6 +118,15 @@ function SessionChat({
     setQueued(rest);
     void submit({ userText: next!, mode, model });
   }, [idle, queued, error, submit, mode, model]);
+
+  // A new conversation is named by the model once its first reply is in. An opened one keeps its name.
+  // A title is a nicety: if it cannot be written, the first words of the prompt stay.
+  const named = useRef(initialMessages.length > 0);
+  useEffect(() => {
+    if (named.current || error || !readyToName(messages, status)) return;
+    named.current = true;
+    void cerberus.nameSession(session.id).catch(() => {});
+  }, [messages, status, error, session.id]);
 
   // "/undo" and "/redo" for this conversation: carried out here, where it is known whether the agent is at rest.
   const undoState = useRef({ idle, mode, model });
@@ -176,6 +189,11 @@ function SessionChat({
       interrupt();
       setQueued([]);   // the operator took the wheel: what was lined up no longer follows
     }
+    // Folded runs of the agent's reads and searches, shown in full and folded again.
+    if (key.ctrl && key.name === "o" && isTopLayer("base")) {
+      key.preventDefault();
+      toggleToolCalls();
+    }
   });
 
   useEffect(() => {
@@ -194,8 +212,8 @@ function SessionChat({
       loading={status === "submitted" || status === "streaming"}
       interruptible={status === "submitted" || status === "streaming"}
     >
-      {messages.map((msg) => (
-        <ChatMessage key={msg.id} msg={msg} />
+      {messages.map((msg, index) => (
+        <ChatMessage key={msg.id} msg={msg} streaming={status === "streaming" && index === messages.length - 1} />
       ))}
       {running !== null ? <text attributes={TextAttributes.DIM}>$ {running} …</text> : null}
       <TaskStrip tasks={latestTasks(messages)} />

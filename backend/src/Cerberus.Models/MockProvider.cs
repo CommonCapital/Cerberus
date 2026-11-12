@@ -27,7 +27,11 @@ public sealed partial class MockProvider : IModelProvider
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var lastUser = request.Messages.LastOrDefault(m => m.Role == "user")?.Content ?? "";
-        await foreach (var word in Words($"Echo: {lastUser}".Trim(), cancellationToken))
+        // Asked to name a conversation: the dev model's title is the message's first words.
+        var reply = request.System?.StartsWith("Write a title", StringComparison.Ordinal) == true
+            ? string.Join(' ', lastUser.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Take(6))
+            : $"Echo: {lastUser}".Trim();
+        await foreach (var word in Words(reply, cancellationToken))
         {
             yield return word;
         }
