@@ -147,6 +147,7 @@ app.MapQuestionEndpoints();
 app.MapSkillEndpoints();
 app.MapPermissionEndpoints();
 app.MapMemoryEndpoints();
+app.MapFindingDecisionEndpoints();
 app.MapHub<ChatHub>("/hub/chat");
 app.MapHub<JobsHub>("/hub/jobs");
 

@@ -22,7 +22,9 @@ public static class SarifEndpoints
     {
         var userId = UserId(http);
         var scan = await db.Scans.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId, ct);
-        return scan is null ? NotFound("Scan") : File(Sarif.Log(RunOf(scan)), $"cerberus-scan-{Short(scan.Id)}.sarif");
+        return scan is null
+            ? NotFound("Scan")
+            : File(Sarif.Log(RunOf(scan, await FindingDecisions.ForUserAsync(db, userId, ct))), $"cerberus-scan-{Short(scan.Id)}.sarif");
     }
 
     private static async Task<IResult> AgentRun(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
@@ -48,10 +50,12 @@ public static class SarifEndpoints
         if (scan is null) return NotFound("The review's scan");
 
         // The scanner's run and the model's run side by side, never merged.
-        return File(Sarif.Log(RunOf(scan), agentRun is null ? null : RunOf(agentRun)), $"cerberus-review-{Short(review.Id)}.sarif");
+        return File(
+            Sarif.Log(RunOf(scan, await FindingDecisions.ForUserAsync(db, userId, ct)), agentRun is null ? null : RunOf(agentRun)),
+            $"cerberus-review-{Short(review.Id)}.sarif");
     }
 
-    private static System.Text.Json.Nodes.JsonObject RunOf(Scan scan)
+    private static System.Text.Json.Nodes.JsonObject RunOf(Scan scan, IReadOnlyDictionary<string, FindingDecision> decisions)
     {
         List<Finding> findings;
         try
@@ -62,7 +66,7 @@ public static class SarifEndpoints
         {
             findings = [];
         }
-        return Sarif.ScanRun(scan.Id, scan.TargetPath, scan.CreatedAt, scan.ScaCompleted, findings, TriageRunner.ReadTriage(scan.Triage));
+        return Sarif.ScanRun(scan.Id, scan.TargetPath, scan.CreatedAt, scan.ScaCompleted, findings, TriageRunner.ReadTriage(scan.Triage), decisions);
     }
 
     private static System.Text.Json.Nodes.JsonObject RunOf(AgentRun run) =>

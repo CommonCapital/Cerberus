@@ -34,7 +34,8 @@ public static class Sarif
     /// <summary>The scanner's findings of one scan, with the model's opinions on them (if any) as properties.</summary>
     public static JsonObject ScanRun(
         string scanId, string targetPath, DateTime finishedAt, bool dependencyCheckCompleted,
-        IReadOnlyList<Finding> findings, IReadOnlyList<TriageResult> opinions)
+        IReadOnlyList<Finding> findings, IReadOnlyList<TriageResult> opinions,
+        IReadOnlyDictionary<string, Cerberus.Data.FindingDecision>? decisions = null)
     {
         var rules = new List<JsonObject>();
         var ruleIndex = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -79,15 +80,27 @@ public static class Sarif
                 ? finding.Title
                 : $"{finding.Title} ({finding.Package} {finding.Version}{(finding.FixedVersion is null ? "" : $"; fixed in {finding.FixedVersion}")})";
             var result = Result(ruleId, index, finding.Severity, message, finding.File, finding.Line, finding.Evidence, finding.Id, properties);
+            var suppressions = new JsonArray();
             if (finding.Suppressed)
             {
                 // The target asked for this to be ignored. It is still reported, marked as such.
-                result["suppressions"] = new JsonArray(new JsonObject
+                suppressions.Add(new JsonObject
                 {
                     ["kind"] = "inSource",
                     ["justification"] = "Marked to be ignored in the target (cerberus:ignore).",
                 });
             }
+            if (decisions is not null && decisions.TryGetValue(FindingDecisions.Fingerprint(finding), out var decision))
+            {
+                // The operator's own decision, recorded in Cerberus: a suppression made outside the source.
+                suppressions.Add(new JsonObject
+                {
+                    ["kind"] = "external",
+                    ["status"] = "accepted",
+                    ["justification"] = $"{char.ToUpperInvariant(DecisionStatuses.Label(decision.Status)[0])}{DecisionStatuses.Label(decision.Status)[1..]}: {decision.Note}",
+                });
+            }
+            if (suppressions.Count > 0) result["suppressions"] = suppressions;
             results.Add(result);
         }
 

@@ -20,6 +20,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<AgentRun> AgentRuns => Set<AgentRun>();
     public DbSet<MemoryNote> MemoryNotes => Set<MemoryNote>();
+    public DbSet<FindingDecision> FindingDecisions => Set<FindingDecision>();
     public DbSet<OperatorQuestion> OperatorQuestions => Set<OperatorQuestion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -103,6 +104,12 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
         {
             e.HasKey(m => m.Id);
             e.HasIndex(m => new { m.UserId, m.CreatedAt });
+        });
+
+        modelBuilder.Entity<FindingDecision>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.UserId, d.Fingerprint }).IsUnique();
         });
 
         modelBuilder.Entity<PermissionSetting>(e =>

@@ -34,7 +34,7 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 
 | Area | Status |
 |---|---|
-| TypeScript CLI | ✅ chat, plus `/scan`, `/review`, `/sast`, `/threatmodel`, `/assess`, `/assessments` and `/runs` against the .NET backend |
+| TypeScript CLI | ✅ chat, plus `/scan`, `/findings`, `/review`, `/sast`, `/threatmodel`, `/assess`, `/assessments` and `/runs` against the .NET backend |
 | TypeScript server (`packages/server`) | 🗄 superseded by the .NET backend, which has all of its features; kept for reference |
 | .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
 | Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
@@ -117,6 +117,7 @@ With the backend and the CLI running, `/login`, and:
 - **`/scope`** — the directories the current engagement may be run on. Type a path to add it — doing so is your statement that you own that code or are authorized to test it. With nothing typed, Enter removes the highlighted one.
 - **`/abort`** — the kill switch: after one confirmation, stops every queued and running job under the current engagement and ends it for good.
 - **`/memory`** — what Cerberus remembers between runs: your standing instructions, your notes, and notes agents left (marked as a model's). Type to add one and choose note or instruction; with nothing typed, Enter forgets the highlighted entry.
+- **`/findings`** — open a scan's findings (also `f` on a finished scan or review). Go through them with ↑↓: `r` accepts the risk, `p` marks a false positive — each asks for the reason — and `x` withdraws a decision. A decision stays with the finding in later scans, until the flagged code changes.
 - **Export** — on a finished scan, review or model code review, `s` saves its findings as a SARIF file (`cerberus-<kind>-<id>.sarif`) in the directory the CLI was started in, ready for a code-scanning dashboard. Credential-shaped values in snippets are masked.
 - **Notices** — wherever you are in the CLI, a notice appears when one of your runs starts waiting for your approval or answer, and when one ends; the status bar shows how many are waiting. The run you are looking at is not announced.
 - **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
