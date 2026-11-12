@@ -2,7 +2,8 @@ namespace Cerberus.Api;
 
 public sealed record CredentialsRequest(string Email, string Password);
 
-public sealed record CreateSessionRequest(string? Title);
+/// <param name="ParentId">For a helper's conversation: the session whose agent delegated to it.</param>
+public sealed record CreateSessionRequest(string? Title, string? ParentId = null);
 
 /// <param name="Model">The model that writes the summary; default: the one that wrote the session's last reply.</param>
 public sealed record CompactRequest(string? Model);
@@ -45,4 +46,6 @@ public sealed record UiChatRequest(
     string? Mode,
     string? Model,
     // Where the client's tools run and the project's instructions file; optional (see ChatContext).
-    System.Text.Json.JsonElement? Context = null);
+    System.Text.Json.JsonElement? Context = null,
+    // True when the client can run helper conversations itself: only then is the agent offered the task tool.
+    bool? Subagents = null);

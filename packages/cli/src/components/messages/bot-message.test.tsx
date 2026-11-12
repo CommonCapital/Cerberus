@@ -147,3 +147,25 @@ test("a call still running is shown under the run it will join", async () => {
   expect(text).toContain("Explored: 3 reads");
   expect(text).toContain("Read File: d.py …");
 });
+
+test("a helper at work shows what it is doing; when it is done, how it went", async () => {
+  const { setHelperProgress } = await import("../../lib/subagent-progress");
+  const running = { type: "tool-task", toolCallId: "h1", state: "input-available", input: { description: "Find the loader", prompt: "…" } };
+  const ui = (current = await screen([running], true));
+
+  expect(ui.text()).toContain("Task: Find the loader …");
+  setHelperProgress("h1", "2 tool calls · readFile svc/loader.py");
+  await ui.settle(50);
+  expect(ui.text()).toContain("↳ 2 tool calls · readFile svc/loader.py");
+  setHelperProgress("h1", null);
+  ui.renderer.destroy();
+
+  const done = (current = await screen([
+    { ...running, state: "output-available", output: { report: "svc/loader.py:7 calls pickle.loads.", toolCalls: 2, complete: true } },
+  ]));
+  const text = done.text();
+  expect(text).toContain("Task: Find the loader");
+  expect(text).toContain("helper finished · 2 tool calls");
+  expect(text).toContain("svc/loader.py:7 calls pickle.loads.");
+  expect(text).not.toContain("↳");
+});

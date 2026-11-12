@@ -74,3 +74,23 @@ describe("toolResultLines", () => {
     expect(toolResultLines("bash", null)).toEqual([]);
   });
 });
+
+test("a task is shown by what the helper was asked to do, and how its work went", () => {
+  expect(summarizeToolCall("task", { description: "Find the loader", prompt: "a long prompt the user need not read" })).toBe("Find the loader");
+
+  expect(toolResultLines("task", { report: "svc/loader.py:7 calls pickle.loads.\n\nNothing else found.", toolCalls: 3, complete: true })).toEqual([
+    { text: "helper finished · 3 tool calls", tone: "plain" },
+    { text: "svc/loader.py:7 calls pickle.loads.", tone: "plain" },
+    { text: "Nothing else found.", tone: "plain" },
+  ]);
+});
+
+test("a helper that was stopped says so, and a long report is only begun", () => {
+  const report = Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join("\n");
+
+  const lines = toolResultLines("task", { report, toolCalls: 1, complete: false, note: "The helper was stopped after 25 rounds." });
+
+  expect(lines[0]).toEqual({ text: "helper stopped · 1 tool call", tone: "plain" });
+  expect(lines[1]).toEqual({ text: "The helper was stopped after 25 rounds.", tone: "problem" });
+  expect(lines.slice(2).map((line) => line.text)).toEqual(["line 1", "line 2", "line 3", "line 4", "… 5 more line(s) in its report"]);
+});

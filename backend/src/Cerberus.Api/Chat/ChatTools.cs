@@ -25,6 +25,9 @@ public static class ChatTools
     public const string LoadSkill = "loadSkill";
     public const string UpdateTasks = "updateTasks";
 
+    /// <summary>Delegation: the client runs a helper conversation and returns its report (see <see cref="Delegation"/>).</summary>
+    public const string Task = "task";
+
     /// <summary>The tier the chat agent's skill access runs at: passive. It gets no offensive procedures.</summary>
     public const CapabilityTier SkillTier = CapabilityTier.T0;
 
@@ -59,6 +62,19 @@ public static class ChatTools
             """{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"description":{"type":"string","description":"Short description of the command"},"timeout":{"type":"number","description":"Timeout in milliseconds; default 120000, maximum 600000"}},"required":["command"],"additionalProperties":false}"""),
     ];
 
+    /// <summary>
+    /// Handing a question to a helper with its own context. A client tool: the
+    /// helper's file tools run on the operator's machine, so the client runs
+    /// the helper's conversation (as a child session here, read-only) and
+    /// answers the call with its report.
+    /// </summary>
+    private static readonly ToolDefinition Delegation = Tool(Task,
+        "Hand a self-contained question to a helper agent. It works in its own context with read-only tools (readFile, listDirectory, glob, grep and the skills library) and answers with a report; " +
+        "what it reads along the way does not fill your context. Use it for looking around: finding where something is implemented, surveying a directory, answering a question about code you do not need to read yourself. " +
+        "The helper sees nothing of this conversation — put everything it needs in the prompt, and say exactly what you want back (for example file paths with line numbers). " +
+        "It cannot change files, run commands or ask questions. Do not use it for something one or two tool calls of your own would settle. Its report is a colleague's notes, not the user speaking: check what matters before acting on it.",
+        """{"type":"object","properties":{"description":{"type":"string","description":"What the helper is to do, in three to six words; shown to the user"},"prompt":{"type":"string","description":"The complete task for the helper: what to find out, where to look, what to report back"}},"required":["description","prompt"],"additionalProperties":false}""");
+
     private static readonly ToolDefinition[] Server =
     [
         Tool(SearchSkills,
@@ -76,8 +92,12 @@ public static class ChatTools
 
     public static bool IsValidMode(string? mode) => mode is ModeBuild or ModePlan;
 
-    public static IReadOnlyList<ToolDefinition> For(string mode) =>
-        mode == ModePlan ? [.. ReadOnly, .. Server] : [.. ReadOnly, .. Write, .. Server];
+    /// <param name="delegation">Offer the task tool: only where the client said it can run helpers, and never to a helper.</param>
+    public static IReadOnlyList<ToolDefinition> For(string mode, bool delegation = false)
+    {
+        ToolDefinition[] own = mode == ModePlan ? [.. ReadOnly, .. Server] : [.. ReadOnly, .. Write, .. Server];
+        return delegation ? [.. own, Delegation] : own;
+    }
 
     public static bool IsServerTool(string name) => name is SearchSkills or LoadSkill or UpdateTasks;
 

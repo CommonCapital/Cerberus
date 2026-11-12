@@ -121,6 +121,12 @@ public sealed partial class MockProvider : IModelProvider
 
         (string Tool, object Input)? call = lastUser switch
         {
+            // "delegate: <task>" → hand the task to a helper, named by its first words.
+            _ when DelegatePattern().Match(lastUser) is { Success: true } m => ("task", new
+            {
+                description = string.Join(' ', m.Groups[1].Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Take(4)),
+                prompt = m.Groups[1].Value.Trim(),
+            }),
             _ when ReadPattern().Match(lastUser) is { Success: true } m => ("readFile", new { path = m.Groups[1].Value }),
             _ when ListPattern().Match(lastUser) is { Success: true } m => ("listDirectory", new { path = m.Groups[1].Value }),
             _ when SkillsPattern().Match(lastUser) is { Success: true } m => ("searchSkills", new { query = m.Groups[1].Value.Trim(), limit = 3 }),
@@ -325,6 +331,9 @@ public sealed partial class MockProvider : IModelProvider
 
     [GeneratedRegex(@"^skills about (.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex SkillsPattern();
+
+    [GeneratedRegex(@"^delegate:\s*(.+)$", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex DelegatePattern();
 
     [GeneratedRegex(@"^tasks:\s*(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex TasksPattern();

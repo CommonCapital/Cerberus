@@ -40,6 +40,8 @@ export function summarizeToolCall(toolName: string, input: unknown): string {
       return clip(text(input, "query"), 60);
     case "loadSkill":
       return text(input, "name");
+    case "task":
+      return clip(text(input, "description"), 80);
     case "updateTasks": {
       const tasks = input && typeof input === "object" ? (input as { tasks?: unknown }).tasks : undefined;
       return Array.isArray(tasks) ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "";
@@ -52,6 +54,7 @@ export function summarizeToolCall(toolName: string, input: unknown): string {
 export type ResultLine = { text: string; tone: "added" | "removed" | "plain" | "problem" };
 
 const MAX_DIFF_SHOWN = 14;
+const MAX_REPORT_SHOWN = 4;
 
 /** What to show under a finished call. Empty when the one-line summary already says it all. */
 export function toolResultLines(toolName: string, output: unknown): ResultLine[] {
@@ -100,6 +103,17 @@ export function toolResultLines(toolName: string, output: unknown): ResultLine[]
     const shown = result.matches.length;
     const total = number(result, "totalMatches");
     return [{ text: shown === 0 ? "no matches" : `${shown} match${shown === 1 ? "" : "es"}${total && total > shown ? ` of ${total}` : ""}`, tone: "plain" }];
+  }
+
+  // A helper's report goes to the agent; here, how the helper's work went and how its report begins.
+  if (toolName === "task") {
+    const calls = number(result, "toolCalls") ?? 0;
+    const lines: ResultLine[] = [{ text: `helper ${result.complete === true ? "finished" : "stopped"} · ${calls} tool call${calls === 1 ? "" : "s"}`, tone: "plain" }];
+    if (typeof result.note === "string") lines.push({ text: result.note, tone: "problem" });
+    const report = (typeof result.report === "string" ? result.report : "").split("\n").map((line) => line.trimEnd()).filter((line) => line.length > 0);
+    for (const line of report.slice(0, MAX_REPORT_SHOWN)) lines.push({ text: line.length <= 160 ? line : `${line.slice(0, 160)}…`, tone: "plain" });
+    if (report.length > MAX_REPORT_SHOWN) lines.push({ text: `… ${report.length - MAX_REPORT_SHOWN} more line(s) in its report`, tone: "plain" });
+    return lines;
   }
 
   // The list itself is shown in the task strip; here, where it stands.

@@ -649,7 +649,8 @@ public static class Endpoints
     {
         var userId = UserId(http);
         var sessions = await db.Sessions
-            .Where(s => s.UserId == userId)
+            // A helper's conversation belongs to the chat that started it; it is not one of the operator's own.
+            .Where(s => s.UserId == userId && s.ParentId == null)
             .OrderByDescending(s => s.CreatedAt)
             .Select(s => new { s.Id, s.Title, s.CreatedAt })
             .ToListAsync(ct);
@@ -674,6 +675,7 @@ public static class Endpoints
             summarizedThrough = session.SummarizedThrough,
             // The agent's task list as it last set it (see updateTasks).
             tasks = Cerberus.Api.Chat.TaskList.Read(session.Tasks),
+            parentId = session.ParentId,
         });
     }
 
@@ -780,7 +782,14 @@ public static class Endpoints
         {
             return Results.Json(new { error = "Invalid request body" }, statusCode: 400);
         }
-        var session = new Session { UserId = userId, Title = SessionTitler.Initial(body.Title) };
+        if (body.ParentId is not null)
+        {
+            // A helper's conversation hangs under one of the caller's own chats, and helpers have no helpers.
+            var parent = await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == body.ParentId && s.UserId == userId, ct);
+            if (parent is null) return Results.Json(new { error = "Parent session not found" }, statusCode: 404);
+            if (parent.ParentId is not null) return Results.Json(new { error = "A helper cannot start helpers of its own." }, statusCode: 400);
+        }
+        var session = new Session { UserId = userId, Title = SessionTitler.Initial(body.Title), ParentId = body.ParentId };
         db.Sessions.Add(session);
         await db.SaveChangesAsync(ct);
 
@@ -792,6 +801,7 @@ public static class Endpoints
             session.CreatedAt,
             session.UpdatedAt,
             messages = Array.Empty<object>(),
+            parentId = session.ParentId,
         }, statusCode: 201);
     }
 
@@ -827,6 +837,10 @@ public static class Endpoints
             await http.Response.WriteAsJsonAsync(new { error = "Session not found" }, ct);
             return;
         }
+
+        // A helper only ever looks: whatever mode the request names, it gets the read-only tools.
+        var helper = session.ParentId is not null;
+        if (helper) mode = ChatTools.ModePlan;
 
         // Incoming messages replace stored ones with the same id, and are stamped with the mode and model in use.
         var messages = UiMessages.Merge(ParseStoredMessages(session.Messages), body.Messages);
@@ -870,7 +884,8 @@ public static class Endpoints
         var result = await runner.RunAsync(
             new UiMessageStreamWriter(http.Response),
             new ChatRun(mode!, body.Model, messages, credentials, memory, ChatContext.Read(body.Context).PromptSection(),
-                session.Summary, session.SummarizedThrough, notices, session.Tasks), ct);
+                session.Summary, session.SummarizedThrough, notices, session.Tasks,
+                Delegation: body.Subagents == true, Helper: helper), ct);
 
         // The task list is kept as soon as it changes — also when the reply is waiting on client tools:
         // the continuation is a new request and must find the list as the model left it.
