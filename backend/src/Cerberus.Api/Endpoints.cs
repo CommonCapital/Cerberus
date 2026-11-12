@@ -25,7 +25,7 @@ public static class Endpoints
 
     public static void MapCerberusEndpoints(this WebApplication app)
     {
-        app.MapGet("/health", () => Results.Json(new { status = "ok" }));
+        Cerberus.Api.Health.HealthEndpoints.MapHealthEndpoints(app);
 
         var auth = app.MapGroup("/auth");
         auth.MapPost("/register", Register);

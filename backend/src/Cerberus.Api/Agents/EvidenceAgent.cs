@@ -211,9 +211,9 @@ public sealed class EvidenceAgentRunner(
                 parameters.Model, credentials, EvidenceAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
                 EvidenceAgent.Task(assessment.TargetPath, catalog.Name, controls, scale, maxSteps) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
                 tools, maxSteps, reporter, ct, messages.Take);
-            if (outcome.HitStepLimit)
+            if (outcome.StopNote(maxSteps, "some controls may have no suggestion") is { } stopped)
             {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent was stopped at its limit of {maxSteps} steps; some controls may have no suggestion." });
+                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
             }
             await reporter.ProgressAsync(suggest.Count, controls.Count, $"{suggest.Count} of {controls.Count} control(s) have a suggestion.");
             await reporter.StepAsync("evidence", title, StepStatus.Completed);
@@ -222,7 +222,7 @@ public sealed class EvidenceAgentRunner(
         {
             messages.Dispose();
             var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
-            await audit.AppendAsync(job.UserId, "evidence.run", outcome is { HitStepLimit: false } ? AuditOutcome.Ok : AuditOutcome.Error,
+            await audit.AppendAsync(job.UserId, "evidence.run", outcome is { StoppedEarly: false } ? AuditOutcome.Ok : AuditOutcome.Error,
                 $"Evidence agent on assessment {assessment.Id} with {parameters.Model}: {suggest.Count} suggestion(s) for {controls.Count} control(s), " +
                 $"{outcome?.ToolCalls ?? 0} tool call(s); the code it read was sent to {where}. Suggestions are advisory.",
                 job.EngagementId, assessment.TargetPath, CapabilityTier.T0, CancellationToken.None);

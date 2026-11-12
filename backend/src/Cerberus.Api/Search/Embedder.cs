@@ -23,6 +23,12 @@ public interface IEmbedder
     string Model { get; }
 
     Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> inputs, EmbeddingPurpose purpose, CancellationToken ct);
+
+    /// <summary>
+    /// Whether the model can be used right now, without embedding anything: null if so, otherwise what is wrong,
+    /// in a few words fit for a health report (no addresses).
+    /// </summary>
+    Task<string?> ProblemAsync(CancellationToken ct) => Task.FromResult<string?>(null);
 }
 
 /// <summary>
@@ -36,6 +42,30 @@ public sealed class OllamaEmbedder(HttpClient http, EmbeddingOptions options) : 
     private const int BatchSize = 32;
 
     public string Model => options.Model;
+
+    /// <summary>Asks the server which models it has — nothing is loaded and nothing is sent to be embedded.</summary>
+    public async Task<string?> ProblemAsync(CancellationToken ct)
+    {
+        if (!options.AllowRemote && !IsLocal(options.BaseUrl)) return "the embedding server is not on this machine and remote use is not allowed";
+        try
+        {
+            using var response = await http.GetAsync($"{options.BaseUrl.TrimEnd('/')}/models", ct);
+            if (!response.IsSuccessStatusCode) return $"the embedding server answered {(int)response.StatusCode}";
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var listed = body.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array &&
+                         data.EnumerateArray().Any(m => m.TryGetProperty("id", out var id) && id.GetString() is { } name &&
+                                                        (name == options.Model || name.StartsWith(options.Model + ":", StringComparison.Ordinal)));
+            return listed ? null : $"the model {options.Model} is not pulled on the embedding server";
+        }
+        catch (HttpRequestException)
+        {
+            return "the embedding server cannot be reached";
+        }
+        catch (JsonException)
+        {
+            return "the embedding server gave an answer that could not be read";
+        }
+    }
 
     public async Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> inputs, EmbeddingPurpose purpose, CancellationToken ct)
     {
