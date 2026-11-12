@@ -1,10 +1,10 @@
 {
-  "name": "@nightcode/cli",
+  "name": "@cerberus/cli",
   "module": "src/main.ts",
   "type": "module",
   "private": true,
   "bin": {
-    "nightcode": "./bin/nightcode"
+    "cerberus": "./bin/cerberus"
   },
   "scripts": {
     "dev": "bun run --watch src/main.ts",
@@ -12,7 +12,7 @@
     "test": "bun test src"
   },
   "devDependencies": {
-    "@nightcode/server": "workspace:*",
+    "@cerberus/server": "workspace:*",
     "@types/bun": "latest",
     "@types/react": "^19.2.14"
   },
@@ -22,7 +22,7 @@
   "dependencies": {
     "@ai-sdk/react": "^3.0.186",
     "@microsoft/signalr": "^11.0.0",
-    "@nightcode/shared": "workspace:*",
+    "@cerberus/shared": "workspace:*",
     "@opentui/core": "^0.1.97",
     "@opentui/react": "^0.1.97",
     "ai": "^6.0.184",

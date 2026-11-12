@@ -8,8 +8,8 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import type { Engagement, EngagementTarget } from "../../lib/cerberus/api";
 
 // Never the operator's real settings directory.
-const home = mkdtempSync(join(tmpdir(), "nightcode-test-"));
-process.env.NIGHTCODE_HOME = home;
+const home = mkdtempSync(join(tmpdir(), "cerberus-test-"));
+process.env.CERBERUS_HOME = home;
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 let engagements: Engagement[] = [];
@@ -78,7 +78,7 @@ async function screen(title: string, content: ReactNode) {
 
 let current: Awaited<ReturnType<typeof screen>> | null = null;
 beforeEach(() => {
-  process.env.NIGHTCODE_HOME = home;
+  process.env.CERBERUS_HOME = home;
   calls.length = 0;
   setCurrentEngagement(null);
   engagements = [

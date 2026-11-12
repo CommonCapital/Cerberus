@@ -1,13 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { cerberusHome } from "../../lib/home";
 import { join } from "node:path";
 import { createContext, useContext, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { ThemeColors, Theme } from "../../theme";
 import { DEFAULT_THEME, THEMES } from "../../theme";
 
-const CONFIG_DIR = join(homedir(), ".nightcode");
-const THEME_PREFERENCES_PATH = join(CONFIG_DIR, "preferences.json");
+const configDir = () => cerberusHome();
+const preferencesPath = () => join(configDir(), "preferences.json");
 
 type ThemePreferences = {
   themeName: string;
@@ -16,7 +16,7 @@ type ThemePreferences = {
 function getInitialTheme(): Theme {
   try {
     const preferences = JSON.parse(
-      readFileSync(THEME_PREFERENCES_PATH, "utf8"),
+      readFileSync(preferencesPath(), "utf8"),
     ) as Partial<ThemePreferences>;
     const savedTheme = THEMES.find((theme) => theme.name === preferences.themeName);
     return savedTheme ?? DEFAULT_THEME;
@@ -27,9 +27,9 @@ function getInitialTheme(): Theme {
 
 function persistTheme(theme: Theme) {
   try {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+    mkdirSync(configDir(), { recursive: true });
     writeFileSync(
-      THEME_PREFERENCES_PATH,
+      preferencesPath(),
       JSON.stringify({ themeName: theme.name } satisfies ThemePreferences, null, 2),
       "utf8",
     );

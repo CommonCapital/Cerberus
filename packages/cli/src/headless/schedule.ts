@@ -1,8 +1,8 @@
 import type { SubmitJob } from "../lib/cerberus/api";
 import { parseArgs } from "./args";
 
-// `nightcode schedule …`: recurring runs from the command line. A schedule is
-// a job — written exactly as for `nightcode run` — and how often to start it.
+// `cerberus schedule …`: recurring runs from the command line. A schedule is
+// a job — written exactly as for `cerberus run` — and how often to start it.
 // Its runs go through the server's ordinary checks each time, so nothing
 // about approval is said here: what a run may do without asking is what the
 // operator's permission settings say.
@@ -28,11 +28,11 @@ export type ScheduleCommand =
   | { kind: "list"; server: string | null }
   | { kind: "remove" | "run" | "pause" | "resume"; id: string; server: string | null };
 
-export const SCHEDULE_USAGE = `Usage: nightcode schedule <add|list|run|pause|resume|remove> …
+export const SCHEDULE_USAGE = `Usage: cerberus schedule <add|list|run|pause|resume|remove> …
 
   schedule add <scan|review|sast|threat-model|index> [path] --every <interval> [--name <name>] [job options]
       Start this job again and again. The interval is like 45m, 6h, 1d or 1w
-      (at least 15 minutes). Job options are those of "nightcode run".
+      (at least 15 minutes). Job options are those of "cerberus run".
   schedule list                 what is scheduled, when it runs next, how the last run went
   schedule run <id>             start it now, without changing its rhythm
   schedule pause <id>           stop it running until resumed
@@ -84,7 +84,7 @@ export function parseSchedule(argv: string[]): ScheduleCommand {
     return args.length === 0 ? { kind: "list", server: server.value } : usage(`"schedule list" takes no arguments.`);
   }
   if (action === "remove" || action === "run" || action === "pause" || action === "resume") {
-    if (args.length !== 1 || args[0]!.startsWith("-")) return usage(`Say which schedule: nightcode schedule ${action} <id> (see "schedule list").`);
+    if (args.length !== 1 || args[0]!.startsWith("-")) return usage(`Say which schedule: cerberus schedule ${action} <id> (see "schedule list").`);
     return { kind: action, id: args[0]!, server: server.value };
   }
   if (action !== "add") return usage(`"${action}" is not something schedule can do. Choose one of: add, list, run, pause, resume, remove.`);
@@ -127,7 +127,7 @@ const when = (iso: string | null) => (iso ? `${iso.slice(0, 10)} ${iso.slice(11,
 
 /** The table "schedule list" prints. Times are UTC. */
 export function scheduleTable(schedules: Schedule[]): string[] {
-  if (schedules.length === 0) return ["Nothing is scheduled. Add one with: nightcode schedule add scan . --every 1d"];
+  if (schedules.length === 0) return ["Nothing is scheduled. Add one with: cerberus schedule add scan . --every 1d"];
   const rows = schedules.map((s) => [
     s.id.slice(0, 8),
     s.name,
@@ -145,7 +145,7 @@ export function scheduleTable(schedules: Schedule[]): string[] {
 function resolve(schedules: Schedule[], id: string): Schedule {
   const matches = schedules.filter((s) => s.id === id || s.id.startsWith(id));
   if (matches.length === 1) return matches[0]!;
-  throw new Error(matches.length === 0 ? `No schedule has an id starting with "${id}". See "nightcode schedule list".` : `"${id}" fits ${matches.length} schedules; give more of the id.`);
+  throw new Error(matches.length === 0 ? `No schedule has an id starting with "${id}". See "cerberus schedule list".` : `"${id}" fits ${matches.length} schedules; give more of the id.`);
 }
 
 export const SCHEDULE_EXIT = { ok: 0, failed: 2, usage: 64 } as const;

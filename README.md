@@ -99,7 +99,7 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **Your own commands.** Start a line with `!` to run a command yourself — `!git status`, `!npm test`. It runs in the project directory without asking (it is yours), its output appears in the chat, and the agent is told what you ran and what came of it with your next message. Its output goes to the model like anything else you say, so do not `!cat` a secrets file.
 - **Typing ahead.** While the agent is replying or working with a tool, what you type and send is queued and goes out when it has finished. Esc interrupts the reply and drops what was queued.
 - **Tasks.** For work of several steps the agent keeps a task list, shown above the input as it changes: what is done, what is under way, what waits for what. It is the agent's own plan — it updates it as it goes, and it survives a summarised conversation.
-- **Your own slash commands.** A Markdown file `.cerberus/commands/fix-tests.md` in your project (or in `~/.nightcode/commands/` for all projects) becomes `/fix-tests`. Its text is the prompt; `$ARGUMENTS` is replaced by what you type after the name, `$1`, `$2` by single words (the last one takes the rest). An optional first block `---` / `description: …` / `---` sets what the menu shows. Existing `.opencode/commands` and `.claude/commands` files work too. A command only sends a message as you; it runs nothing by itself.
+- **Your own slash commands.** A Markdown file `.cerberus/commands/fix-tests.md` in your project (or in `~/.cerberus/commands/` for all projects) becomes `/fix-tests`. Its text is the prompt; `$ARGUMENTS` is replaced by what you type after the name, `$1`, `$2` by single words (the last one takes the rest). An optional first block `---` / `description: …` / `---` sets what the menu shows. Existing `.opencode/commands` and `.claude/commands` files work too. A command only sends a message as you; it runs nothing by itself.
 - **Long conversations.** When a chat nears the model's limit, the earlier part is summarised for the model so the conversation can go on; you are told, and nothing disappears from your screen. `/compact` does it on demand. Local models are assumed to have a small window (8k tokens) unless the backend is started with `CERBERUS_CONTEXT_TOKENS`.
 - **Helpers.** For a question that needs a lot of looking around, the agent can hand it to a helper: a second conversation with the same model that reads and searches on its own and reports back, so the main conversation stays short. You see "Task: …" with what the helper is doing, then how its report begins. A helper cannot change files or run commands, and it asks you before reading a file that probably holds secrets, just as the agent does. Esc stops it.
 - **Readable replies.** A reply's markdown is shown as headings, lists, tables and highlighted code. When the agent looks around — several reads, searches and listings in a row — those calls are folded into one line that counts them; `ctrl+o` shows each one and folds them again. What it changed or ran is always shown in full.
@@ -153,10 +153,10 @@ Runs on `http://localhost:3000` (configurable via `PORT`), creates its SQLite sc
 
 ### 5. In a pipeline (no screen)
 
-`nightcode run` starts one job, waits for it and exits with a code a pipeline can act on. Progress goes to stderr, the result to stdout.
+`cerberus run` starts one job, waits for it and exits with a code a pipeline can act on. Progress goes to stderr, the result to stdout.
 
 ```bash
-nightcode run scan . --sarif cerberus.sarif --fail-on high
+cerberus run scan . --sarif cerberus.sarif --fail-on high
 ```
 
 - **Jobs:** `scan`, `review`, `sast`, `threat-model`, `index`. The path is the target as the server sees it (under its scan root), so the server needs the code: run it on the build machine or give it the checkout.
@@ -173,22 +173,22 @@ In GitHub Actions, for example:
   env:
     API_URL: ${{ vars.CERBERUS_URL }}
     CERBERUS_TOKEN: ${{ secrets.CERBERUS_TOKEN }}
-  run: nightcode run scan . --sarif cerberus.sarif --fail-on high
+  run: cerberus run scan . --sarif cerberus.sarif --fail-on high
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
     sarif_file: cerberus.sarif
 ```
 
-`nightcode run --help` lists every option.
+`cerberus run --help` lists every option.
 
 ### 6. Recurring runs
 
 ```bash
-nightcode schedule add scan . --every 1d --name "Nightly scan"
+cerberus schedule add scan . --every 1d --name "Nightly scan"
 ```
 
-- A schedule is a job, written as for `nightcode run`, and how often to start it: `45m`, `6h`, `1d`, `1w` (at least 15 minutes). `schedule list` shows what runs when and how the last run went; `schedule run <id>` starts one now; `pause`, `resume` and `remove` do what they say. An id can be shortened to its first characters. In the CLI, `/schedules` lists them and Enter pauses or resumes one.
+- A schedule is a job, written as for `cerberus run`, and how often to start it: `45m`, `6h`, `1d`, `1w` (at least 15 minutes). `schedule list` shows what runs when and how the last run went; `schedule run <id>` starts one now; `pause`, `resume` and `remove` do what they say. An id can be shortened to its first characters. In the CLI, `/schedules` lists them and Enter pauses or resumes one.
 - **Each run is checked like one you start yourself.** If your permission settings say a run needs approval, the scheduled run waits for you — the CLI shows it among the runs waiting — and the schedule does not start another one while it waits. To let it run unattended, answer the approval with "always allow" (or set it in `/permissions`). There is no separate approval for schedules.
 - Runs do not pile up: if the previous run is still going when the next is due, that one is skipped. After the server was down, a schedule runs once, not once for every run it missed. A schedule the server refuses three times in a row is paused and says why.
 

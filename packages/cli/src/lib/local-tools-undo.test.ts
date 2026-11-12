@@ -7,8 +7,8 @@ import { UndoJournal } from "./undo-journal";
 
 // The agent's write and edit tools, run for real in a scratch project, with the journal attached as the chat attaches it.
 
-const project = realpathSync(mkdtempSync(join(tmpdir(), "nightcode-tools-undo-")));
-const journalDir = mkdtempSync(join(tmpdir(), "nightcode-journal-"));
+const project = realpathSync(mkdtempSync(join(tmpdir(), "cerberus-tools-undo-")));
+const journalDir = mkdtempSync(join(tmpdir(), "cerberus-journal-"));
 afterAll(() => {
   rmSync(project, { recursive: true, force: true });
   rmSync(journalDir, { recursive: true, force: true });

@@ -87,5 +87,5 @@ test("with nothing scheduled the dialog says how to add one", async () => {
   const ui = (current = await screen({ list: async () => [], setEnabled: async () => schedule("x") }));
 
   expect(ui.captureCharFrame()).toContain("Nothing is scheduled.");
-  expect(ui.captureCharFrame()).toContain("nightcode schedule add scan . --every 1d");
+  expect(ui.captureCharFrame()).toContain("cerberus schedule add scan . --every 1d");
 });

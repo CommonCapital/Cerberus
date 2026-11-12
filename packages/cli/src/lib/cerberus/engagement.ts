@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { cerberusHome } from "../home";
 import { join } from "node:path";
 import { useSyncExternalStore } from "react";
 
@@ -9,7 +9,7 @@ import { useSyncExternalStore } from "react";
 
 export type CurrentEngagement = { id: string; name: string };
 
-const directory = () => process.env.NIGHTCODE_HOME ?? join(homedir(), ".nightcode");
+const directory = () => cerberusHome();
 const file = () => join(directory(), "engagement.json");
 
 let loaded = false;

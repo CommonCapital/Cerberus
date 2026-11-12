@@ -9,22 +9,22 @@ import {
   type LanguageModelUsage,
   type UIMessage,
 } from "ai";
-import { db } from "@nightcode/database/client";
+import { db } from "@cerberus/database/client";
 import {
   getToolContracts,
   modeSchema,
   type ModeType,
   type ToolContracts
-} from "@nightcode/shared";
+} from "@cerberus/shared";
 import { buildSystemPrompt } from "../system-prompt";
 import type { AuthenticatedEnv } from "../middleware/require-auth";
 import { isSupportedChatModel, resolveChatModel } from "../lib/models";
 
-function parseStoredMessages(raw: unknown): NightcodeUIMessage[] {
+function parseStoredMessages(raw: unknown): CerberusUIMessage[] {
   if (typeof raw !== "string" || raw.length === 0) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as NightcodeUIMessage[]) : [];
+    return Array.isArray(parsed) ? (parsed as CerberusUIMessage[]) : [];
   } catch {
     return [];
   }
@@ -37,13 +37,13 @@ type ChatMessageMetadata = {
   usage?: LanguageModelUsage;
 };
 
-type NightcodeUIMessage = UIMessage<ChatMessageMetadata, never, InferUITools<ToolContracts>>;
+type CerberusUIMessage = UIMessage<ChatMessageMetadata, never, InferUITools<ToolContracts>>;
 
 const submitSchema = z.object({
   id: z.string(),
   messages: z
     .array(
-      z.custom<NightcodeUIMessage>((value) => {
+      z.custom<CerberusUIMessage>((value) => {
         return value != null && typeof value === "object" && "id" in value && "parts" in value;
       }),
     )
@@ -58,7 +58,7 @@ const submitValidator = zValidator("json", submitSchema, (result, c) => {
   }
 });
 
-function hasPendingToolCalls(message: NightcodeUIMessage) {
+function hasPendingToolCalls(message: CerberusUIMessage) {
   return message.parts.some((part) => {
     if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
       const state = (part as { state?: string }).state;
@@ -95,7 +95,7 @@ const app = new Hono<AuthenticatedEnv>()
         const incomingMessage = {
           ...message,
           metadata: { ...message.metadata, mode, model },
-        } satisfies NightcodeUIMessage;
+        } satisfies CerberusUIMessage;
 
         const existingMessageIndex = mergedMessages.findIndex((m) => m.id === incomingMessage.id);
 
@@ -106,7 +106,7 @@ const app = new Hono<AuthenticatedEnv>()
         }
       }
 
-      const nextMessages = await validateUIMessages<NightcodeUIMessage>({
+      const nextMessages = await validateUIMessages<CerberusUIMessage>({
         messages: mergedMessages,
         tools,
       });
@@ -124,7 +124,7 @@ const app = new Hono<AuthenticatedEnv>()
         },
       });
 
-      return result.toUIMessageStreamResponse<NightcodeUIMessage>({
+      return result.toUIMessageStreamResponse<CerberusUIMessage>({
         originalMessages: nextMessages,
         messageMetadata({ part }) {
           if (part.type === "start") {

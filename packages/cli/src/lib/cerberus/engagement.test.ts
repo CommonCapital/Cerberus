@@ -4,15 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Never the operator's real settings directory.
-const home = mkdtempSync(join(tmpdir(), "nightcode-test-"));
-process.env.NIGHTCODE_HOME = home;
+const home = mkdtempSync(join(tmpdir(), "cerberus-test-"));
+process.env.CERBERUS_HOME = home;
 
 const {
   explainSubmitError, getCurrentEngagement, resetCurrentEngagementCache, setCurrentEngagement, underEngagement,
 } = await import("./engagement");
 
 beforeEach(() => {
-  process.env.NIGHTCODE_HOME = home;
+  process.env.CERBERUS_HOME = home;
   setCurrentEngagement(null);
 });
 afterAll(() => rmSync(home, { recursive: true, force: true }));

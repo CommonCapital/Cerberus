@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "fs"
 import { mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
-import { toolInputSchemas, Mode, type ModeType } from "@nightcode/shared";
+import { toolInputSchemas, Mode, type ModeType } from "@cerberus/shared";
 
 /** Reading: at most this many lines and characters per call; the rest is reached with `offset`. */
 const MAX_READ_LINES = 2000;
@@ -15,7 +15,7 @@ const DEFAULT_TIMEOUT = 120_000;
 const MAX_TIMEOUT = 600_000;
 
 /** Where the full output of a command goes when it is too long to hand to the model. */
-export const OUTPUT_DIR = join(tmpdir(), "nightcode-tool-output");
+export const OUTPUT_DIR = join(tmpdir(), "cerberus-tool-output");
 const OUTPUT_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 
 const isSavedOutput = (path: string) => {

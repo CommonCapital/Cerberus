@@ -7,7 +7,7 @@ import { parseArgs, USAGE } from "./args";
 import { parseSchedule, runSchedule, SCHEDULE_EXIT, SCHEDULE_USAGE } from "./schedule";
 import { EXIT, runHeadless, type HeadlessDeps } from "./run";
 
-// `nightcode run …`: the real network, disk and clock behind run.ts.
+// `cerberus run …`: the real network, disk and clock behind run.ts.
 
 async function reportOf(job: Job): Promise<string | null> {
   if (!job.resultId) return null;
@@ -60,7 +60,7 @@ export async function main(argv: string[]): Promise<number> {
     return EXIT.ok;
   }
   if (parsed.kind === "usage") {
-    process.stderr.write(`${parsed.message}\nSee: nightcode run --help\n`);
+    process.stderr.write(`${parsed.message}\nSee: cerberus run --help\n`);
     return EXIT.usage;
   }
 
@@ -72,7 +72,7 @@ export async function main(argv: string[]): Promise<number> {
   return runHeadless(parsed.options, deps);
 }
 
-/** `nightcode schedule …` */
+/** `cerberus schedule …` */
 async function scheduleMain(argv: string[]): Promise<number> {
   const command = parseSchedule(argv);
   if (command.kind === "help") {
@@ -80,7 +80,7 @@ async function scheduleMain(argv: string[]): Promise<number> {
     return SCHEDULE_EXIT.ok;
   }
   if (command.kind === "usage") {
-    process.stderr.write(`${command.message}\nSee: nightcode schedule --help\n`);
+    process.stderr.write(`${command.message}\nSee: cerberus schedule --help\n`);
     return SCHEDULE_EXIT.usage;
   }
   if (command.server) process.env.API_URL = command.server;

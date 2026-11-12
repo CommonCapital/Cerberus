@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { cerberusHome } from "./home";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 // Undo for what the agent did to files. Every write and edit the CLI carries
@@ -179,7 +179,7 @@ function skip(outcome: Outcome, path: string, reason: string) {
 /** The journal of one conversation, kept beside the CLI's other files. */
 export function journalFor(sessionId: string): UndoJournal {
   const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
-  return new UndoJournal(join(process.env.NIGHTCODE_HOME ?? join(homedir(), ".nightcode"), "undo", safe));
+  return new UndoJournal(join(cerberusHome(), "undo", safe));
 }
 
 /** What an undo or redo did, in a sentence for the operator — and, with `forAgent`, as the operator would tell the agent. */

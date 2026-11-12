@@ -1,5 +1,5 @@
 {
-  "name": "@nightcode/database",
+  "name": "@cerberus/database",
   "type": "module",
   "private": true,
   "exports": {

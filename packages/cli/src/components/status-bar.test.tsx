@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { testRender } from "@opentui/react/test-utils";
 
 // Never the operator's real settings directory.
-const home = mkdtempSync(join(tmpdir(), "nightcode-test-"));
-process.env.NIGHTCODE_HOME = home;
+const home = mkdtempSync(join(tmpdir(), "cerberus-test-"));
+process.env.CERBERUS_HOME = home;
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 const { StatusBar } = await import("./status-bar");
@@ -31,7 +31,7 @@ async function frame() {
 }
 
 test("the status bar names the engagement runs go under, when there is one", async () => {
-  process.env.NIGHTCODE_HOME = home;
+  process.env.CERBERUS_HOME = home;
   setCurrentEngagement(null);
   expect(await frame()).not.toContain("engagement");
 

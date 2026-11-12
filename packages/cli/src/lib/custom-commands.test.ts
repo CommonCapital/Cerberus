@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expandSubmission, expandTemplate, loadCustomCommands, parseCommandFile, splitArguments, type CustomCommand } from "./custom-commands";
 
-const root = mkdtempSync(join(tmpdir(), "nightcode-commands-"));
+const root = mkdtempSync(join(tmpdir(), "cerberus-commands-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function project() {
