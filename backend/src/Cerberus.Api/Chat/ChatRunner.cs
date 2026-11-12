@@ -127,6 +127,17 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
                             if (usage.InputTokens is { } i) inputTokens = (inputTokens ?? 0) + i;
                             if (usage.OutputTokens is { } o) outputTokens = (outputTokens ?? 0) + o;
                             break;
+
+                        case RetryScheduled retry:
+                            // The provider is busy: tell the client why nothing is arriving, and for how long.
+                            await writer.NoticeAsync("retry", new
+                            {
+                                attempt = retry.Attempt,
+                                maxAttempts = retry.MaxAttempts,
+                                seconds = (int)Math.Ceiling(retry.Delay.TotalSeconds),
+                                reason = retry.Reason,
+                            }, ct);
+                            break;
                     }
                 }
 

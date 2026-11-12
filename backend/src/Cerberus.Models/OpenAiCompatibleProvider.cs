@@ -107,8 +107,15 @@ public abstract class OpenAiCompatibleProvider(HttpClient httpClient) : IModelPr
         if (!response.IsSuccessStatusCode)
         {
             var detail = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new HttpRequestException(
-                $"The model provider answered {(int)response.StatusCode}: {Truncate(detail, 500)}");
+            // The status and the server's Retry-After travel with the exception, so the retry wrapper can act on them.
+            var failure = new HttpRequestException(
+                $"The model provider answered {(int)response.StatusCode}: {Truncate(detail, 500)}", null, response.StatusCode);
+            if (response.Headers.RetryAfter is { } retryAfter)
+            {
+                var wait = retryAfter.Delta ?? (retryAfter.Date is { } at ? at - DateTimeOffset.UtcNow : (TimeSpan?)null);
+                if (wait is { } w && w > TimeSpan.Zero) failure.Data[RetryPolicy.RetryAfterKey] = w;
+            }
+            throw failure;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

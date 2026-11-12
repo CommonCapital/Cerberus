@@ -76,6 +76,12 @@ public sealed class UiMessageStreamWriter(HttpResponse response)
     public Task FinishAsync(object? messageMetadata, CancellationToken ct) =>
         WriteChunkAsync(new { type = "finish", messageMetadata }, ct);
 
+    /// <summary>
+    /// A transient notice for the client (AI-SDK "data" part): shown while it matters, never stored in the message.
+    /// </summary>
+    public Task NoticeAsync(string kind, object data, CancellationToken ct) =>
+        WriteChunkAsync(new { type = $"data-{kind}", data, transient = true }, ct);
+
     public Task ErrorAsync(string errorText, CancellationToken ct) =>
         WriteChunkAsync(new { type = "error", errorText }, ct);
 

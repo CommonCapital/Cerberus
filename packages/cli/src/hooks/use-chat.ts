@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -49,7 +49,20 @@ type ChatTools = {
   };
 };
 
-export type Message = UIMessage<ChatMessageMetadata, never, ChatTools>;
+/** The provider was busy; the server waits and tries again. Shown while it lasts, never stored. */
+export type RetryNotice = { attempt: number; maxAttempts: number; seconds: number; reason: string };
+
+/** What a retry notice says to the operator. */
+export const describeRetry = (retry: RetryNotice) =>
+  `The model provider is busy (${retry.reason}). Trying again in ${retry.seconds} s — attempt ${retry.attempt} of ${retry.maxAttempts}.`;
+
+export type Message = UIMessage<ChatMessageMetadata, { retry: RetryNotice }, ChatTools>;
+
+/** Whether the reply in progress has produced anything yet (after which a retry notice is stale). */
+function lastHasContent(messages: Message[]): boolean {
+  const last = messages.at(-1);
+  return last?.role === "assistant" && last.parts.some((part) => part.type === "text" || part.type === "reasoning" || part.type.startsWith("tool-"));
+}
 
 export function useChat(
   sessionId: string,
@@ -58,6 +71,7 @@ export function useChat(
 ) {
   // Read once per chat, then kept current as the operator chooses "always allow".
   const policyRef = useRef<Promise<Policy> | null>(null);
+  const [retry, setRetry] = useState<RetryNotice | null>(null);
 
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
@@ -97,6 +111,15 @@ export function useChat(
     id: sessionId,
     messages: initialMessages,
     transport,
+    onData(part) {
+      if (part.type === "data-retry") setRetry(part.data);
+    },
+    onFinish() {
+      setRetry(null);
+    },
+    onError() {
+      setRetry(null);
+    },
     onToolCall({ toolCall }) {
       const mode = chat.messages.at(-1)?.metadata?.mode ?? "BUILD";
       const tool = toolCall.toolName as keyof ChatTools;
@@ -132,6 +155,8 @@ export function useChat(
     messages: chat.messages,
     status: chat.status,
     error: chat.error,
+    /** Set while the server is waiting to retry a busy provider; cleared once content arrives or the reply ends. */
+    retry: chat.status === "streaming" && lastHasContent(chat.messages) ? null : retry,
     submit: (params: { userText: string; mode: ModeType; model: SupportedChatModelId }) => {
       return chat.sendMessage({
         text: params.userText,

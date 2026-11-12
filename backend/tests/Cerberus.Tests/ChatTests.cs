@@ -25,10 +25,19 @@ public sealed class RuleFollowingProvider(ModelProvider provider) : IModelProvid
     /// <summary>Set by a test to hold the model back until the test lets it answer.</summary>
     public Func<ChatRequest, Task>? BeforeReply { get; set; }
 
+    /// <summary>How many of the next calls fail as an overloaded provider would.</summary>
+    public int FailNext { get; set; }
+
     public async IAsyncEnumerable<ChatEvent> StreamChatAsync(
         ChatRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         lock (Requests) Requests.Add(request with { Turns = [.. request.Turns] });
+        // Fails the next calls as an overloaded provider would, before anything is produced.
+        if (FailNext > 0)
+        {
+            FailNext--;
+            throw new HttpRequestException("answered 529", null, (System.Net.HttpStatusCode)529);
+        }
         if (BeforeReply is { } hold) await hold(request);
         await foreach (var e in _rules.StreamChatAsync(request, cancellationToken)) yield return e;
     }
