@@ -297,6 +297,9 @@ public class PermissionSetting
 
     /// <summary>Action kinds that never ask (JSON list).</summary>
     public string AllowedKinds { get; set; } = "[]";
+
+    /// <summary>Shell commands the chat agent may run without asking, as command prefixes such as "git status" (JSON list).</summary>
+    public string AllowedCommands { get; set; } = "[]";
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

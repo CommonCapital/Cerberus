@@ -1,12 +1,29 @@
+import { looksSecret } from "./sensitive-files";
+import { isCovered, rulesToRemember } from "./shell-commands";
+
 // Which chat tool calls the operator is asked about before the CLI runs them
 // on their machine. Mirrors the backend's permission policy
 // (Cerberus.Authorization/Permissions.cs) so the CLI and the server agree.
 
 export type PermissionMode = "Default" | "Ask";
 
-export type Policy = { mode: PermissionMode; allowedKinds: string[] };
+/** `allowedCommands` are command rules: prefixes such as "git status" that run without asking (see shell-commands.ts). */
+export type Policy = { mode: PermissionMode; allowedKinds: string[]; allowedCommands?: string[] };
 
 export const STANDARD_POLICY: Policy = { mode: "Default", allowedKinds: [] };
+
+/**
+ * What "always allow" would remember for this call: for a shell command its
+ * command rules ("git status"), for anything else its kind of action. Null
+ * when nothing can be remembered — a secrets file, or a command line that
+ * always has to be looked at.
+ */
+export function whatAlwaysRemembers(toolName: string, input: unknown): { kind: ActionKind } | { commands: string[] } | null {
+  if (isSensitiveRead(toolName, input)) return null;
+  if (toolName !== "bash") return { kind: kindOfTool(toolName) };
+  const commands = rulesToRemember(field(input, "command"));
+  return commands ? { commands } : null;
+}
 
 export type ActionKind = "read-files" | "edit-files" | "run-commands";
 
@@ -30,19 +47,13 @@ const field = (input: unknown, name: string): string => {
   return typeof value === "string" ? value : "";
 };
 
-/** Files that usually hold credentials. A template of one (`.env.example`) does not. */
-const SECRET_FILE = /^(\.env(\..+)?|\.netrc|\.npmrc|\.pypirc|id_(rsa|dsa|ecdsa|ed25519)|.+\.(pem|key|p12|pfx|keystore))$/i;
-const TEMPLATE_FILE = /\.(example|sample|template|dist|defaults)$/i;
-
 /**
  * Whether this call reads a file that probably holds secrets. Such a read is
  * always asked about by name — also when reading files is otherwise allowed —
  * because what is read goes to the model.
  */
 export function isSensitiveRead(toolName: string, input: unknown): boolean {
-  if (toolName !== "readFile") return false;
-  const name = field(input, "path").split(/[\\/]/).pop() ?? "";
-  return SECRET_FILE.test(name) && !TEMPLATE_FILE.test(name);
+  return toolName === "readFile" && looksSecret(field(input, "path"));
 }
 
 /**
@@ -55,6 +66,8 @@ export function toolNeedsApproval(policy: Policy, toolName: string, input?: unkn
   if (isSensitiveRead(toolName, input)) return true;
   const kind = kindOfTool(toolName);
   if (policy.allowedKinds.includes(kind)) return false;
+  // A command the operator's rules cover runs without asking, in either mode: a rule is an explicit decision.
+  if (toolName === "bash" && isCovered(field(input, "command"), policy.allowedCommands ?? [])) return false;
   return kind === "read-files" ? policy.mode === "Ask" : true;
 }
 
@@ -116,6 +129,8 @@ export type GateResult = {
   policy: Policy;
   /** The kind the operator chose to always allow, to be remembered on the server. */
   remembered: ActionKind | null;
+  /** The command rules the operator chose to always allow, to be remembered on the server. */
+  rememberedCommands?: string[];
 };
 
 /**
@@ -133,10 +148,16 @@ export async function gateToolCall(
   const decision = await ask({ toolName, input });
   if (typeof decision === "object") return { run: false, policy, remembered: null, feedback: decision.deny.trim() || undefined };
   if (decision === "deny") return { run: false, policy, remembered: null };
-  // A read of a secrets file is allowed this once only: "always" has nothing to remember.
-  if (decision === "allow" || isSensitiveRead(toolName, input)) return { run: true, policy, remembered: null };
+  // Where "always" has nothing it could remember (a secrets file, a command line that must be looked at), it allows this once.
+  const remember = whatAlwaysRemembers(toolName, input);
+  if (decision === "allow" || remember === null) return { run: true, policy, remembered: null };
 
-  const kind = kindOfTool(toolName);
+  if ("commands" in remember) {
+    const allowedCommands = [...new Set([...(policy.allowedCommands ?? []), ...remember.commands])];
+    return { run: true, policy: { ...policy, allowedCommands }, remembered: null, rememberedCommands: remember.commands };
+  }
+
+  const kind = remember.kind;
   return {
     run: true,
     policy: { ...policy, allowedKinds: [...new Set([...policy.allowedKinds, kind])] },

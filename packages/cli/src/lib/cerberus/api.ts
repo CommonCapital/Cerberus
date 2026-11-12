@@ -69,6 +69,8 @@ export type EventsPage = { jobId: string; events: RunEvent[]; lastSequence: numb
 export type Permissions = {
   mode: "Default" | "Ask";
   allowedKinds: string[];
+  /** Command rules: shell command prefixes ("git status") the chat agent may run without asking. */
+  allowedCommands?: string[];
   scope: "standard" | "user" | "engagement";
   kinds: { kind: string; description: string; asks: boolean }[];
 };
@@ -307,7 +309,7 @@ export const cerberus = {
   approve: (id: string, options: { note?: string; remember?: boolean } = {}) =>
     request<Approval>("POST", `/approvals/${id}/approve`, options),
   permissions: () => request<Permissions>("GET", "/settings/permissions"),
-  setPermissions: (change: { mode?: "default" | "ask"; allowedKinds?: string[] }) =>
+  setPermissions: (change: { mode?: "default" | "ask"; allowedKinds?: string[]; allowedCommands?: string[] }) =>
     request<Permissions>("PUT", "/settings/permissions", change),
   deny: (id: string, note?: string) => request<Approval>("POST", `/approvals/${id}/deny`, { note }),
   answer: (id: string, selected: string[], text?: string) =>
