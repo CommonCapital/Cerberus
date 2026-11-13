@@ -465,6 +465,7 @@ public static class Endpoints
             filesScanned = result.FilesScanned,
             filesSkipped = result.FilesSkipped,
             filesIgnored = result.FilesIgnored,
+            binariesInspected = result.BinariesInspected,
             manifestsScanned = scaResult.ManifestsScanned,
             dependenciesScanned = scaResult.DependenciesScanned,
             scaCompleted = scaResult.Completed,
