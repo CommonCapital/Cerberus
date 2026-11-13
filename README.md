@@ -15,6 +15,8 @@
 </div>
 
 > **Status: active rewrite.** Cerberus is being built on a de-clouded terminal-agent chassis. See **[PLAN.md](PLAN.md)** for the full architecture and roadmap. This README reflects what exists today.
+>
+> **Taking the project over?** Start at [PLAN.md §24](PLAN.md#24-handoff--everything-left-to-100): where it stands, how to work in it, what to verify first, and the ordered list of everything that is left.
 
 ---
 
