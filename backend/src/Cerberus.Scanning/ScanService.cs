@@ -9,13 +9,15 @@ namespace Cerberus.Scanning;
 /// <param name="FilesIgnored">Files excluded by a <c>.cerberusignore</c> file.</param>
 /// <param name="SuppressedCount">Findings the target marked with <c>cerberus:ignore</c>.</param>
 /// <param name="Truncated">True when the finding cap was reached and the scan stopped early.</param>
+/// <param name="BinariesInspected">Built artefacts (ELF, PE) whose headers were checked for hardening.</param>
 public sealed record ScanResult(
     int FilesScanned,
     IReadOnlyList<Finding> Findings,
     int FilesSkipped = 0,
     int FilesIgnored = 0,
     int SuppressedCount = 0,
-    bool Truncated = false)
+    bool Truncated = false,
+    int BinariesInspected = 0)
 {
     /// <summary>Findings that count: everything the target did not suppress.</summary>
     public int ActiveCount => Findings.Count - SuppressedCount;
@@ -81,7 +83,7 @@ public sealed partial class ScanService(ScanOptions options)
 
         var ignore = honourExclusions ? IgnoreList.Load(root, target) : IgnoreList.Empty;
         var findings = new List<Finding>();
-        int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0;
+        int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0, binariesInspected = 0;
         var truncated = false;
 
         foreach (var file in EnumerateFiles(target))
@@ -91,6 +93,32 @@ public sealed partial class ScanService(ScanOptions options)
 
             var relFile = Path.GetRelativePath(root, file).Replace('\\', '/');
             if (ignore.Matches(relFile)) { filesIgnored++; continue; }
+
+            // A built artefact is not read as text: its headers are checked for hardening instead.
+            if (InspectBinary(file) is { } binary)
+            {
+                binariesInspected++;
+                var binaryContext = ContextOf(relFile);
+                foreach (var issue in binary.Issues)
+                {
+                    if (findings.Count >= MaxFindings) { truncated = true; break; }
+                    findings.Add(new Finding(
+                        Id: $"{issue.RuleId}:{relFile}:1",
+                        Title: issue.Title,
+                        Severity: issue.Severity,
+                        Category: BinaryHardening.Category,
+                        Cwe: BinaryHardening.Cwe,
+                        File: relFile,
+                        Line: 1,
+                        Evidence: $"{binary.Format}: {issue.Evidence}",
+                        Confidence: binaryContext is null ? issue.Confidence : "low",
+                        Owasp: BinaryHardening.Owasp,
+                        Remediation: issue.Remediation,
+                        Context: binaryContext));
+                }
+                continue;
+            }
+
             if (!LooksScannable(file)) { filesSkipped++; continue; }
 
             string[] lines;
@@ -149,7 +177,31 @@ public sealed partial class ScanService(ScanOptions options)
         findings.Sort((a, b) => a.Suppressed != b.Suppressed
             ? a.Suppressed.CompareTo(b.Suppressed)
             : b.Severity.CompareTo(a.Severity));
-        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated);
+        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated, binariesInspected);
+    }
+
+    /// <summary>
+    /// The hardening report of a file that is an ELF or PE executable or
+    /// library; null for anything else (text, other binaries, unreadable or
+    /// oversized files), which then takes the ordinary path.
+    /// </summary>
+    private static BinaryReport? InspectBinary(string file)
+    {
+        try
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> head = stackalloc byte[4];
+            if (stream.ReadAtLeast(head, 4, throwOnEndOfStream: false) < 4) return null;
+            if (!BinaryHardening.LooksLikeBinary(head)) return null;
+            if (stream.Length > BinaryHardening.MaxBinaryBytes) return null;
+
+            var bytes = new byte[stream.Length];
+            stream.Position = 0;
+            stream.ReadExactly(bytes);
+            return BinaryHardening.Inspect(bytes);
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
     }
 
     // --- suppression -----------------------------------------------------------

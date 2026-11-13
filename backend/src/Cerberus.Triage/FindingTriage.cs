@@ -272,12 +272,13 @@ public sealed class FindingTriager(IModelProviderResolver resolver)
     /// <summary>
     /// Which findings to send, in order: unsuppressed static findings, production
     /// code before tests and docs, most severe first. Dependency findings are
-    /// facts from an advisory database, not judgements about code, and are left out.
+    /// facts from an advisory database, not judgements about code, and are left out;
+    /// so are binary-hardening findings, which are header facts with no source line to judge.
     /// </summary>
     public static IReadOnlyList<Finding> Select(IEnumerable<Finding> findings, int max, bool includeTestsAndDocs)
     {
         return findings
-            .Where(f => !f.Suppressed && f.Category != "dependency")
+            .Where(f => !f.Suppressed && f.Category != "dependency" && f.Category != BinaryHardening.Category)
             .Where(f => includeTestsAndDocs || f.Context is null)
             .OrderBy(f => f.Context is null ? 0 : 1)
             .ThenByDescending(f => f.Severity)
