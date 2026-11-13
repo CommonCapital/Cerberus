@@ -276,6 +276,8 @@ Files over 16 MB are not read. Not covered: Electron fuses, paths stored as UTF-
 - A Go binary (ELF, PE or Mach-O) — the modules the linker recorded, with replace directives applied, and the toolchain as the package `stdlib`.
 - A `.jar` / `.war` / `.ear` — the `pom.properties` inside it and inside the archives nested one level down (a Spring Boot or WAR layout).
 
+A dependency finding's `fixedVersion` is the lowest fixed version above the one in use: an advisory lists one fix per maintained branch, and the first listed may be on an older branch. When nothing listed is above the version in use, none is suggested.
+
 Nothing is unpacked or executed; files over 128 MB are not read. A library that left no metadata behind (a shaded JAR without `META-INF/maven`, a statically linked C library, a JavaScript bundle) is not seen. As for the scan, build directories are skipped unless they are the target.
 
 **What is not scanned**, and how it is reported: dependency and build directories (`node_modules`, `.git`, `bin`, `obj`, `dist`, `vendor`, …); other binary, media, archive, lock and minified files, files over 1 MB and lines over 2,000 characters (`filesSkipped`); and paths listed in a `.cerberusignore` at the scan root or in the scanned directory (`filesIgnored`). Ignore patterns follow `.gitignore` conventions: `dir/`, `*.ext` at any depth, `a/b.py` anchored, `**` across directories. A scan stops at 5,000 findings and sets `truncated`.
