@@ -48,6 +48,9 @@ public interface IMessageBus
     /// <summary>What carries the messages, for the operator ("this process", "RabbitMQ").</summary>
     string Transport { get; }
 
+    /// <summary>Null when messages can travel; otherwise what is wrong, in a line for an operator (no addresses, no secrets).</summary>
+    ValueTask<string?> ProblemAsync(CancellationToken ct);
+
     ValueTask PublishAsync(string queue, WorkMessage message, CancellationToken ct = default);
 
     /// <summary>Messages of one queue in arrival order; each is delivered to exactly one consumer.</summary>
@@ -63,6 +66,8 @@ public sealed class InProcMessageBus : IMessageBus
     private readonly ConcurrentDictionary<string, Channel<WorkMessage>> _queues = new();
 
     public string Transport => "this process";
+
+    public ValueTask<string?> ProblemAsync(CancellationToken ct) => ValueTask.FromResult<string?>(null);
 
     private Channel<WorkMessage> Queue(string name) => _queues.GetOrAdd(name, _ => Channel.CreateUnbounded<WorkMessage>());
 

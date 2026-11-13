@@ -24,7 +24,8 @@ public sealed record ChatRun(
 /// in both cases nothing is stored yet.
 /// </param>
 /// <param name="Tasks">The task list as the reply left it (JSON), or null if the reply did not change it.</param>
-public sealed record ChatResult(List<JsonObject> Messages, bool Complete, string? Tasks = null);
+/// <param name="Failed">The reply broke off on an error, which the stream has already said.</param>
+public sealed record ChatResult(List<JsonObject> Messages, bool Complete, string? Tasks = null, bool Failed = false);
 
 /// <summary>
 /// Produces one reply of the chat agent and streams it in the AI-SDK UI message
@@ -173,7 +174,7 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
         {
             await writer.ErrorAsync(ex.Message, ct);
             await writer.DoneAsync(ct);
-            return new ChatResult(messages, Complete: false, taskList.Changed ? taskList.Serialize() : null);
+            return new ChatResult(messages, Complete: false, taskList.Changed ? taskList.Serialize() : null, Failed: true);
         }
 
         var durationMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;

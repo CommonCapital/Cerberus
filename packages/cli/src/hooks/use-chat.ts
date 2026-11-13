@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
+import { chatFetch } from "../lib/cerberus/turn-io";
 import {
   DefaultChatTransport,
   type InferUITools,
@@ -98,6 +99,8 @@ export function useChat(
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
       api: apiClient.chat.$url().toString(),
+      // The request is queued on the server and the reply comes over SignalR (see lib/cerberus/turn-fetch.ts).
+      fetch: chatFetch(),
       headers() {
         const auth = getAuth();
         return auth ? { Authorization: `Bearer ${auth.token}` } : new Headers();

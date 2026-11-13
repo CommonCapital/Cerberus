@@ -106,7 +106,11 @@ builder.Services.AddSingleton(new OwnershipProbeOptions(
 builder.Services.AddSingleton<Cerberus.Authorization.IOwnershipProbe, NetworkOwnershipProbe>();
 
 // --- Job pipeline (in-process bus locally; RabbitMQ in production) ----------
-builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
+// With a broker configured, work travels over RabbitMQ; without one, inside this process.
+var rabbit = new RabbitMqOptions(Environment.GetEnvironmentVariable("CERBERUS_RABBITMQ_URL"));
+builder.Services.AddSingleton(rabbit);
+if (rabbit.Enabled) builder.Services.AddSingleton<IMessageBus, RabbitMqBus>();
+else builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton(new JobOptions(
     Concurrency: Math.Clamp(EnvInt("CERBERUS_JOB_CONCURRENCY", 2), 1, 16),

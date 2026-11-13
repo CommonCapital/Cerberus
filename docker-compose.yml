@@ -3,7 +3,7 @@
 #   docker compose up -d                      # the API (the one backend)
 #   docker compose run --rm cli               # the terminal client, attached to your terminal
 #   docker compose --profile models up -d     # + Ollama (local models; heavy, opt-in)
-#   docker compose --profile infra up -d      # + RabbitMQ and Redis (not used by the API yet)
+#   docker compose --profile infra up -d      # + RabbitMQ (used when CERBERUS_RABBITMQ_URL is set) and Redis (not used yet)
 #   docker compose --profile web up -d        # + SearXNG, a search service of your own for the agents' research
 #
 # Settings come from a .env file next to this one (copy .env.example). All are optional.
@@ -46,6 +46,11 @@ services:
       # CERBERUS_REQUIRE_ENGAGEMENT: "true"
       # CERBERUS_JOB_TIMEOUT_SECONDS: "600"
       # CERBERUS_JOB_CONCURRENCY: "2"
+      # Put RabbitMQ between accepting work and doing it (start it with --profile infra, and set RABBITMQ_PASSWORD):
+      # CERBERUS_RABBITMQ_URL: amqp://${RABBITMQ_USER:-cerberus}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # Chat turns answered at once, in all and per user:
+      # CERBERUS_CHAT_CONCURRENCY: "4"
+      # CERBERUS_CHAT_PER_USER: "2"
       # How many specialists of a team review work at once with an API model (1-4):
       # CERBERUS_AGENT_PARALLELISM: "2"
       # CERBERUS_QUESTION_TIMEOUT_SECONDS: "3600"
@@ -99,8 +104,8 @@ services:
     volumes:
       - ollama-models:/root/.ollama
 
-  # Message broker for the RabbitMQ implementation of IMessageBus (PLAN.md M3).
-  # The API uses its in-process bus today and does not connect to this.
+  # Message broker for the queue (PLAN.md §22). The API uses it only when CERBERUS_RABBITMQ_URL is set;
+  # otherwise the queue lives inside the API process.
   rabbitmq:
     profiles: ["infra"]
     image: rabbitmq:4-management

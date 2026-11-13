@@ -412,7 +412,10 @@ public sealed class ChatTurnWorker(
             }
             else
             {
-                stored = (await scope.ServiceProvider.GetRequiredService<ChatService>().RunAsync(prepared, writer, stop.Token)).Complete;
+                var result = await scope.ServiceProvider.GetRequiredService<ChatService>().RunAsync(prepared, writer, stop.Token);
+                stored = result.Complete;
+                // The model or its provider gave up part-way; the reply itself says why.
+                if (result.Failed) (state, error) = (TurnStates.Failed, "The model could not complete the reply.");
             }
         }
         catch (OperationCanceledException)

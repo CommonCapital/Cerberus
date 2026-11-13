@@ -160,6 +160,12 @@ Off by default. An agent that has read your code knows things that must not be t
   A header value written `env:NAME` is read from the environment, so no token sits in the file. With `tools`, exactly those tools are used; without it, only the tools the server itself marks read-only. The tools go to the researcher only — the agent that never sees the code — everything it sends them is checked like a question to the internet, and what comes back is marked as outside information. A run with `--research` then also asks for "use MCP servers" (`--approve use-mcp-servers`). `cerberus mcp` shows which servers answer and exactly which tools agents get; `dotnet Cerberus.Api.dll mcp-check` does the same on the server and can call one tool. Servers work with the internet switched off too. Servers over HTTP only; a server that needs a browser sign-in (OAuth) is not supported yet.
 - The guard is a set of patterns. It stops the obvious ways for something to leak, not every way; use local models and leave research off for code that must not be hinted at.
 
+### How a conversation travels
+
+When you type in the CLI, your request is not answered on the connection that carries it. The server accepts it, puts it on a queue under your account, and a worker answers it; the reply comes back piece by piece over a live connection (SignalR) that only ever carries your own conversations. If the connection drops for a moment, the CLI reads what it missed and the reply is whole. A second prompt sent while the first is still being answered waits its turn. Several people can use one server at once without one long task holding up everyone else's question.
+
+By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (the `infra` profile of the compose file has one) — this part is written and waits for its first run against a real broker. `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
+
 ### 4. Security runs from the CLI
 
 With the backend and the CLI running, `/login`, and:

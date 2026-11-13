@@ -38,7 +38,8 @@ public sealed class RuleFollowingProvider(ModelProvider provider) : IModelProvid
             FailNext--;
             throw new HttpRequestException("answered 529", null, (System.Net.HttpStatusCode)529);
         }
-        if (BeforeReply is { } hold) await hold(request);
+        // Held back, but not beyond a stop: a reply that is cancelled while it waits ends there.
+        if (BeforeReply is { } hold) await hold(request).WaitAsync(cancellationToken);
         await foreach (var e in _rules.StreamChatAsync(request, cancellationToken)) yield return e;
     }
 }
