@@ -4,10 +4,10 @@ using System.Text.RegularExpressions;
 namespace Cerberus.Scanning;
 
 /// <summary>
-/// One resolved dependency discovered in a manifest/lockfile.
-/// <paramref name="Ecosystem"/> uses OSV.dev ecosystem names
-/// (npm, PyPI, Go, NuGet). <paramref name="Line"/> is 1 when the source
-/// format does not carry a usable line (e.g. JSON lockfiles).
+/// One resolved dependency discovered in a manifest, a lockfile or a built
+/// artefact. <paramref name="Ecosystem"/> uses OSV.dev ecosystem names
+/// (npm, PyPI, Go, NuGet, Maven). <paramref name="Line"/> is 1 when the source
+/// format does not carry a usable line (JSON lockfiles, binaries, archives).
 /// </summary>
 public sealed record Dependency(
     string Ecosystem,
@@ -21,6 +21,8 @@ public sealed record Dependency(
 /// into a normalized dependency list for SCA (software-composition analysis).
 /// Lockfiles are preferred over range-only manifests because OSV needs exact
 /// versions. Best-effort and language-agnostic; unknown formats are skipped.
+/// Built artefacts in the target are read too (<see cref="ArtefactDependencies"/>):
+/// they say what actually shipped.
 /// </summary>
 public static class Dependencies
 {
@@ -36,31 +38,36 @@ public static class Dependencies
         var deps = new List<Dependency>();
         var manifests = new List<string>();
 
-        foreach (var file in EnumerateManifests(target))
+        foreach (var file in EnumerateFiles(target))
         {
             var name = Path.GetFileName(file);
-            string text;
-            try
-            {
-                if (new FileInfo(file).Length > MaxManifestBytes) continue;
-                text = File.ReadAllText(file);
-            }
-            catch (IOException) { continue; }
-            catch (UnauthorizedAccessException) { continue; }
-
             var rel = Path.GetRelativePath(root, file);
             var before = deps.Count;
 
-            switch (name.ToLowerInvariant())
+            try
             {
-                case "package-lock.json": ParseNpmLock(text, rel, deps); break;
-                case "requirements.txt": ParseRequirements(text, rel, deps); break;
-                case "go.mod": ParseGoMod(text, rel, deps); break;
-                default:
-                    if (name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-                        ParseCsproj(text, rel, deps);
-                    break;
+                if (IsManifest(name))
+                {
+                    if (new FileInfo(file).Length > MaxManifestBytes) continue;
+                    var text = File.ReadAllText(file);
+                    switch (name.ToLowerInvariant())
+                    {
+                        case "package-lock.json": ParseNpmLock(text, rel, deps); break;
+                        case "requirements.txt": ParseRequirements(text, rel, deps); break;
+                        case "go.mod": ParseGoMod(text, rel, deps); break;
+                        default:
+                            if (ArtefactDependencies.IsDepsJson(name)) ArtefactDependencies.ParseDepsJson(text, rel, deps);
+                            else ParseCsproj(text, rel, deps);
+                            break;
+                    }
+                }
+                else
+                {
+                    ReadArtefact(file, name, rel, deps);
+                }
             }
+            catch (IOException) { continue; }
+            catch (UnauthorizedAccessException) { continue; }
 
             if (deps.Count > before) manifests.Add(rel);
         }
@@ -76,7 +83,34 @@ public static class Dependencies
         return (unique, manifests);
     }
 
-    private static IEnumerable<string> EnumerateManifests(string target)
+    private static bool IsManifest(string name) =>
+        name.Equals("package-lock.json", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("requirements.txt", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("go.mod", StringComparison.OrdinalIgnoreCase) ||
+        name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+        ArtefactDependencies.IsDepsJson(name);
+
+    /// <summary>A Java archive by its name, or a Go binary by its first bytes; anything else is left alone.</summary>
+    private static void ReadArtefact(string file, string name, string rel, List<Dependency> deps)
+    {
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length > ArtefactDependencies.MaxArtefactBytes) return;
+
+        if (ArtefactDependencies.IsJavaArchive(name))
+        {
+            ArtefactDependencies.ParseJavaArchive(stream, rel, deps);
+            return;
+        }
+
+        Span<byte> head = stackalloc byte[4];
+        if (stream.ReadAtLeast(head, 4, throwOnEndOfStream: false) < 4 || !ArtefactDependencies.LooksLikeExecutable(head)) return;
+        var bytes = new byte[stream.Length];
+        stream.Position = 0;
+        stream.ReadExactly(bytes);
+        ArtefactDependencies.ParseGoBinary(bytes, rel, deps);
+    }
+
+    private static IEnumerable<string> EnumerateFiles(string target)
     {
         if (File.Exists(target)) { yield return target; yield break; }
         if (!Directory.Exists(target)) yield break;
@@ -91,21 +125,23 @@ public static class Dependencies
             catch (IOException) { continue; }
             catch (UnauthorizedAccessException) { continue; }
 
+            // Never follow links out of the tree being read.
             foreach (var sub in subDirs)
-                if (!SkipDirs.Contains(Path.GetFileName(sub))) stack.Push(sub);
+                if (!SkipDirs.Contains(Path.GetFileName(sub)) && !IsLink(sub)) stack.Push(sub);
 
+            // Deterministic order, so the same tree always yields the same inventory.
+            Array.Sort(files, StringComparer.Ordinal);
             foreach (var file in files)
             {
-                var n = Path.GetFileName(file);
-                if (n.Equals("package-lock.json", StringComparison.OrdinalIgnoreCase) ||
-                    n.Equals("requirements.txt", StringComparison.OrdinalIgnoreCase) ||
-                    n.Equals("go.mod", StringComparison.OrdinalIgnoreCase) ||
-                    n.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-                {
-                    yield return file;
-                }
+                if (!IsLink(file)) yield return file;
             }
         }
+    }
+
+    private static bool IsLink(string path)
+    {
+        try { return new FileInfo(path).LinkTarget is not null; }
+        catch (IOException) { return false; }
     }
 
     // --- npm: package-lock.json (v1 "dependencies" and v2/v3 "packages") -----
