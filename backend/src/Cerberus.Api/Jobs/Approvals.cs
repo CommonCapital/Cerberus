@@ -152,7 +152,7 @@ public static class ApprovalEndpoints
         // a worker can claim it instantly, and "Running" must not overtake "Queued".
         await events.PublishApprovalAsync(id, JobsHub.ApprovalResolved);
         await events.PublishAsync(approval.JobId);
-        if (release) await bus.PublishAsync(new JobMessage(approval.JobId), ct);
+        if (release) await bus.PublishAsync(WorkQueues.Jobs, new WorkMessage(approval.JobId, approval.UserId), ct);
 
         var current = await db.ApprovalRequests.AsNoTracking().FirstAsync(a => a.Id == id, ct);
         return Results.Json(Describe(current), JsonOptions);

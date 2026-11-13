@@ -496,7 +496,7 @@ public static class JobEndpoints
             db.Jobs.Add(job);
             await db.SaveChangesAsync(ct);
             await events.PublishAsync(job.Id);
-            await bus.PublishAsync(new JobMessage(job.Id), ct);
+            await bus.PublishAsync(WorkQueues.Jobs, new WorkMessage(job.Id, job.UserId), ct);
             accepted?.Invoke(job, null);
             return Results.Json(Describe(job), JsonOptions, statusCode: 202);
         }

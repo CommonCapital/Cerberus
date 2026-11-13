@@ -80,6 +80,15 @@ builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatRunner>();
+// A conversation over the queue: a turn is accepted, queued under its user's id, answered by a worker and delivered over SignalR.
+builder.Services.AddScoped<Cerberus.Api.Chat.ChatService>();
+builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatTurnOptions(
+    Concurrency: Math.Clamp(EnvInt("CERBERUS_CHAT_CONCURRENCY", 4), 1, 64),
+    PerUser: Math.Clamp(EnvInt("CERBERUS_CHAT_PER_USER", 2), 1, 16),
+    Timeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_CHAT_TURN_TIMEOUT_SECONDS", 900))));
+builder.Services.AddSingleton<Cerberus.Api.Chat.TurnRegistry>();
+builder.Services.AddSingleton<Cerberus.Api.Chat.ChatWorkerHealth>();
+builder.Services.AddHostedService<Cerberus.Api.Chat.ChatTurnWorker>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.ChatCompactor>();
 builder.Services.AddSingleton<Cerberus.Api.Chat.SessionTitler>();
 builder.Services.AddSingleton(new Cerberus.Api.Chat.ChatLimits
@@ -97,7 +106,11 @@ builder.Services.AddSingleton(new OwnershipProbeOptions(
 builder.Services.AddSingleton<Cerberus.Authorization.IOwnershipProbe, NetworkOwnershipProbe>();
 
 // --- Job pipeline (in-process bus locally; RabbitMQ in production) ----------
-builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
+// With a broker configured, work travels over RabbitMQ; without one, inside this process.
+var rabbit = new RabbitMqOptions(Environment.GetEnvironmentVariable("CERBERUS_RABBITMQ_URL"));
+builder.Services.AddSingleton(rabbit);
+if (rabbit.Enabled) builder.Services.AddSingleton<IMessageBus, RabbitMqBus>();
+else builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton(new JobOptions(
     Concurrency: Math.Clamp(EnvInt("CERBERUS_JOB_CONCURRENCY", 2), 1, 16),
@@ -231,6 +244,7 @@ using (var scope = app.Services.CreateScope())
 app.MapCerberusEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
+Cerberus.Api.Chat.ChatTurnEndpoints.MapChatTurnEndpoints(app);
 app.MapScheduleEndpoints();
 app.MapModelEndpoints();
 Cerberus.Api.Web.ArtifactEndpoints.MapArtifactEndpoints(app);

@@ -162,6 +162,30 @@ public sealed class JobWorkerCheck(WorkerHealth worker) : IReadinessCheck
             : (true, "running"));
 }
 
+/// <summary>The queue between accepting work and doing it: without it nothing that is accepted is ever started.</summary>
+public sealed class QueueCheck(Cerberus.Jobs.IMessageBus bus) : IReadinessCheck
+{
+    public string Name => "queue";
+    public bool Required => true;
+
+    public async Task<(bool, string)> CheckAsync(CancellationToken ct) =>
+        await bus.ProblemAsync(ct) is { } problem
+            ? (false, $"{bus.Transport}: {problem}; work is accepted and starts when the queue is back")
+            : (true, bus.Transport);
+}
+
+/// <summary>The worker that answers queued chat turns.</summary>
+public sealed class ChatWorkerCheck(Chat.ChatWorkerHealth worker) : IReadinessCheck
+{
+    public string Name => "chat-worker";
+    public bool Required => true;
+
+    public Task<(bool, string)> CheckAsync(CancellationToken ct) => Task.FromResult(
+        worker.Fault is not null ? (false, "stopped on an error; chat turns are not being answered")
+        : worker.StartedAt is null ? (false, "not started yet")
+        : (true, "running"));
+}
+
 public sealed class CatalogsCheck(CatalogLoader catalogs) : IReadinessCheck
 {
     public string Name => "catalogs";
@@ -250,6 +274,8 @@ public static class HealthEndpoints
         services.AddSingleton<IReadinessCheck, KeyRingCheck>();
         services.AddSingleton<IReadinessCheck, ScanRootCheck>();
         services.AddSingleton<IReadinessCheck, JobWorkerCheck>();
+        services.AddSingleton<IReadinessCheck, QueueCheck>();
+        services.AddSingleton<IReadinessCheck, ChatWorkerCheck>();
         services.AddSingleton<IReadinessCheck, CatalogsCheck>();
         services.AddSingleton<IReadinessCheck, SkillsCheck>();
         services.AddSingleton<IReadinessCheck, EmbeddingsCheck>();
