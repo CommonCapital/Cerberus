@@ -10,6 +10,7 @@ namespace Cerberus.Scanning;
 /// <param name="SuppressedCount">Findings the target marked with <c>cerberus:ignore</c>.</param>
 /// <param name="Truncated">True when the finding cap was reached and the scan stopped early.</param>
 /// <param name="BinariesInspected">Built artefacts (ELF, PE) whose headers were checked for hardening.</param>
+/// <param name="ReleaseFilesInspected">Minified bundles, source maps and debug companions checked for what they expose. They are also counted in <paramref name="FilesSkipped"/>: the line rules do not read them.</param>
 public sealed record ScanResult(
     int FilesScanned,
     IReadOnlyList<Finding> Findings,
@@ -17,7 +18,8 @@ public sealed record ScanResult(
     int FilesIgnored = 0,
     int SuppressedCount = 0,
     bool Truncated = false,
-    int BinariesInspected = 0)
+    int BinariesInspected = 0,
+    int ReleaseFilesInspected = 0)
 {
     /// <summary>Findings that count: everything the target did not suppress.</summary>
     public int ActiveCount => Findings.Count - SuppressedCount;
@@ -83,8 +85,30 @@ public sealed partial class ScanService(ScanOptions options)
 
         var ignore = honourExclusions ? IgnoreList.Load(root, target) : IgnoreList.Empty;
         var findings = new List<Finding>();
-        int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0, binariesInspected = 0;
+        int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0, binariesInspected = 0, releaseInspected = 0;
         var truncated = false;
+        var debugBundles = new HashSet<string>(StringComparer.Ordinal);
+
+        // A finding about what a built file exposes (ReleaseExposure); false once the cap is reached.
+        bool AddRelease(ReleaseIssue issue, string relFile)
+        {
+            if (findings.Count >= MaxFindings) { truncated = true; return false; }
+            var context = ContextOf(relFile);
+            findings.Add(new Finding(
+                Id: $"{issue.RuleId}:{relFile}:{issue.Line}",
+                Title: issue.Title,
+                Severity: issue.Severity,
+                Category: ReleaseExposure.Category,
+                Cwe: issue.Cwe,
+                File: relFile,
+                Line: issue.Line,
+                Evidence: Truncate(issue.Evidence, 300),
+                Confidence: context is null ? issue.Confidence : "low",
+                Owasp: ReleaseExposure.Owasp,
+                Remediation: issue.Remediation,
+                Context: context));
+            return true;
+        }
 
         foreach (var file in EnumerateFiles(target))
         {
@@ -95,7 +119,7 @@ public sealed partial class ScanService(ScanOptions options)
             if (ignore.Matches(relFile)) { filesIgnored++; continue; }
 
             // A built artefact is not read as text: its headers are checked for hardening instead.
-            if (InspectBinary(file) is { } binary)
+            if (InspectBinary(file, out var binaryBytes) is { } binary)
             {
                 binariesInspected++;
                 var binaryContext = ContextOf(relFile);
@@ -116,6 +140,42 @@ public sealed partial class ScanService(ScanOptions options)
                         Remediation: issue.Remediation,
                         Context: binaryContext));
                 }
+                if (ReleaseExposure.BuildPaths(binaryBytes) is { } buildPath) AddRelease(buildPath, relFile);
+                continue;
+            }
+
+            // Debug companions: reported once, not read further.
+            if (ReleaseExposure.DsymBundleOf(relFile) is { } bundle)
+            {
+                filesSkipped++;
+                if (debugBundles.Add(bundle))
+                {
+                    releaseInspected++;
+                    AddRelease(ReleaseExposure.DebugSymbols("A .dSYM debug-symbol bundle is present"), bundle);
+                }
+                continue;
+            }
+            var fileName = Path.GetFileName(file);
+            if (fileName.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase) && ReleaseExposure.IsPdb(fileName, ReadHead(file)))
+            {
+                filesSkipped++;
+                releaseInspected++;
+                AddRelease(ReleaseExposure.DebugSymbols("A program database (.pdb) is present"), relFile);
+                continue;
+            }
+
+            // Minified bundles and source maps: not for the line rules, but checked for what they give away.
+            if (ReleaseExposure.IsBuiltText(fileName))
+            {
+                filesSkipped++;
+                if (ReadBuiltText(file) is { } builtText)
+                {
+                    releaseInspected++;
+                    foreach (var issue in ReleaseExposure.InspectBuiltText(fileName, builtText))
+                    {
+                        if (!AddRelease(issue, relFile)) break;
+                    }
+                }
                 continue;
             }
 
@@ -126,7 +186,13 @@ public sealed partial class ScanService(ScanOptions options)
             {
                 var bytes = File.ReadAllBytes(file);
                 if (IsBinary(bytes)) { filesSkipped++; continue; }
-                lines = Encoding.UTF8.GetString(bytes).Split('\n');
+                var text = Encoding.UTF8.GetString(bytes);
+                lines = text.Split('\n');
+                // A script or stylesheet may carry its source map inside itself.
+                if (ReleaseExposure.MayCarryInlineMap(Path.GetExtension(file)) && ReleaseExposure.InlineSourceMap(text) is { } inlineMap)
+                {
+                    foreach (var issue in inlineMap) AddRelease(issue, relFile);
+                }
             }
             catch (IOException) { filesSkipped++; continue; }
             catch (UnauthorizedAccessException) { filesSkipped++; continue; }
@@ -177,7 +243,7 @@ public sealed partial class ScanService(ScanOptions options)
         findings.Sort((a, b) => a.Suppressed != b.Suppressed
             ? a.Suppressed.CompareTo(b.Suppressed)
             : b.Severity.CompareTo(a.Severity));
-        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated, binariesInspected);
+        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated, binariesInspected, releaseInspected);
     }
 
     /// <summary>
@@ -185,8 +251,9 @@ public sealed partial class ScanService(ScanOptions options)
     /// library; null for anything else (text, other binaries, unreadable or
     /// oversized files), which then takes the ordinary path.
     /// </summary>
-    private static BinaryReport? InspectBinary(string file)
+    private static BinaryReport? InspectBinary(string file, out byte[] bytes)
     {
+        bytes = [];
         try
         {
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -195,10 +262,36 @@ public sealed partial class ScanService(ScanOptions options)
             if (!BinaryHardening.LooksLikeBinary(head)) return null;
             if (stream.Length > BinaryHardening.MaxBinaryBytes) return null;
 
-            var bytes = new byte[stream.Length];
+            bytes = new byte[stream.Length];
             stream.Position = 0;
             stream.ReadExactly(bytes);
             return BinaryHardening.Inspect(bytes);
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The first bytes of a file, enough to recognise its format; empty when it cannot be read.</summary>
+    private static byte[] ReadHead(string file)
+    {
+        try
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var head = new byte[32];
+            var read = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+            return head[..read];
+        }
+        catch (IOException) { return []; }
+        catch (UnauthorizedAccessException) { return []; }
+    }
+
+    /// <summary>The text of a bundle or source map; null when it is too large or cannot be read.</summary>
+    private static string? ReadBuiltText(string file)
+    {
+        try
+        {
+            if (new FileInfo(file).Length > ReleaseExposure.MaxTextBytes) return null;
+            return Encoding.UTF8.GetString(File.ReadAllBytes(file));
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
