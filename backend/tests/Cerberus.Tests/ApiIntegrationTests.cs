@@ -43,6 +43,10 @@ public sealed class ApiHost : IDisposable
         Environment.SetEnvironmentVariable("CERBERUS_WEB", "on");
         Environment.SetEnvironmentVariable("CERBERUS_SEARXNG_URL", "http://search.invalid");
         Environment.SetEnvironmentVariable("CERBERUS_BROWSER", "on");
+        // Request-rate limits are off in the test host: tests poll far faster than a person or a client would.
+        // ServiceHardeningTests starts variants with a limit switched on.
+        Environment.SetEnvironmentVariable("CERBERUS_RATE_PER_ADDRESS", "0");
+        Environment.SetEnvironmentVariable("CERBERUS_RATE_PER_USER", "0");
 
         _factory = NewFactory();
         // Started now, while the settings above are in place: a variant started by a test changes and then clears

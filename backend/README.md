@@ -31,6 +31,9 @@ Environment:
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — user-supplied keys for cloud models (optional).
 - `OLLAMA_BASE_URL` — local Ollama endpoint (default `http://localhost:11434/v1`). Use Ollama for fully offline operation.
 - `CERBERUS_BIND` — address to listen on (default `localhost`; the container image sets `0.0.0.0`).
+- `CERBERUS_RATE_PER_ADDRESS` / `CERBERUS_RATE_PER_USER` — requests per minute allowed from one network address (default `1200`) and with one sign-in token (default `600`); `0` switches a limit off. See "Protection of the service".
+- `CERBERUS_MAX_REQUEST_BYTES` — largest request body accepted (default 16 MB).
+- `CERBERUS_CORS_ORIGINS` — comma-separated origins a browser client may call from, e.g. `https://app.example.com`. Not set: no cross-origin access.
 - `CERBERUS_SKILLS_ROOT` / `CERBERUS_CATALOG_ROOT` — where the skills library and control catalogs are (default: the repository's `security-skills/skills` and `catalogs`).
 
 Or in a container, from the repository root (see `docker-compose.yml`; written but not yet run):
@@ -38,6 +41,15 @@ Or in a container, from the repository root (see `docker-compose.yml`; written b
 ```bash
 docker compose up -d
 ```
+
+### Protection of the service
+
+- **Settings are checked before start-up.** A setting that is present but cannot be understood stops the service (exit code 2) with a message naming the setting — never its value, which may be an address with a password in it. Switches are exact: `true` / `false`, `on` / `off`. Before this, `CERBERUS_REQUIRE_ENGAGEMENT=True` silently meant *off*.
+- **Request rate.** Each request must fit two allowances over a sliding minute: the network address it comes from, and the sign-in token it carries. Over either: `429` with `Retry-After` and a JSON error. `/health` is never limited (a container's liveness probe must not be refused). A made-up token has its own allowance, so it cannot use up a real user's. Limits are counted in this process; behind a reverse proxy the address is the proxy's, so set the per-address limit accordingly or leave rate limiting by client address to the proxy.
+- **Request size.** A body over `CERBERUS_MAX_REQUEST_BYTES` is refused with `413`, whether or not it declared its length.
+- **Headers** on every response, errors included: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Cache-Control: no-store`; no `Server` header. The API serves data, never a page.
+- **Browser origins.** None by default. `CERBERUS_CORS_ORIGINS` lists the origins that may call the API from a browser; a wildcard is refused at start-up.
+- **TLS** is not terminated by the service: it listens on plain HTTP on `localhost`. Put a reverse proxy that terminates TLS in front of it for anything beyond one machine.
 
 ## Endpoints
 

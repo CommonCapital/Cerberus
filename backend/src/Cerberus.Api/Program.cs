@@ -23,7 +23,22 @@ if (args is ["health", ..])
     return await Cerberus.Api.Health.ServiceCommands.HealthAsync(url, Console.Out, probe, CancellationToken.None);
 }
 
+// A setting that is present but cannot be understood stops the service: it is not replaced by a default.
+var configErrors = Cerberus.Api.Security.ServiceConfig.Validate(Environment.GetEnvironmentVariable);
+if (configErrors.Count > 0)
+{
+    Console.Error.WriteLine("Cerberus cannot start: the configuration is not valid.");
+    foreach (var error in configErrors) Console.Error.WriteLine("  - " + error);
+    return 2;
+}
+
 var builder = WebApplication.CreateBuilder(args);
+// Nothing in a response needs to say which server software this is.
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
+
+// --- The service's own protection: request size, request rate, browser origins (§22 item 8) ---
+Cerberus.Api.Security.ServiceHardening.AddServiceHardening(
+    builder.Services, Cerberus.Api.Security.ServiceLimits.FromEnvironment(Environment.GetEnvironmentVariable));
 
 // --- Database: local SQLite (no hosted Postgres) ---------------------------
 var dbPath = Environment.GetEnvironmentVariable("CERBERUS_DB")
@@ -213,18 +228,22 @@ if (args is ["smoke-llm", ..])
         Console.Out, CancellationToken.None);
 }
 
+// Security headers go on every response, the error responses below included.
+Cerberus.Api.Security.ServiceHardening.UseSecurityHeaders(app);
+
 // Errors are JSON, as clients of this API expect: a request that cannot be read is a
-// 400 "Invalid request body", and anything unexpected is a 500 without internals.
+// 400 "Invalid request body" (413 when it is too large), and anything unexpected is a 500 without internals.
 app.Use(async (context, next) =>
 {
     try
     {
         await next(context);
     }
-    catch (BadHttpRequestException) when (!context.Response.HasStarted)
+    catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
     {
-        context.Response.StatusCode = StatusCodes.Status400BadRequest;
-        await context.Response.WriteAsJsonAsync(new { error = "Invalid request body" });
+        var tooLarge = ex.StatusCode == StatusCodes.Status413PayloadTooLarge;
+        context.Response.StatusCode = tooLarge ? StatusCodes.Status413PayloadTooLarge : StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = tooLarge ? "Request body too large." : "Invalid request body" });
     }
     catch (Exception ex) when (ex is not OperationCanceledException && !context.Response.HasStarted)
     {
@@ -233,6 +252,9 @@ app.Use(async (context, next) =>
         await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
     }
 });
+
+// Browser origins, the request-size cap and the rate limits apply before any endpoint runs.
+Cerberus.Api.Security.ServiceHardening.UseServiceHardening(app);
 
 // Create the schema on first run, and additively upgrade an existing local database.
 using (var scope = app.Services.CreateScope())
