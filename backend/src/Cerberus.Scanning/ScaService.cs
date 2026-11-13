@@ -70,14 +70,19 @@ public sealed class ScaService(ScanOptions options, OsvClient osv)
         return new ScaResult(manifests.Count, deps.Count, findings, Completed: batch.Complete && !truncated);
     }
 
-    private static Finding ToFinding(Dependency dep, string id, OsvVuln? vuln)
+    internal static Finding ToFinding(Dependency dep, string id, OsvVuln? vuln)
     {
         var cve = vuln?.Cve;
         var label = cve ?? id;
         var severity = vuln?.Severity ?? Severity.Medium;
         var title = $"Vulnerable dependency: {dep.Name}@{dep.Version} ({label})";
         var summary = vuln?.Summary ?? $"{dep.Name}@{dep.Version} is affected by {id}.";
-        var fix = vuln?.FixedVersion;
+        // The fix for the version in use: the lowest fixed version above it. Advisories list one
+        // per maintained branch, and the first listed may sit on an older branch. An older client's
+        // record without the full list keeps its single value.
+        var fix = vuln is null ? null
+            : vuln.FixedVersions is null ? vuln.FixedVersion
+            : VersionOrder.NextFix(dep.Version, vuln.FixedVersions);
         var evidence = fix is not null
             ? $"{summary} Fixed in {fix}."
             : summary;

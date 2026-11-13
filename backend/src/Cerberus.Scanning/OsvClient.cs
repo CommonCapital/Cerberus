@@ -12,7 +12,13 @@ public sealed record OsvVuln(
     Severity Severity,
     string? Cwe,
     string? FixedVersion,
-    string Reference);
+    string Reference,
+    /// <summary>
+    /// Every fixed version the advisory lists for the package — one per
+    /// maintained branch. <see cref="FixedVersion"/> is only the first of them;
+    /// which one applies depends on the version in use (<see cref="VersionOrder.NextFix"/>).
+    /// </summary>
+    IReadOnlyList<string>? FixedVersions = null);
 
 /// <summary>
 /// Minimal read-only client for the public OSV.dev API
@@ -146,10 +152,10 @@ public sealed class OsvClient(HttpClient http)
             var cve = ExtractCve(root);
             var severity = ExtractSeverity(root);
             var cwe = ExtractCwe(root);
-            var fixedVersion = ExtractFixedVersion(root, ecosystem, packageName);
+            var fixedVersions = ExtractFixedVersions(root, ecosystem, packageName);
             var reference = $"https://osv.dev/vulnerability/{id}";
 
-            return new OsvVuln(id, cve, summary, severity, cwe, fixedVersion, reference);
+            return new OsvVuln(id, cve, summary, severity, cwe, fixedVersions.FirstOrDefault(), reference, fixedVersions);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -225,11 +231,16 @@ public sealed class OsvClient(HttpClient http)
         return null;
     }
 
-    /// <summary>Find the first "fixed" event for the affected package that matches our ecosystem.</summary>
-    private static string? ExtractFixedVersion(JsonElement root, string ecosystem, string packageName)
+    /// <summary>
+    /// Every "fixed" version listed for the affected package in our ecosystem,
+    /// in the advisory's order. Ranges of commits (type GIT) are left out: their
+    /// "fixed" is a commit hash, not a version anyone can upgrade to.
+    /// </summary>
+    internal static IReadOnlyList<string> ExtractFixedVersions(JsonElement root, string ecosystem, string packageName)
     {
+        var found = new List<string>();
         if (!root.TryGetProperty("affected", out var affected) || affected.ValueKind != JsonValueKind.Array)
-            return null;
+            return found;
 
         foreach (var a in affected.EnumerateArray())
         {
@@ -242,15 +253,21 @@ public sealed class OsvClient(HttpClient http)
             if (!a.TryGetProperty("ranges", out var ranges) || ranges.ValueKind != JsonValueKind.Array) continue;
             foreach (var range in ranges.EnumerateArray())
             {
+                if (range.ValueKind != JsonValueKind.Object) continue;
+                if (string.Equals(Str(range, "type"), "GIT", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!range.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Array) continue;
                 foreach (var ev in events.EnumerateArray())
                 {
-                    if (ev.TryGetProperty("fixed", out var fx) && fx.ValueKind == JsonValueKind.String)
-                        return fx.GetString();
+                    if (ev.ValueKind == JsonValueKind.Object && ev.TryGetProperty("fixed", out var fx) &&
+                        fx.ValueKind == JsonValueKind.String && fx.GetString() is { Length: > 0 } version &&
+                        !found.Contains(version))
+                    {
+                        found.Add(version);
+                    }
                 }
             }
         }
-        return null;
+        return found;
     }
 
     private static string Truncate(string value, int max) =>
