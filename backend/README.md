@@ -270,6 +270,14 @@ Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: curr
 
 Files over 16 MB are not read. Not covered: Electron fuses, paths stored as UTF-16, credentials inside binaries. `release` findings are not sent to triage and do not feed a compliance control.
 
+**Dependencies from built artefacts.** The dependency check reads what shipped as well as what the manifests declare, and checks both against OSV as one de-duplicated inventory (`manifestsScanned` counts artefacts that yielded dependencies too):
+
+- `*.deps.json` beside a published .NET application — its NuGet packages.
+- A Go binary (ELF, PE or Mach-O) — the modules the linker recorded, with replace directives applied, and the toolchain as the package `stdlib`.
+- A `.jar` / `.war` / `.ear` — the `pom.properties` inside it and inside the archives nested one level down (a Spring Boot or WAR layout).
+
+Nothing is unpacked or executed; files over 128 MB are not read. A library that left no metadata behind (a shaded JAR without `META-INF/maven`, a statically linked C library, a JavaScript bundle) is not seen. As for the scan, build directories are skipped unless they are the target.
+
 **What is not scanned**, and how it is reported: dependency and build directories (`node_modules`, `.git`, `bin`, `obj`, `dist`, `vendor`, …); other binary, media, archive, lock and minified files, files over 1 MB and lines over 2,000 characters (`filesSkipped`); and paths listed in a `.cerberusignore` at the scan root or in the scanned directory (`filesIgnored`). Ignore patterns follow `.gitignore` conventions: `dir/`, `*.ext` at any depth, `a/b.py` anchored, `**` across directories. A scan stops at 5,000 findings and sets `truncated`.
 
 Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. For code you do not control, scan with `"exclusions": "ignore"`: every file is scanned and nothing is suppressed. A scan *job* asks you about this when the target actually excludes something (see `/questions`).
