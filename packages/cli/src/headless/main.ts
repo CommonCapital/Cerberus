@@ -38,6 +38,7 @@ const deps: HeadlessDeps = {
   cancel: (id) => cerberus.cancelJob(id),
   sarif: (source) => cerberus.sarif(source.kind, source.id),
   report: reportOf,
+  position: async (jobId) => (await cerberus.job(jobId)).queue ?? null,
   screenshots: async (jobId) => {
     const kept = await cerberus.artifacts(jobId);
     return Promise.all(kept.map(async (artifact) => ({ name: artifact.name, source: artifact.source, bytes: await cerberus.artifactBytes(artifact.id) })));

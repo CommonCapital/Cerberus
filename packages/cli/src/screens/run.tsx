@@ -7,6 +7,7 @@ import { cerberus } from "../lib/cerberus/api";
 import { saveSarif, sarifSourceOf } from "../lib/cerberus/export";
 import { sarifIo } from "../lib/cerberus/export-io";
 import { followRun } from "../lib/cerberus/follow";
+import { describeQueue } from "../lib/cerberus/queue";
 import { canBeSteered, emptyRun, isFinished, type RunView as RunViewModel } from "../lib/cerberus/run-state";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
 import { useToast } from "../providers/toast";
@@ -20,6 +21,8 @@ export function Run() {
   const [view, setView] = useState<RunViewModel>(emptyRun);
   const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState(0);
+  // While the run waits for a place: where it stands. Asked now and then, because others' runs move it on.
+  const [waitingLine, setWaitingLine] = useState<string | null>(null);
   const [report, setReport] = useState<string | null>(null);
   // The scan behind a finished review, known once the review is loaded.
   const [reviewScanId, setReviewScanId] = useState<string | null>(null);
@@ -70,6 +73,26 @@ export function Run() {
     view.job && view.job.state === "Succeeded" && (view.job.type === "assess" || view.job.type === "evidence")
       ? view.job.resultId
       : null;
+
+  const queued = view.job?.state === "Queued";
+  useEffect(() => {
+    if (!queued || !id) {
+      setWaitingLine(null);
+      return;
+    }
+    let current = true;
+    const ask = () =>
+      void cerberus
+        .job(id)
+        .then((job) => current && setWaitingLine(describeQueue(job.queue)))
+        .catch(() => {});
+    ask();
+    const timer = setInterval(ask, 3000);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [queued, id]);
 
   // A new question starts with its first option highlighted.
   const questionId = view.question?.id;
@@ -170,7 +193,7 @@ export function Run() {
   return (
     <box flexDirection="column" flexGrow={1} width="100%" height="100%" paddingY={1} paddingX={2} gap={1}>
       <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="bottom">
-        <RunView view={view} selectedOption={selectedOption} error={error} report={report} />
+        <RunView view={view} selectedOption={selectedOption} error={error} report={report} waiting={waitingLine} />
       </scrollbox>
       {composing ? (
         <box flexShrink={0} flexDirection="column">

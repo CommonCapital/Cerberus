@@ -8,8 +8,9 @@ namespace Cerberus.Api.Jobs;
 public sealed record CancelSummary(int Queued, int Running);
 
 /// <param name="QuestionTimeout">How long a job waits for the operator to answer a question before falling back.</param>
+/// <param name="PerUser">The most jobs one user may have running at once (CERBERUS_JOB_PER_USER); 0 for no limit. Whose turn it is, is decided fairly either way.</param>
 public sealed record JobOptions(
-    int Concurrency, TimeSpan Timeout, TimeSpan Grace, int MaxQueuedPerUser, TimeSpan QuestionTimeout);
+    int Concurrency, TimeSpan Timeout, TimeSpan Grace, int MaxQueuedPerUser, TimeSpan QuestionTimeout, int PerUser = 0);
 
 /// <summary>
 /// The operator's controls over jobs: cancel one, or stop everything an

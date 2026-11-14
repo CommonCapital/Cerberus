@@ -50,6 +50,8 @@ services:
       # CERBERUS_REQUIRE_ENGAGEMENT: "true"
       # CERBERUS_JOB_TIMEOUT_SECONDS: "600"
       # CERBERUS_JOB_CONCURRENCY: "2"
+      # The most jobs one person may run at once (0 = no limit; the next free place goes to whoever has fewest either way):
+      # CERBERUS_JOB_PER_USER: "0"
       # RabbitMQ between accepting work and doing it: compose.infra.yml sets CERBERUS_RABBITMQ_URL for this service.
       # Chat turns answered at once, in all and per user:
       # CERBERUS_CHAT_CONCURRENCY: "4"

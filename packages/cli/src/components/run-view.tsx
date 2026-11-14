@@ -42,6 +42,8 @@ type Props = {
   error?: string | null;
   /** The finished review's report (Markdown), once loaded. */
   report?: string | null;
+  /** While the run waits for a place: where it stands, in words. */
+  waiting?: string | null;
 };
 
 const STATE_LABEL: Record<JobState, string> = {
@@ -68,7 +70,7 @@ const TITLE: Record<string, string> = { scan: "Scan", assess: "Compliance assess
 
 const RESULT: Record<string, string> = { scan: "scan", assess: "assessment", triage: "scan", review: "review", sast: "agent run", evidence: "assessment", "threat-model": "agent run", investigate: "agent run", index: "index" };
 
-export function RunView({ view, selectedOption, error, report }: Props) {
+export function RunView({ view, selectedOption, error, report, waiting }: Props) {
   const { colors } = useTheme();
   const { job } = view;
 
@@ -107,6 +109,7 @@ export function RunView({ view, selectedOption, error, report }: Props) {
         <box flexGrow={1} />
         <text fg={stateColor(job.state)}>● {STATE_LABEL[job.state]}</text>
       </box>
+      {job.state === "Queued" && waiting ? <text attributes={TextAttributes.DIM}>{waiting}</text> : null}
 
       {/* Task list */}
       {view.steps.length > 0 ? (

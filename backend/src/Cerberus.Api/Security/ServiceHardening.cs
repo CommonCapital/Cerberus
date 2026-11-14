@@ -48,7 +48,7 @@ public static class ServiceConfig
 {
     private static readonly string[] Integers =
     [
-        "CERBERUS_CHAT_CONCURRENCY", "CERBERUS_CHAT_PER_USER", "CERBERUS_JOB_CONCURRENCY", "CERBERUS_AGENT_PARALLELISM",
+        "CERBERUS_CHAT_CONCURRENCY", "CERBERUS_CHAT_PER_USER", "CERBERUS_JOB_CONCURRENCY", "CERBERUS_JOB_PER_USER", "CERBERUS_AGENT_PARALLELISM",
     ];
 
     private static readonly string[] PositiveSeconds =

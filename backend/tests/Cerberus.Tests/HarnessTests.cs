@@ -187,7 +187,7 @@ public class AgentHarnessTests(ApiHost host)
         var result = await rig.Harness.RunAsync(asking, rig.Request(questions: true, brief: brief), context => new LicenceCheck(context), new RecordingReporter(), default);
 
         Assert.Equal(("specialist:licences", "the-leads-run"), (result.Run!.Agent, result.Run.ParentRunId));
-        Assert.EndsWith("You are sent by a lead to look at the vendored code only.", rig.Model.Requests[0].System.Split("\n\n")[1]);
+        Assert.EndsWith("You are sent by a lead to look at the vendored code only.", rig.Model.Requests[0].System!.Split("\n\n")[1]);
         Assert.DoesNotContain(rig.Model.Requests[0].Tools, t => t.Name == "askOperator");   // even though the run and the description allow questions
         Assert.False(posted);
     }

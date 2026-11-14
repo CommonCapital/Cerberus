@@ -563,11 +563,13 @@ public static class JobEndpoints
         return Results.Json(jobs.Select(Describe), JsonOptions);
     }
 
-    private static async Task<IResult> Get(string id, HttpContext http, CerberusDbContext db, CancellationToken ct)
+    private static async Task<IResult> Get(string id, HttpContext http, CerberusDbContext db, JobQueue queue, CancellationToken ct)
     {
         var userId = UserId(http);
         var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id && j.UserId == userId, ct);
-        return job is null ? NotFound() : Results.Json(Describe(job), JsonOptions);
+        if (job is null) return NotFound();
+        // A job that waits its turn says where it stands.
+        return Results.Json(job.State == nameof(JobState.Queued) ? Describe(job, await queue.PositionAsync(job, ct)) : Describe(job), JsonOptions);
     }
 
     private static async Task<IResult> Cancel(
@@ -627,5 +629,13 @@ public static class JobEndpoints
     {
         j.Id, j.Type, j.State, j.Tier, j.EngagementId, j.TargetPath,
         j.ResultId, j.ApprovalId, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt,
+    };
+
+    /// <summary>A waiting job, with where it stands: <c>queue: { ahead, others }</c>.</summary>
+    internal static object Describe(Job j, QueuePosition position) => new
+    {
+        j.Id, j.Type, j.State, j.Tier, j.EngagementId, j.TargetPath,
+        j.ResultId, j.ApprovalId, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt,
+        queue = new { ahead = position.Ahead, others = position.Others },
     };
 }

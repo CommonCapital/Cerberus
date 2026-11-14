@@ -273,6 +273,27 @@ test("a request covering two kinds of action needs both named", async () => {
   expect(seen.log.join("\n")).toContain("--approve run-plan,send-code-to-cloud-model");
 });
 
+test("a run that waits for a place says once where it stands, and then runs", async () => {
+  const asked: string[] = [];
+  const { deps, seen } = harness(
+    async (emit) => {
+      emit(view({ job: job("Queued") }));
+      emit(view({ job: job("Queued"), lastSequence: 2 }));   // still waiting: not said again
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      emit(view({ job: job("Succeeded"), lastSequence: 3 }));
+    },
+    { position: async (id) => (asked.push(id), { ahead: 2, others: 1 }) },
+  );
+
+  const code = await runHeadless(options("run scan svc"), deps);
+
+  expect(code).toBe(EXIT.ok);
+  expect(asked).toEqual(["job-12345678-abcd"]);
+  expect(seen.log.filter((line) => line.startsWith("[wait]"))).toEqual([
+    "[wait] waiting its turn — 2 of your runs are ahead of it · places are shared with 1 other person",
+  ]);
+});
+
 test("a question stops the run: nobody is here to answer it", async () => {
   const question: Question = {
     id: "q1", jobId: "job-12345678-abcd", text: "The target ignores 3 files. Honour that?", options: [], multiSelect: false, allowText: false, status: "Pending", answer: null,

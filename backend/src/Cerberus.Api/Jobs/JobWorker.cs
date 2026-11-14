@@ -80,8 +80,12 @@ public sealed class JobWorker(
                 var message = delivery.Message;
                 try
                 {
-                    await ProcessAsync(message, stoppingToken);
-                    // Only now: the job has reached a final state, or was never this message's to start.
+                    // The message says that there is work. Which job this worker takes is decided afresh from the
+                    // database (see JobQueue) — and it goes on taking jobs for as long as one may start.
+                    while (await RunNextAsync(stoppingToken))
+                    {
+                    }
+                    // Only now: what this message announced has been run, by this worker or another, or cannot run yet.
                     await delivery.DoneAsync();
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -102,22 +106,21 @@ public sealed class JobWorker(
         }
     }
 
-    private async Task ProcessAsync(WorkMessage message, CancellationToken stoppingToken)
+    /// <summary>
+    /// Takes the job whose turn it is and sees it to its end. False when no job may start now: nothing is
+    /// waiting, or everyone who waits is at their limit. The job and its user come from the database, never
+    /// from a message.
+    /// </summary>
+    private async Task<bool> RunNextAsync(CancellationToken stoppingToken)
     {
-        var jobId = message.Id;
         using var scope = scopes.CreateScope();
         var services = scope.ServiceProvider;
         var db = services.GetRequiredService<CerberusDbContext>();
         var audit = services.GetRequiredService<AuditLog>();
 
-        var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
-        if (job is null || job.State != nameof(JobState.Queued)) return;   // cancelled while waiting, or delivered twice
-        if (job.UserId != message.UserId)
-        {
-            // The message names another user than the job belongs to: not something this service publishes.
-            logger.LogWarning("A queue message for job {JobId} named a user the job does not belong to; it was not run.", jobId);
-            return;
-        }
+        var job = await JobQueue.NextAsync(db, options.PerUser, stoppingToken);
+        if (job is null) return false;
+        var jobId = job.Id;
 
         // A job that needed the operator's consent runs only if it was given.
         if (job.ApprovalId is not null)
@@ -130,7 +133,7 @@ public sealed class JobWorker(
             {
                 await FinishAsync(db, audit, job, nameof(JobState.Queued),
                     new JobOutcome(JobState.Failed, null, "Not approved: the job's approval request is missing or was not approved."));
-                return;
+                return true;
             }
         }
 
@@ -145,7 +148,7 @@ public sealed class JobWorker(
             {
                 await FinishAsync(db, audit, job, nameof(JobState.Queued), new JobOutcome(JobState.Failed, null,
                     $"No longer authorized: {decision?.Reason ?? "the engagement no longer exists."}"));
-                return;
+                return true;
             }
         }
 
@@ -157,7 +160,7 @@ public sealed class JobWorker(
                 .SetProperty(j => j.State, nameof(JobState.Running))
                 .SetProperty(j => j.OwnerId, instance.Id)
                 .SetProperty(j => j.StartedAt, startedAt), stoppingToken);
-        if (claimed != 1) return;
+        if (claimed != 1) return true;   // cancelled in this moment, or another worker was quicker: look again
         await events.PublishAsync(jobId);
 
         var outcome = await JobExecutor.RunAsync(
@@ -167,6 +170,7 @@ public sealed class JobWorker(
             registry, options.Timeout, options.Grace, stoppingToken);
 
         await FinishAsync(db, audit, job, nameof(JobState.Running), outcome);
+        return true;
     }
 
     /// <summary>Dispatches on job type and returns the id of what was produced.</summary>
