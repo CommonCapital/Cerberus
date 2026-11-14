@@ -45,6 +45,8 @@ var dbPath = Environment.GetEnvironmentVariable("CERBERUS_DB")
     ?? Path.Combine(builder.Environment.ContentRootPath, "cerberus.db");
 builder.Services.AddDbContext<CerberusDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
+// Whose rows a context may see: one per scope, unrestricted until a request restricts it (see DataOwner).
+builder.Services.AddScoped<DataOwner>();
 
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
@@ -251,6 +253,13 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
     }
+});
+
+// A request sees nobody's data until its sign-in token has been checked (RequireAuthFilter then names the user).
+app.Use((context, next) =>
+{
+    context.RequestServices.GetRequiredService<DataOwner>().RestrictToNoOne();
+    return next(context);
 });
 
 // Browser origins, the request-size cap and the rate limits apply before any endpoint runs.

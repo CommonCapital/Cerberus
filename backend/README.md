@@ -49,6 +49,7 @@ docker compose up -d
 - **Request size.** A body over `CERBERUS_MAX_REQUEST_BYTES` is refused with `413`, whether or not it declared its length.
 - **Headers** on every response, errors included: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Cache-Control: no-store`; no `Server` header. The API serves data, never a page.
 - **Browser origins.** None by default. `CERBERUS_CORS_ORIGINS` lists the origins that may call the API from a browser; a wildcard is refused at start-up.
+- **Per-user data has two locks.** Every query filters by the signed-in user; in addition the request's database context is restricted — to no one until the token is checked, then to that user — so a query that forgot its filter still returns only that user's rows, and a write to another user's row is refused. Background services (job and chat workers, audit log, scheduler) open their own, unrestricted scope: they are told the user by their caller. Code that must look past the lock inside a request says so with `IgnoreQueryFilters()`.
 - **TLS** is not terminated by the service: it listens on plain HTTP on `localhost`. Put a reverse proxy that terminates TLS in front of it for anything beyond one machine.
 
 ## Endpoints

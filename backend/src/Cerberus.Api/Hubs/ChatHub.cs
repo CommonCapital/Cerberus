@@ -77,6 +77,8 @@ public sealed class ChatHub(IModelProviderResolver resolver) : Hub
         }
 
         var http = Context.GetHttpContext() ?? throw new HubException("The connection is gone.");
+        // The connection's database context is restricted to the user it authenticated as.
+        http.RequestServices.GetRequiredService<Cerberus.Data.DataOwner>().RestrictTo(userId);
         var credentials = await http.RequestServices.GetRequiredService<ApiKeyService>()
             .ResolveCredentialsAsync(userId, cancellationToken);
 

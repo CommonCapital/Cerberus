@@ -2,8 +2,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Data;
 
-public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : DbContext(options)
+/// <param name="owner">
+/// Whose rows this context may see (<see cref="DataOwner"/>). Null — a context made without one,
+/// as some tests do — is unrestricted.
+/// </param>
+public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, DataOwner? owner = null) : DbContext(options)
 {
+    // Read by the query filters below each time a query runs, so a context restricted
+    // after it was created (sign-in is checked inside the request) is restricted from then on.
+    private bool OwnerRestricted => owner?.Restricted ?? false;
+    private string? OwnerId => owner?.UserId;
+
     public DbSet<User> Users => Set<User>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<Session> Sessions => Set<Session>();
@@ -29,8 +38,68 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options) : Db
     public DbSet<Schedule> Schedules => Set<Schedule>();
     public DbSet<RunArtifact> RunArtifacts => Set<RunArtifact>();
 
+    /// <summary>The second lock: a restricted context sees one user's rows of this type, whatever the query says.</summary>
+    private void OwnedByUser<T>(ModelBuilder modelBuilder) where T : class, IUserOwned =>
+        modelBuilder.Entity<T>().HasQueryFilter(e => !OwnerRestricted || e.UserId == OwnerId);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RefuseForeignWrites();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        RefuseForeignWrites();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// A restricted context does not write another user's rows either: a row
+    /// added, changed or removed must belong to the user it is restricted to.
+    /// </summary>
+    private void RefuseForeignWrites()
+    {
+        if (!OwnerRestricted) return;
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted)) continue;
+            if (entry.Entity is IUserOwned row && !string.Equals(row.UserId, OwnerId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"A {entry.Metadata.ClrType.Name} belonging to another user cannot be written through a context restricted to one user.");
+            }
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Every type with an owner. A sign-in session is not among them: it is looked up by its
+        // secret token before the user is known. Users have no owner but themselves.
+        OwnedByUser<UserApiKey>(modelBuilder);
+        OwnedByUser<Scan>(modelBuilder);
+        OwnedByUser<ComplianceAssessment>(modelBuilder);
+        OwnedByUser<Engagement>(modelBuilder);
+        OwnedByUser<AuditEvent>(modelBuilder);
+        OwnedByUser<Job>(modelBuilder);
+        OwnedByUser<ApprovalRequest>(modelBuilder);
+        OwnedByUser<ChatTurn>(modelBuilder);
+        OwnedByUser<ChatTurnEvent>(modelBuilder);
+        OwnedByUser<JobEvent>(modelBuilder);
+        OwnedByUser<OperatorQuestion>(modelBuilder);
+        OwnedByUser<PermissionSetting>(modelBuilder);
+        OwnedByUser<Review>(modelBuilder);
+        OwnedByUser<AgentRun>(modelBuilder);
+        OwnedByUser<MemoryNote>(modelBuilder);
+        OwnedByUser<FindingDecision>(modelBuilder);
+        OwnedByUser<CodeIndex>(modelBuilder);
+        OwnedByUser<Session>(modelBuilder);
+        OwnedByUser<Schedule>(modelBuilder);
+        OwnedByUser<RunArtifact>(modelBuilder);
+        // Owned through their parent.
+        modelBuilder.Entity<EngagementTarget>().HasQueryFilter(t => !OwnerRestricted || t.Engagement!.UserId == OwnerId);
+        modelBuilder.Entity<CodeChunk>().HasQueryFilter(c => !OwnerRestricted || CodeIndexes.Any(i => i.Id == c.IndexId && i.UserId == OwnerId));
+
         modelBuilder.Entity<User>(e =>
         {
             e.HasKey(u => u.Id);
