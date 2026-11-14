@@ -1,6 +1,7 @@
 import { clearAuth, getAuth } from "../auth";
 import type { ModelListing } from "../model-choices";
 import type { McpListing } from "../../headless/mcp";
+import type { QueuePosition } from "./queue";
 import { explainSubmitError, getCurrentEngagement, setCurrentEngagement, underEngagement } from "./engagement";
 
 // Client for the Cerberus (.NET) backend's job, approval and question
@@ -33,6 +34,8 @@ export type Job = {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Only while it waits for a place, and only from GET /jobs/{id}: where it stands. */
+  queue?: QueuePosition;
 };
 
 export type Approval = {

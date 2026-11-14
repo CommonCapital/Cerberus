@@ -5,6 +5,7 @@ import { isFinished, type RunView } from "../lib/cerberus/run-state";
 import { summarizeToolCall } from "../lib/tool-display";
 import { SEVERITIES, type RunOptions } from "./args";
 import { failing, readSarif, summarize, type GateFinding, type Summary } from "./gate";
+import { describeQueue, type QueuePosition } from "../lib/cerberus/queue";
 
 // One job from start to exit code, with nobody at the keyboard. The server
 // does the work; this follows the run, answers only what was approved in
@@ -20,6 +21,8 @@ export type HeadlessDeps = {
   approve: (approvalId: string, note: string) => Promise<unknown>;
   cancel: (jobId: string) => Promise<unknown>;
   sarif: (source: SarifSource) => Promise<unknown>;
+  /** Where a waiting job stands; null once it no longer waits. Optional: without it nothing is said. */
+  position?: (jobId: string) => Promise<QueuePosition | null>;
   /** The written report of a finished job (Markdown), or null if it has none. */
   report: (job: Job) => Promise<string | null>;
   /** Writes a file and returns the path it was written to. */
@@ -102,6 +105,7 @@ function watch(jobId: string, options: RunOptions, deps: HeadlessDeps, say: (lin
   return new Promise((resolve) => {
     const print = progressPrinter(say);
     const handled = new Set<string>();
+    let toldPlace = false;
     const errors: number[] = [];
     let settled = false;
     let follower: Follower | null = null;
@@ -119,6 +123,14 @@ function watch(jobId: string, options: RunOptions, deps: HeadlessDeps, say: (lin
       (view) => {
         if (settled) return;
         print(view);
+        // Waiting for a place: said once, so a log shows why nothing happened for a while.
+        if (view.job?.state === "Queued" && !toldPlace && deps.position) {
+          toldPlace = true;
+          void deps.position(jobId).then((position) => {
+            const line = describeQueue(position);
+            if (line && !settled) say(`[wait] ${line.replace(/^Waiting its turn: /, "waiting its turn — ")}`);
+          }).catch(() => {});
+        }
 
         const approval = view.approval;
         if (approval && !handled.has(approval.id)) {

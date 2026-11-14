@@ -162,11 +162,13 @@ builder.Services.AddSingleton(rabbit);
 if (rabbit.Enabled) builder.Services.AddSingleton<IMessageBus, RabbitMqBus>();
 else builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
+builder.Services.AddSingleton<JobQueue>();
 builder.Services.AddSingleton(new JobOptions(
     Concurrency: Math.Clamp(EnvInt("CERBERUS_JOB_CONCURRENCY", 2), 1, 16),
     Timeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_TIMEOUT_SECONDS", 600)),
     Grace: TimeSpan.FromSeconds(EnvDouble("CERBERUS_JOB_GRACE_SECONDS", 10)),
     MaxQueuedPerUser: 50,
+    PerUser: Math.Clamp(EnvInt("CERBERUS_JOB_PER_USER", 0), 0, 16),
     QuestionTimeout: TimeSpan.FromSeconds(EnvDouble("CERBERUS_QUESTION_TIMEOUT_SECONDS", 3600))));
 builder.Services.AddScoped<ScanRunner>();
 builder.Services.AddScoped<AssessmentRunner>();
