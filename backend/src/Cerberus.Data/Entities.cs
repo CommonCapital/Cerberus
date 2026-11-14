@@ -194,6 +194,9 @@ public class Job : IUserOwned
     /// <summary>Id of what the job produced (for a scan job, the Scan).</summary>
     public string? ResultId { get; set; }
 
+    /// <summary>The server instance that is running it (see WorkerInstance). Null until a worker has claimed it.</summary>
+    public string? OwnerId { get; set; }
+
     /// <summary>The approval request this job had to wait for, if it needed one.</summary>
     public string? ApprovalId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -240,6 +243,17 @@ public class ApprovalRequest : IUserOwned
 /// client can replay a run and continue live from where it left off.
 /// </summary>
 /// <summary>
+/// One running copy of the service (PLAN.md §22 item 7). It says it is alive every few seconds; work that is
+/// marked as running under an instance that has stopped saying so is nobody's any more, and is failed.
+/// </summary>
+public class WorkerInstance
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
+}
+
+/// <summary>
 /// One request to the chat agent, accepted and queued (PLAN.md §22): whose it is, which conversation, what was
 /// asked, and how far it got. The reply is its events; once the reply is whole it is also in the session.
 /// </summary>
@@ -254,6 +268,9 @@ public class ChatTurn : IUserOwned
 
     /// <summary>The chat request as it was accepted, as JSON.</summary>
     public string Request { get; set; } = "{}";
+
+    /// <summary>The server instance that is answering it (see WorkerInstance). Null until a worker has claimed it.</summary>
+    public string? OwnerId { get; set; }
 
     /// <summary>The sequence number of the last event of the reply.</summary>
     public long LastSequence { get; set; }

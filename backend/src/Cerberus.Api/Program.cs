@@ -50,7 +50,31 @@ builder.Services.AddScoped<DataOwner>();
 
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
-builder.Services.AddSingleton<LoginThrottle>();
+// --- Several instances of the service (PLAN.md §22 item 7) -------------------
+// Each instance has a name and says it is alive; work marked as running under a name that went quiet is failed.
+builder.Services.AddSingleton<Cerberus.Api.Cluster.InstanceIdentity>();
+builder.Services.AddSingleton<Cerberus.Api.Cluster.OrphanSweeper>();
+builder.Services.AddHostedService<Cerberus.Api.Cluster.InstanceHeartbeat>();
+// With Redis configured the instances share what must hold over all of them: signals (stop this job, here is
+// the answer), places (one turn per conversation, a few per user) and the sign-in count. Without it: one process.
+var redis = new Cerberus.Api.Cluster.RedisOptions(Environment.GetEnvironmentVariable("CERBERUS_REDIS_URL"));
+builder.Services.AddSingleton(redis);
+if (redis.Enabled)
+{
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.RedisLink>();
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.ISignals, Cerberus.Api.Cluster.RedisSignals>();
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.IPlaces, Cerberus.Api.Cluster.RedisPlaces>();
+    builder.Services.AddSingleton<ILoginThrottle, Cerberus.Api.Cluster.RedisLoginThrottle>();
+    builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Cluster.RedisCheck>();
+}
+else
+{
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.ISignals, Cerberus.Api.Cluster.LocalSignals>();
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.IPlaces, Cerberus.Api.Cluster.LocalPlaces>();
+    builder.Services.AddSingleton<LoginThrottle>();
+    builder.Services.AddSingleton<ILoginThrottle>(services => services.GetRequiredService<LoginThrottle>());
+}
+builder.Services.AddHostedService<Cerberus.Api.Cluster.SignalRouter>();
 
 // --- Per-user API keys (encrypted at rest via Data Protection) -------------
 var keyRingPath = Environment.GetEnvironmentVariable("CERBERUS_KEYRING")
@@ -73,7 +97,16 @@ builder.Services.AddSingleton(RetryPolicy.Standard);
 builder.Services.AddSingleton<IModelProviderResolver, ModelProviderResolver>();
 builder.Services.AddSingleton<ILocalModelCatalog, OllamaCatalog>();
 
-builder.Services.AddSignalR();
+// With Redis, what one instance pushes reaches a client connected to any of them.
+var signalR = builder.Services.AddSignalR();
+if (redis.Enabled)
+{
+    signalR.AddStackExchangeRedis(o =>
+    {
+        o.Configuration = redis.Configuration();
+        o.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal(Cerberus.Api.Cluster.RedisOptions.Prefix + "signalr");
+    });
+}
 
 // --- Phase 1 scanning (passive, trusted-target MVP) ------------------------
 var scanRoot = Environment.GetEnvironmentVariable("CERBERUS_SCAN_ROOT") ?? Directory.GetCurrentDirectory();

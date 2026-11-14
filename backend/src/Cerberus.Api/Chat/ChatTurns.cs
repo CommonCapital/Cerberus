@@ -160,54 +160,6 @@ public sealed class TurnRegistry
     }
 }
 
-/// <summary>Places that are handed out per key: one per conversation, a few per user. Whoever comes next waits their turn.</summary>
-internal sealed class KeyedGate
-{
-    private readonly Dictionary<string, (SemaphoreSlim Gate, int Holders)> _gates = [];
-
-    public async Task<IDisposable> EnterAsync(string key, int places, CancellationToken ct)
-    {
-        SemaphoreSlim gate;
-        lock (_gates)
-        {
-            var entry = _gates.TryGetValue(key, out var known) ? known : (Gate: new SemaphoreSlim(places, places), Holders: 0);
-            _gates[key] = (entry.Gate, entry.Holders + 1);
-            gate = entry.Gate;
-        }
-        try
-        {
-            await gate.WaitAsync(ct);
-        }
-        catch
-        {
-            Leave(key, release: false);
-            throw;
-        }
-        return new Place(this, key);
-    }
-
-    private void Leave(string key, bool release)
-    {
-        lock (_gates)
-        {
-            var (gate, holders) = _gates[key];
-            if (release) gate.Release();
-            if (holders <= 1) _gates.Remove(key);
-            else _gates[key] = (gate, holders - 1);
-        }
-    }
-
-    private sealed class Place(KeyedGate owner, string key) : IDisposable
-    {
-        private int _left;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _left, 1) == 0) owner.Leave(key, release: true);
-        }
-    }
-}
-
 /// <summary>Whether the worker that answers queued turns is alive, for readiness.</summary>
 public sealed class ChatWorkerHealth
 {
@@ -224,13 +176,14 @@ public sealed class ChatWorkerHealth
 /// </summary>
 public sealed class ChatTurnWorker(
     IMessageBus bus, IServiceScopeFactory scopes, TurnRegistry registry, ChatTurnOptions options, IHubContext<ChatHub> hub,
-    ChatWorkerHealth health, ILogger<ChatTurnWorker> logger) : BackgroundService
+    ChatWorkerHealth health, Cluster.IPlaces places, Cluster.InstanceIdentity instance, Cluster.OrphanSweeper orphans,
+    ILogger<ChatTurnWorker> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
 
-    private readonly KeyedGate _sessions = new();
-    private readonly KeyedGate _users = new();
-    private readonly SemaphoreSlim _places = new(Math.Max(1, options.Concurrency));
+    // How many turns this instance answers at once. The conversation's order and the user's places are shared
+    // with the other instances (IPlaces); this one is the instance's own capacity.
+    private readonly SemaphoreSlim _capacity = new(Math.Max(1, options.Concurrency));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -260,17 +213,16 @@ public sealed class ChatTurnWorker(
         }
     }
 
-    /// <summary>After a restart: a turn that was being answered cannot be resumed and is failed; waiting ones are published again.</summary>
+    /// <summary>
+    /// At start: a turn that was being answered by an instance that is gone cannot be resumed and is failed
+    /// (one that a living instance is answering is left alone); waiting ones are published again.
+    /// </summary>
     private async Task RecoverAsync(CancellationToken ct)
     {
+        await orphans.BeatAsync(ct);
+        await orphans.SweepAsync(ct);
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
-        var now = DateTime.UtcNow;
-        await db.ChatTurns.Where(t => t.State == TurnStates.Running)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.State, TurnStates.Failed)
-                .SetProperty(t => t.Error, "Interrupted by a server restart.")
-                .SetProperty(t => t.FinishedAt, now), ct);
         var waiting = await db.ChatTurns.AsNoTracking().Where(t => t.State == TurnStates.Queued)
             .OrderBy(t => t.CreatedAt).Select(t => new { t.Id, t.UserId }).ToListAsync(ct);
         foreach (var turn in waiting) await bus.PublishAsync(WorkQueues.ChatTurns, new WorkMessage(turn.Id, turn.UserId), ct);
@@ -345,22 +297,22 @@ public sealed class ChatTurnWorker(
     {
         for (var attempt = 0; ; attempt++)
         {
-            using (await _sessions.EnterAsync(turn.SessionId, 1, stoppingToken))
+            await using (await places.EnterAsync($"session:{turn.SessionId}", 1, stoppingToken))
             {
                 // Two turns of one conversation sent in quick succession may arrive here the wrong way round:
                 // the later one steps back and lets the earlier one through. (Bounded, in case a message was lost.)
                 if (attempt >= 100 || !await EarlierWaitingAsync(turn, stoppingToken))
                 {
-                    using (await _users.EnterAsync(turn.UserId, Math.Max(1, options.PerUser), stoppingToken))
+                    await using (await places.EnterAsync($"user:{turn.UserId}", Math.Max(1, options.PerUser), stoppingToken))
                     {
-                        await _places.WaitAsync(stoppingToken);
+                        await _capacity.WaitAsync(stoppingToken);
                         try
                         {
                             await AnswerAsync(turn.Id, stoppingToken);
                         }
                         finally
                         {
-                            _places.Release();
+                            _capacity.Release();
                         }
                     }
                     return;
@@ -385,7 +337,10 @@ public sealed class ChatTurnWorker(
         // Claim it. Conditional on it still waiting, so a cancel — or another worker — wins cleanly.
         var startedAt = DateTime.UtcNow;
         var claimed = await db.ChatTurns.Where(t => t.Id == turnId && t.State == TurnStates.Queued)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.State, TurnStates.Running).SetProperty(t => t.StartedAt, startedAt), stoppingToken);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.State, TurnStates.Running)
+                .SetProperty(t => t.OwnerId, instance.Id)
+                .SetProperty(t => t.StartedAt, startedAt), stoppingToken);
         if (claimed != 1) return;
         var turn = await db.ChatTurns.AsNoTracking().FirstAsync(t => t.Id == turnId, stoppingToken);
         await TurnDelivery.PushAsync(hub, turn.UserId, ChatHub.ChatTurn, ChatTurnEndpoints.Describe(turn, null), logger);
@@ -436,7 +391,7 @@ public sealed class ChatTurnWorker(
             await delivery.StoreAsync();
             var finishedAt = DateTime.UtcNow;
             var last = delivery.LastSequence;
-            await db.ChatTurns.Where(t => t.Id == turn.Id)
+            await db.ChatTurns.Where(t => t.Id == turn.Id && t.State == TurnStates.Running)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(t => t.State, state)
                     .SetProperty(t => t.Error, error)
@@ -543,7 +498,8 @@ public static class ChatTurnEndpoints
     }
 
     private static async Task<IResult> Cancel(
-        string id, HttpContext http, CerberusDbContext db, TurnRegistry registry, IHubContext<ChatHub> hub, ILoggerFactory loggers, CancellationToken ct)
+        string id, HttpContext http, CerberusDbContext db, TurnRegistry registry, IHubContext<ChatHub> hub, ILoggerFactory loggers,
+        Cluster.ISignals signals, CancellationToken ct)
     {
         var userId = UserId(http);
         var turn = await db.ChatTurns.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId, ct);
@@ -564,6 +520,11 @@ public static class ChatTurnEndpoints
         }
         var stopping = registry.TryStop(id);
         var current = await db.ChatTurns.AsNoTracking().FirstAsync(t => t.Id == id, ct);
+        // Not being answered here, but somewhere: the instance that has it is told.
+        if (!stopping && signals.Distributed && current.State == TurnStates.Running)
+        {
+            stopping = await signals.SendAsync(Cluster.Topics.StopTurn, id);
+        }
         return Results.Json(Describe(current, null), statusCode: stopping ? 202 : 200);
     }
 

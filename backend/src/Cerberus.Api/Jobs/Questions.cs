@@ -190,7 +190,7 @@ public static class QuestionEndpoints
 
     private static async Task<IResult> Answer(
         string id, AnswerRequest body, HttpContext http, CerberusDbContext db, OperatorDesk desk,
-        RunStream stream, AuditLog audit, CancellationToken ct)
+        RunStream stream, AuditLog audit, Cluster.ISignals signals, CancellationToken ct)
     {
         var userId = UserId(http);
         var question = await db.OperatorQuestions.AsNoTracking().FirstOrDefaultAsync(q => q.Id == id && q.UserId == userId, ct);
@@ -222,7 +222,12 @@ public static class QuestionEndpoints
         await audit.AppendAsync(userId, "question.answer", AuditOutcome.Ok,
             $"Answered \"{question.Text}\": {summary}", question.EngagementId, ct: ct);
         await stream.EmitAsync(current.JobId, current.UserId, RunEventTypes.QuestionResolved, OperatorDesk.Describe(current));
-        desk.Deliver(id, answer);   // wakes the waiting job
+        // Wakes the waiting job — here, or in whichever instance of the service it is waiting.
+        if (!desk.Deliver(id, answer) && signals.Distributed)
+        {
+            await signals.SendAsync(Cluster.Topics.Answer, JsonSerializer.Serialize(
+                new Cluster.SignalRouter.AnswerSignal(id, [.. answer.Selected], answer.Text), Cluster.SignalRouter.Json));
+        }
 
         return Results.Json(OperatorDesk.Describe(current), OperatorDesk.JsonOptions);
     }

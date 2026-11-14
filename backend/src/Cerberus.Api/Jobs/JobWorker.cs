@@ -20,7 +20,7 @@ public sealed record AssessJobParameters(string CatalogId, string? ScanId, bool 
 public sealed class JobWorker(
     IMessageBus bus, IServiceScopeFactory scopes, JobCancellationRegistry registry,
     JobOptions options, JobEvents events, RunStream stream, OperatorDesk desk, ILogger<JobWorker> logger,
-    Cerberus.Api.Health.WorkerHealth health) : BackgroundService
+    Cerberus.Api.Health.WorkerHealth health, Cluster.InstanceIdentity instance, Cluster.OrphanSweeper orphans) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -44,28 +44,16 @@ public sealed class JobWorker(
     }
 
     /// <summary>
-    /// After a restart the in-memory queue is gone: jobs that were running
-    /// cannot be resumed and are failed; jobs still queued are re-published.
+    /// At start: jobs that were running under an instance that is gone cannot be resumed and are failed —
+    /// those a living instance is running are left alone (see <see cref="Cluster.OrphanSweeper"/>). Jobs still
+    /// queued are published again.
     /// </summary>
     private async Task RecoverAsync(CancellationToken ct)
     {
+        await orphans.BeatAsync(ct);
+        var (interrupted, _) = await orphans.SweepAsync(ct);
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
-
-        var now = DateTime.UtcNow;
-        var interrupted = await db.Jobs
-            .Where(j => j.State == nameof(JobState.Running) || j.State == nameof(JobState.AwaitingInput))
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(j => j.State, nameof(JobState.Failed))
-                .SetProperty(j => j.Error, "Interrupted by a server restart.")
-                .SetProperty(j => j.FinishedAt, now), ct);
-
-        // Questions of jobs that died with the old process can no longer be answered.
-        await db.OperatorQuestions
-            .Where(q => q.Status == QuestionStatus.Pending)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(q => q.Status, QuestionStatus.Cancelled)
-                .SetProperty(q => q.ResolvedAt, now), ct);
 
         // Published again whatever the queue: a durable queue may still hold them, and a second message
         // for a job is harmless — a job that is no longer queued is not started.
@@ -167,6 +155,7 @@ public sealed class JobWorker(
             .Where(j => j.Id == jobId && j.State == nameof(JobState.Queued))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.State, nameof(JobState.Running))
+                .SetProperty(j => j.OwnerId, instance.Id)
                 .SetProperty(j => j.StartedAt, startedAt), stoppingToken);
         if (claimed != 1) return;
         await events.PublishAsync(jobId);

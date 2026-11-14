@@ -15,7 +15,7 @@ public sealed record JobOptions(
 /// The operator's controls over jobs: cancel one, or stop everything an
 /// engagement has queued or running (the kill switch).
 /// </summary>
-public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry registry, AuditLog audit, JobEvents events)
+public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry registry, AuditLog audit, JobEvents events, Cluster.ISignals signals)
 {
     public enum CancelResult { Cancelled, StopRequested, AlreadyFinished }
 
@@ -41,8 +41,9 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
             return CancelResult.Cancelled;
         }
 
-        // A running job is signalled; the worker records the final state.
-        if (registry.Cancel(job.Id))
+        // A running job is signalled; the worker records the final state. It may be running in another
+        // instance of the service: then that one is told.
+        if (registry.Cancel(job.Id) || await ElsewhereAsync(job.Id, ct))
         {
             await audit.AppendAsync(job.UserId, "job.cancel", AuditOutcome.Ok,
                 $"Stop requested for running job {job.Id}.", job.EngagementId, job.TargetPath, ct: ct);
@@ -72,7 +73,11 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
                         (j.State == nameof(JobState.Running) || j.State == nameof(JobState.AwaitingInput)))
             .Select(j => j.Id)
             .ToListAsync(ct);
-        var running = runningIds.Count(registry.Cancel);
+        var running = 0;
+        foreach (var id in runningIds)
+        {
+            if (registry.Cancel(id) || await ElsewhereAsync(id, ct)) running++;
+        }
 
         if (queued + running > 0)
         {
@@ -83,6 +88,15 @@ public sealed class JobControl(CerberusDbContext db, JobCancellationRegistry reg
         await WithdrawApprovalsAsync(queuedIds, now, ct);
         foreach (var id in queuedIds) await events.PublishAsync(id);
         return new CancelSummary(queued, running);
+    }
+
+    /// <summary>Tells the other instances to stop a job that is still marked as running but is not running here.</summary>
+    private async Task<bool> ElsewhereAsync(string jobId, CancellationToken ct)
+    {
+        if (!signals.Distributed) return false;
+        var stillRunning = await db.Jobs.AsNoTracking().AnyAsync(j => j.Id == jobId &&
+            (j.State == nameof(JobState.Running) || j.State == nameof(JobState.AwaitingInput)), ct);
+        return stillRunning && await signals.SendAsync(Cluster.Topics.CancelJob, jobId);
     }
 
     /// <summary>Pending approval requests of cancelled jobs are closed, so nobody is asked about work that is gone.</summary>
