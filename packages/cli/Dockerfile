@@ -6,9 +6,9 @@
 # It is interactive: run it with a terminal attached, e.g.
 #   docker compose run --rm cli
 #
-# NOTE: written without being built or run (see PLAN.md §15).
+# First built and run on 2026-11-14 (PLAN.md §15). The base image is an exact version.
 
-FROM oven/bun:1 AS runtime
+FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
 # Install the workspace's dependencies from the lockfile. Install scripts are

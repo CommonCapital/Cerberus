@@ -1,0 +1,25 @@
+# A search service of your own for the agents' research (SearXNG): what agents search for stays between
+# this machine and the search engines SearXNG asks, with no account and no history.
+#
+#   docker compose -f docker-compose.yml -f compose.web.yml up -d
+#
+# Needs SEARXNG_SECRET in .env. This file points the API at the service; internet access for agents
+# is still off until CERBERUS_WEB=on. SearXNG's JSON output must be enabled in its settings
+# (search.formats: [html, json]). Not published to the host: only the API talks to it.
+
+services:
+  api:
+    environment:
+      CERBERUS_SEARXNG_URL: http://searxng:8080
+
+  searxng:
+    # A released build, not "latest". Not started when this was written: check it answers before relying on it.
+    image: searxng/searxng:2026.11.13-219b63b20
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env to use compose.web.yml}
+    volumes:
+      - searxng-config:/etc/searxng
+
+volumes:
+  searxng-config:

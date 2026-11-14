@@ -1,0 +1,20 @@
+# Local models for Cerberus (Ollama). Images and models are several GB and inference needs a lot of memory.
+#
+#   docker compose -f docker-compose.yml -f compose.models.yml up -d
+#   docker compose -f docker-compose.yml -f compose.models.yml exec ollama ollama pull llama3.1
+#   docker compose -f docker-compose.yml -f compose.models.yml exec ollama ollama pull nomic-embed-text   # semantic code search
+#
+# The API already points at http://ollama:11434/v1 by default (OLLAMA_BASE_URL in docker-compose.yml).
+
+services:
+  ollama:
+    # A released version, not "latest": the same file gives the same service next month.
+    image: ollama/ollama:0.40.16
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:

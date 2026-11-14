@@ -1,0 +1,46 @@
+# A message broker and a cache for Cerberus (PLAN.md §22).
+#
+#   docker compose -f docker-compose.yml -f compose.infra.yml up -d
+#
+# Needs RABBITMQ_PASSWORD in .env: there is no default password. With this file the API sends
+# its work over RabbitMQ; without it the queue lives inside the API process.
+
+services:
+  api:
+    environment:
+      CERBERUS_RABBITMQ_URL: amqp://${RABBITMQ_USER:-cerberus}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env to use compose.infra.yml}@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    restart: unless-stopped
+    ports:
+      # Published on this machine only. Change the left side if a port is already taken.
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"   # management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cerberus}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env to use compose.infra.yml}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 8s
+      retries: 10
+      start_period: 20s
+
+  # Cache for IDistributedCache, when something needs one. Unused today (PLAN.md §24.4, A1).
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  rabbitmq-data:
+  redis-data:
