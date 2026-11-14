@@ -35,6 +35,14 @@ public static class EvidenceAgent
 {
     public const int DefaultControls = 8;
     public const int MaxControls = 20;
+    /// <summary>
+    /// The agent, described (see <see cref="AgentHarness"/>). It keeps no run of its own: what it produces are
+    /// suggestions stored with the assessment.
+    /// </summary>
+    public static AgentSpec Spec { get; } = new(
+        "evidence", StepId: "evidence", System, MaxSteps, IfCutShort: "some controls may have no suggestion",
+        AgentOffers.Code | AgentOffers.CodeSearch | AgentOffers.Notes | AgentOffers.Skills, Stored: false);
+
     public const int DefaultSteps = 30;
     public const int MaxSteps = 50;
     public const int MaxEvidence = 8;
@@ -150,9 +158,7 @@ public static class EvidenceAgent
 /// answer. Suggestions are stored beside the assessment and never change its
 /// verdicts or score; only the operator's acceptance does.
 /// </summary>
-public sealed class EvidenceAgentRunner(
-    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions,
-    SkillLibrary skills, CatalogLoader catalogs, OperatorInbox inbox, Search.CodeSearch search)
+public sealed class EvidenceAgentRunner(AgentHarness harness, CerberusDbContext db, CatalogLoader catalogs)
 {
     public async Task<int> RunAsync(Job job, EvidenceJobParameters parameters, IRunReporter reporter, CancellationToken ct)
     {
@@ -160,74 +166,72 @@ public sealed class EvidenceAgentRunner(
             ?? throw new InvalidOperationException($"Assessment {parameters.AssessmentId} no longer exists.");
         var catalog = catalogs.Get(assessment.CatalogId)
             ?? throw new InvalidOperationException($"Catalog '{assessment.CatalogId}' is no longer installed.");
-        var provider = ModelRegistry.Find(parameters.Model)?.Provider
-            ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
+        if (ModelRegistry.Find(parameters.Model) is null) throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
 
         var selected = EvidenceAgent.Select(EvidenceAgent.ReadMatrix(assessment), EvidenceAgent.AnsweredControls(assessment), parameters);
         var title = $"Look for evidence for {selected.Count} control(s) with {parameters.Model}";
-        await reporter.StepAsync("evidence", title, StepStatus.Running);
         if (selected.Count == 0)
         {
+            await reporter.StepAsync(EvidenceAgent.Spec.StepId, title, StepStatus.Running);
             await reporter.EventAsync(RunEventTypes.Note, new { message = "No control is waiting for evidence: all are judged or answered." });
-            await reporter.StepAsync("evidence", title, StepStatus.Completed);
+            await reporter.StepAsync(EvidenceAgent.Spec.StepId, title, StepStatus.Completed);
             return 0;
         }
 
         var controls = catalog.Sections.SelectMany(s => s.Controls)
             .Where(c => selected.Any(s => string.Equals(s.ControlId, c.Id, StringComparison.OrdinalIgnoreCase))).ToList();
         var scale = OperatorResponses.ScaleOf(catalog);
-        var local = FindingTriager.IsLocal(provider);
-        var workspace = new CodeWorkspace(scanOptions.ScanRoot, assessment.TargetPath, redact: !local);
-        var credentials = await keys.ResolveCredentialsAsync(job.UserId, ct);
-        var maxSteps = Math.Clamp(parameters.MaxSteps, 1, EvidenceAgent.MaxSteps);
 
-        var suggest = new SuggestVerdictTool(workspace, controls.Select(c => c.Id).ToList(), scale, parameters.Model, job.Id,
-            async suggestion =>
-            {
-                // Saved as each arrives, so a stopped run keeps what it had.
-                var all = EvidenceAgent.ReadSuggestions(assessment);
-                all[suggestion.ControlId] = suggestion;
-                EvidenceAgent.WriteSuggestions(assessment, all.Values);
-                await db.SaveChangesAsync(CancellationToken.None);
-                await reporter.EventAsync(RunEventTypes.Suggestion, suggestion);
-            });
-        var semantic = await search.ToolForAsync(job.UserId, assessment.TargetPath, ct);
-        IReadOnlyList<IAgentTool> tools =
-        [
-            .. CodeTools.For(workspace),
-            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
-            suggest,
-            new SastAgentRunner.RememberTool(db, audit, job),
-            new SastAgentRunner.SkillTool(ChatTools.SearchSkills, skills),
-            new SastAgentRunner.SkillTool(ChatTools.LoadSkill, skills),
-        ];
+        Gathering? gathering = null;
+        await harness.RunAsync(
+            EvidenceAgent.Spec,
+            new AgentRequest(job, parameters.Model, parameters.MaxSteps, assessment.TargetPath),
+            context => gathering = new Gathering(context, title, assessment, catalog.Name, controls, scale, db), reporter, ct);
+        return gathering!.Suggested;
+    }
 
-        AgentOutcome? outcome = null;
-        var messages = inbox.Open(job.Id);
-        try
+    /// <summary>One look for evidence: the controls asked about, the tool suggestions come in through, and where they are kept.</summary>
+    private sealed class Gathering : IAgentWork
+    {
+        private readonly AgentContext _context;
+        private readonly ComplianceAssessment _assessment;
+        private readonly string _catalog;
+        private readonly IReadOnlyList<Control> _controls;
+        private readonly IReadOnlyList<string> _scale;
+        private readonly SuggestVerdictTool _suggest;
+
+        public Gathering(
+            AgentContext context, string title, ComplianceAssessment assessment, string catalog, IReadOnlyList<Control> controls,
+            IReadOnlyList<string> scale, CerberusDbContext db)
         {
-            var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, assessment.TargetPath, ct);
-            outcome = await loop.RunAsync(
-                parameters.Model, credentials, EvidenceAgent.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                EvidenceAgent.Task(assessment.TargetPath, catalog.Name, controls, scale, maxSteps) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint),
-                tools, maxSteps, reporter, ct, messages.Take);
-            if (outcome.StopNote(maxSteps, "some controls may have no suggestion") is { } stopped)
-            {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
-            }
-            await reporter.ProgressAsync(suggest.Count, controls.Count, $"{suggest.Count} of {controls.Count} control(s) have a suggestion.");
-            await reporter.StepAsync("evidence", title, StepStatus.Completed);
+            (_context, Title, _assessment, _catalog, _controls, _scale) = (context, title, assessment, catalog, controls, scale);
+            _suggest = new SuggestVerdictTool(context.Workspace, controls.Select(c => c.Id).ToList(), scale, context.Model, context.Job.Id,
+                async suggestion =>
+                {
+                    // Saved as each arrives, so a stopped run keeps what it had.
+                    var all = EvidenceAgent.ReadSuggestions(assessment);
+                    all[suggestion.ControlId] = suggestion;
+                    EvidenceAgent.WriteSuggestions(assessment, all.Values);
+                    await db.SaveChangesAsync(CancellationToken.None);
+                    await context.Reporter.EventAsync(RunEventTypes.Suggestion, suggestion);
+                });
+            Tools = [_suggest];
         }
-        finally
-        {
-            messages.Dispose();
-            var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
-            await audit.AppendAsync(job.UserId, "evidence.run", outcome is { StoppedEarly: false } ? AuditOutcome.Ok : AuditOutcome.Error,
-                $"Evidence agent on assessment {assessment.Id} with {parameters.Model}: {suggest.Count} suggestion(s) for {controls.Count} control(s), " +
-                $"{outcome?.ToolCalls ?? 0} tool call(s); the code it read was sent to {where}. Suggestions are advisory.",
-                job.EngagementId, assessment.TargetPath, CapabilityTier.T0, CancellationToken.None);
-        }
-        return suggest.Count;
+
+        public int Suggested => _suggest.Count;
+
+        public string Title { get; }
+
+        public string Assignment => EvidenceAgent.Task(_context.TargetPath, _catalog, _controls, _scale, _context.MaxSteps);
+
+        public IReadOnlyList<IAgentTool> Tools { get; }
+
+        public Task EndedAsync(AgentOutcome outcome) =>
+            _context.Reporter.ProgressAsync(_suggest.Count, _controls.Count, $"{_suggest.Count} of {_controls.Count} control(s) have a suggestion.");
+
+        public AuditLine Audit(AgentRun? run, AgentOutcome? outcome) => new("evidence.run", outcome is { StoppedEarly: false },
+            $"Evidence agent on assessment {_assessment.Id} with {_context.Model}: {_suggest.Count} suggestion(s) for {_controls.Count} control(s), " +
+            $"{outcome?.ToolCalls ?? 0} tool call(s); the code it read was sent to {_context.SentTo}. Suggestions are advisory.");
     }
 
     /// <summary>How the agent hands over a suggested answer. Checked against the controls it was given and the code.</summary>

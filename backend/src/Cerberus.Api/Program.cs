@@ -175,6 +175,8 @@ builder.Services.AddScoped<TriageRunner>();
 builder.Services.AddScoped<ReviewRunner>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.AgentLoop>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
+// One runner for every agent (PLAN.md §22 item 3); the agents below are descriptions it runs.
+builder.Services.AddScoped<Cerberus.Api.Agents.AgentHarness>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.EvidenceAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.ThreatModelAgentRunner>();
