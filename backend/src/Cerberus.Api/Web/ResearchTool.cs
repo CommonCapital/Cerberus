@@ -107,7 +107,7 @@ public sealed class WebSearchTool(IWebSearch search, EgressGuard guard) : IAgent
 /// <summary>The one internet-facing tool an agent that holds the code gets.</summary>
 public sealed class ResearchTool(
     AgentLoop loop, string model, ModelCredentials credentials, IReadOnlyList<IAgentTool> webTools, EgressGuard guard, IRunReporter reporter,
-    bool internet = true) : IAgentTool
+    bool internet = true, IToolGate? gate = null) : IAgentTool
 {
     private int _asked;
 
@@ -144,7 +144,9 @@ public sealed class ResearchTool(
         // The clean room: a fresh loop that gets the question and nothing else — no code, no memory, no history.
         var outcome = await loop.RunAsync(
             model, credentials, Research.SystemFor(internet), question, webTools, Research.MaxSteps,
-            new SubReporter(reporter, $"research-{_asked}"), ct);
+            // The researcher cannot ask the operator anything itself; a call of its that needs consent is put
+            // to them by the run (the gate asks through the run's own reporter).
+            new SubReporter(reporter, $"research-{_asked}"), ct, gate: gate);
         var answer = outcome.FinalText.Length > 0 ? outcome.FinalText : "The researcher found nothing to report.";
         return Untrusted.Wrap($"research {(internet ? "on the public internet" : "with the configured servers")} ({outcome.ToolCalls} lookup(s){(outcome.StoppedEarly ? ", cut short" : "")})", answer);
     }
@@ -152,7 +154,8 @@ public sealed class ResearchTool(
 
 /// <summary>Builds the research tool for one job — or nothing, where the installation has the internet switched off.</summary>
 public sealed class ResearchTools(
-    WebOptions options, IWebFetcher fetcher, IWebSearch search, AgentLoop loop, IAgentBrowser browser, BrowserOptions browserOptions, IMcpServers servers)
+    WebOptions options, IWebFetcher fetcher, IWebSearch search, AgentLoop loop, IAgentBrowser browser, BrowserOptions browserOptions, IMcpServers servers,
+    Cerberus.Api.Audit.AuditLog audit)
 {
     public bool Enabled => options.Enabled || servers.Names.Count > 0;
 
@@ -211,6 +214,6 @@ public sealed class ResearchTools(
             }
         }
         if (web.Count == 0) return null;
-        return new ResearchTool(loop, model, credentials, web, guard, reporter, internet: options.Enabled);
+        return new ResearchTool(loop, model, credentials, web, guard, reporter, internet: options.Enabled, gate: new OperatorGate(job, db, audit, reporter));
     }
 }

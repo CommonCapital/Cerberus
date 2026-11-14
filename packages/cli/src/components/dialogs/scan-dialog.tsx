@@ -53,7 +53,8 @@ const TargetDialog = ({ type, model }: { type: "scan" | "sast" | "threat-model" 
     const path = (inputRef.current?.value ?? "").trim() || ".";
     setStarting(true);
     cerberus
-      .submitJob(type === "sast" || type === "threat-model" || type === "investigate" ? { type, path, model: model ?? "" } : { type, path })
+      // Started from this screen, somebody is here: the agent may ask them a question while it works.
+      .submitJob(type === "sast" || type === "threat-model" || type === "investigate" ? { type, path, model: model ?? "", questions: true } : { type, path })
       .then((job) => {
         close();
         navigate(`/runs/${job.id}`);

@@ -30,6 +30,9 @@ public static class ActionKinds
     /// <summary>Letting an agent's researcher call the tools of the MCP servers the installation has configured.</summary>
     public const string UseMcpServers = "use-mcp-servers";
 
+    /// <summary>A single tool call that may change something in a system outside this one. Asked about per call, during the run.</summary>
+    public const string ChangeOutsideSystems = "change-outside-systems";
+
     public static readonly IReadOnlyList<(string Kind, string Description)> All =
     [
         (ReadFiles, "Read files of the project"),
@@ -40,6 +43,7 @@ public static class ActionKinds
         (SendCodeToCloudModel, "Send source code to a cloud model provider"),
         (UseTheInternet, "Let an agent ask questions on the public internet"),
         (UseMcpServers, "Let an agent's researcher use the configured outside servers (MCP)"),
+        (ChangeOutsideSystems, "Let an agent's tool change something in an outside system, without asking each time"),
     ];
 
     public static bool IsValid(string? kind) => All.Any(k => k.Kind == kind);

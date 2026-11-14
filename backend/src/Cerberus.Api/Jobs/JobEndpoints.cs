@@ -17,7 +17,9 @@ public sealed record SubmitJobRequest(
     // sast, threat-model: let the agent ask questions on the public internet (needs the server's web access switched on).
     bool? Research = null,
     // investigate: how many specialists the lead may dispatch, and whether its plan runs without being shown first.
-    int? MaxSpecialists = null, bool? ApprovePlan = null);
+    int? MaxSpecialists = null, bool? ApprovePlan = null,
+    // sast, threat-model, investigate: a person is there, so the agent may ask them a question while it works.
+    bool? Questions = null);
 
 public sealed record JobMessageRequest(string? Text);
 
@@ -113,13 +115,20 @@ public static class JobEndpoints
         {
             return BadRequest("Research on the internet is switched off on this server (CERBERUS_WEB=on turns it on).");
         }
+        // Questions from the agent: only for the agents that can ask, and only when the caller says somebody is there to answer.
+        var questions = body.Questions == true;
+        if (questions && type is not (JobTypes.Sast or JobTypes.ThreatModel or JobTypes.Investigate))
+        {
+            return BadRequest("questions applies to sast, threat-model and investigate jobs.");
+        }
         // The servers the installation has configured come with research: the same researcher uses them, under a consent of their own.
         ApprovalNeed? mcpNeed = research && mcp.Names.Count > 0
             ? new ApprovalNeed(
                 ActionKinds.UseMcpServers,
                 $"Let the agent's researcher use the outside servers configured here ({string.Join(", ", mcp.Names)}) while it works on \"{targetPath}\"",
                 "The researcher is a separate agent that sees only the agent's question, never the code. It may call the tools of these servers that are " +
-                "allowed here — the ones the administrator named, or the ones a server marks read-only. Everything it sends is checked like a research " +
+                "allowed here — the ones the administrator named, or the ones a server marks read-only; a tool that may change something on a server " +
+                "asks you again before each call. Everything it sends is checked like a research " +
                 "question before it leaves, and every call is shown on the run.")
             : null;
         ApprovalNeed? researchNeed = research && web.Enabled
@@ -203,7 +212,7 @@ public static class JobEndpoints
                 return BadRequest($"instructions must be at most {Agents.SastAgent.MaxInstructions} characters");
             }
             var sast = new Agents.SastJobParameters(body.Model, body.MaxSteps ?? Agents.SastAgent.DefaultSteps,
-                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research);
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research, questions);
             parameters = JsonSerializer.Serialize(sast, JobTypes.Json);
 
             var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
@@ -237,7 +246,7 @@ public static class JobEndpoints
             }
             var investigate = new Agents.InvestigateJobParameters(
                 body.Model, body.MaxSteps ?? Agents.SastAgent.DefaultSteps, body.MaxSpecialists ?? Agents.Team.DefaultSpecialists,
-                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), body.ApprovePlan == true);
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), body.ApprovePlan == true, questions);
             parameters = JsonSerializer.Serialize(investigate, JobTypes.Json);
 
             var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;
@@ -274,7 +283,7 @@ public static class JobEndpoints
                 return BadRequest($"instructions must be at most {Agents.ThreatModelAgent.MaxInstructions} characters");
             }
             var threatModel = new Agents.ThreatModelJobParameters(body.Model, body.MaxSteps ?? Agents.ThreatModelAgent.DefaultSteps,
-                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research);
+                string.IsNullOrWhiteSpace(body.Instructions) ? null : body.Instructions.Trim(), research, questions);
             parameters = JsonSerializer.Serialize(threatModel, JobTypes.Json);
 
             var provider = Cerberus.Core.Models.ModelRegistry.Find(body.Model)!.Provider;

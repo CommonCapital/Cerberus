@@ -17,6 +17,18 @@ public interface IAgentTool
     /// (bad input, no such file); it is reported to the model as a failed call.
     /// </summary>
     Task<string> RunAsync(JsonElement input, CancellationToken ct);
+
+    /// <summary>What a call does besides reading. Declared here, in code — never taken from a model or from an outside server.</summary>
+    ToolEffects Effects => ToolEffects.None;
+
+    /// <summary>
+    /// The kind of action (<c>ActionKinds</c>) the operator is asked about before each call — or null, for a
+    /// tool whose calls run without asking: it only reads, or the run's own approval already covers it.
+    /// </summary>
+    string? AskFirst => null;
+
+    /// <summary>For the operator, when asked: what this call would do, to complete "The agent wants to …".</summary>
+    string Describe(JsonElement input) => $"use the tool \"{Definition.Name}\"";
 }
 
 public sealed class AgentToolException(string message) : Exception(message);
@@ -51,7 +63,7 @@ public sealed class AgentLoop(IModelProviderResolver providers)
     public async Task<AgentOutcome> RunAsync(
         string model, ModelCredentials credentials, string system, string task,
         IReadOnlyList<IAgentTool> tools, int maxSteps, IRunReporter reporter, CancellationToken ct,
-        Func<IReadOnlyList<string>>? operatorMessages = null, LoopGuard? guard = null)
+        Func<IReadOnlyList<string>>? operatorMessages = null, LoopGuard? guard = null, IToolGate? gate = null)
     {
         guard ??= new LoopGuard(LoopGuard.BudgetFor(maxSteps));
         var provider = providers.Resolve(model);
@@ -128,7 +140,7 @@ public sealed class AgentLoop(IModelProviderResolver providers)
             {
                 ct.ThrowIfCancellationRequested();
                 toolCalls++;
-                var (input, output, failed) = await RunToolAsync(tools, call, guard, reporter, ct);
+                var (input, output, failed) = await RunToolAsync(tools, call, guard, gate, reporter, ct);
                 useful |= !failed;
                 parts.Add(new ToolCallPart(call.Id, call.Name, input));
                 results.Add(new ToolResultPart(call.Id, call.Name, output, failed));
@@ -175,7 +187,7 @@ public sealed class AgentLoop(IModelProviderResolver providers)
         string.Join("\n\n", messages);
 
     private static async Task<(JsonElement Input, string Output, bool Failed)> RunToolAsync(
-        IReadOnlyList<IAgentTool> tools, ToolCallComplete call, LoopGuard guard, IRunReporter reporter, CancellationToken ct)
+        IReadOnlyList<IAgentTool> tools, ToolCallComplete call, LoopGuard guard, IToolGate? gate, IRunReporter reporter, CancellationToken ct)
     {
         JsonElement input;
         string? problem = null;
@@ -204,6 +216,17 @@ public sealed class AgentLoop(IModelProviderResolver providers)
             name = call.Name,
             input = JsonSerializer.Deserialize<JsonElement>(SecretMasker.MaskText(input.GetRawText())),
         });
+
+        // The interrupt: a consequential call is put to the operator first and runs only on their yes. It comes
+        // after the call has been shown on the stream, so the question stands next to what it is about. A run
+        // that has nobody to ask does not make such a call at all.
+        if (problem is null && tool!.AskFirst is not null)
+        {
+            var decision = gate is null
+                ? new GateDecision(false, "This run has nobody to ask, and this call needs the operator's consent: it was not made. Go on without it.")
+                : await gate.DecideAsync(tool, input, ct);
+            if (!decision.Allowed) problem = decision.Reason ?? "The operator did not allow this call.";
+        }
 
         string output;
         var failed = problem is not null;
