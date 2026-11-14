@@ -28,7 +28,7 @@ public class AuthSession
 }
 
 /// <summary>A user's API key for a cloud model provider, encrypted at rest.</summary>
-public class UserApiKey
+public class UserApiKey : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -39,7 +39,7 @@ public class UserApiKey
 }
 
 /// <summary>A persisted scan run and its findings (stored as a JSON string).</summary>
-public class Scan
+public class Scan : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -61,7 +61,7 @@ public class Scan
 }
 
 /// <summary>A persisted Phase-2 compliance assessment (control matrix stored as JSON).</summary>
-public class ComplianceAssessment
+public class ComplianceAssessment : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -96,7 +96,7 @@ public class ComplianceAssessment
 /// An authorized piece of work (PLAN.md §3): who may test which targets, up to
 /// which capability tier, and when. Enum-like fields are stored as their names.
 /// </summary>
-public class Engagement
+public class Engagement : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -148,7 +148,7 @@ public class EngagementTarget
 /// (enforced by database triggers) and are hash-chained per user. Deliberately
 /// has no foreign keys, so removing a user or engagement cannot remove history.
 /// </summary>
-public class AuditEvent
+public class AuditEvent : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -172,7 +172,7 @@ public class AuditEvent
 /// A unit of background work (PLAN.md §12). State moves forward only:
 /// Queued → Running → Succeeded | Failed | Cancelled | TimedOut.
 /// </summary>
-public class Job
+public class Job : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -206,7 +206,7 @@ public class Job
 /// loop, PLAN.md §6.5). It names one specific action; approving it approves
 /// that job and nothing else.
 /// </summary>
-public class ApprovalRequest
+public class ApprovalRequest : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -243,7 +243,7 @@ public class ApprovalRequest
 /// One request to the chat agent, accepted and queued (PLAN.md §22): whose it is, which conversation, what was
 /// asked, and how far it got. The reply is its events; once the reply is whole it is also in the session.
 /// </summary>
-public class ChatTurn
+public class ChatTurn : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -270,7 +270,7 @@ public class ChatTurn
 }
 
 /// <summary>One piece of a turn's reply, in order. Kept for a while so a client can read what it missed.</summary>
-public class ChatTurnEvent
+public class ChatTurnEvent : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string TurnId { get; set; } = string.Empty;
@@ -284,7 +284,7 @@ public class ChatTurnEvent
     public DateTime CreatedAt { get; set; }
 }
 
-public class JobEvent
+public class JobEvent : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string JobId { get; set; } = string.Empty;
@@ -304,7 +304,7 @@ public class JobEvent
 /// §6.5). The job waits in AwaitingInput until it is answered, expires, or the
 /// job is cancelled.
 /// </summary>
-public class OperatorQuestion
+public class OperatorQuestion : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -331,7 +331,7 @@ public class OperatorQuestion
 /// A permission policy (PLAN.md §6.5): the user's default (EngagementId null)
 /// or one engagement's override.
 /// </summary>
-public class PermissionSetting
+public class PermissionSetting : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -352,7 +352,7 @@ public class PermissionSetting
 /// The outcome of a review: the scan and assessments it produced, and its
 /// report (Markdown).
 /// </summary>
-public class Review
+public class Review : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -379,7 +379,7 @@ public class Review
 /// the findings it reported (JSON). Kept apart from scans — a model's
 /// findings are candidates and never feed a compliance verdict.
 /// </summary>
-public class AgentRun
+public class AgentRun : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -409,7 +409,7 @@ public class AgentRun
 /// Something remembered across runs: a standing instruction from the
 /// operator, or a note (by the operator, or by an agent during a run).
 /// </summary>
-public class MemoryNote
+public class MemoryNote : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -437,7 +437,7 @@ public class MemoryNote
 /// the reason. Keyed by the finding's fingerprint, so it applies to that
 /// finding in every scan.
 /// </summary>
-public class FindingDecision
+public class FindingDecision : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -459,7 +459,7 @@ public class FindingDecision
 /// vector from an embedding model. Only locations and vectors are stored —
 /// the code itself stays in its files.
 /// </summary>
-public class CodeIndex
+public class CodeIndex : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -493,7 +493,7 @@ public class CodeChunk
 }
 
 /// <summary>A chat/work session. Messages are stored as a JSON string.</summary>
-public class Session
+public class Session : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -524,7 +524,7 @@ public class Session
 /// schedule submits the request as its owner — nothing about consent or scope
 /// is stored here; the same checks apply as when the owner asks by hand.
 /// </summary>
-public class Schedule
+public class Schedule : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string UserId { get; set; } = string.Empty;
@@ -550,7 +550,7 @@ public class Schedule
 }
 
 /// <summary>Something a run produced besides its findings — a screenshot its researcher took of a page it relied on.</summary>
-public class RunArtifact
+public class RunArtifact : IUserOwned
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
     public string JobId { get; set; } = string.Empty;

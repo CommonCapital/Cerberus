@@ -25,6 +25,8 @@ public sealed class RequireAuthFilter : IEndpointFilter
         }
 
         http.Items[UserIdItem] = userId;
+        // From here on the request's database context sees this user's rows and no one else's.
+        http.RequestServices.GetRequiredService<Cerberus.Data.DataOwner>().RestrictTo(userId);
         return await next(context);
     }
 
