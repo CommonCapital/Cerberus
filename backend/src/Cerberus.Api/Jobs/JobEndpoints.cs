@@ -44,7 +44,7 @@ public static class JobEndpoints
     /// <summary>Says something to the agent of a running job; it reads it before its next step.</summary>
     private static async Task<IResult> Message(
         string id, JobMessageRequest body, HttpContext http, CerberusDbContext db, Agents.OperatorInbox inbox,
-        RunStream stream, AuditLog audit, CancellationToken ct)
+        RunStream stream, AuditLog audit, Cluster.ISignals signals, CancellationToken ct)
     {
         var userId = UserId(http);
         var job = await db.Jobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id && j.UserId == userId, ct);
@@ -59,7 +59,15 @@ public static class JobEndpoints
 
         if (!inbox.TryPost(job.Id, text))
         {
-            return Results.Json(new { error = "This run is not taking messages: only a running agent does." }, statusCode: 409);
+            // No agent of this job is listening here. With several instances it may be running in another:
+            // that one is told. (Whether it still reads the message, the run itself says when it ends.)
+            var elsewhere = signals.Distributed && job.State == nameof(JobState.Running) &&
+                await signals.SendAsync(Cluster.Topics.JobMessage, JsonSerializer.Serialize(
+                    new Cluster.SignalRouter.JobMessageSignal(job.Id, text), Cluster.SignalRouter.Json));
+            if (!elsewhere)
+            {
+                return Results.Json(new { error = "This run is not taking messages: only a running agent does." }, statusCode: 409);
+            }
         }
         await stream.EmitAsync(job.Id, userId, RunEventTypes.OperatorMessage, new { text });
         await audit.AppendAsync(userId, "job.message", AuditOutcome.Ok,

@@ -98,6 +98,8 @@ public static class ServiceConfig
         }
         if (Value("CERBERUS_RABBITMQ_URL") is { } broker && !IsUrl(broker, "amqp", "amqps"))
             errors.Add("CERBERUS_RABBITMQ_URL must be an amqp:// or amqps:// address.");
+        if (Value("CERBERUS_REDIS_URL") is { } shared && !IsUrl(shared, "redis", "rediss"))
+            errors.Add("CERBERUS_REDIS_URL must be a redis:// or rediss:// address.");
 
         if (Value("PORT") is { } port && !(int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p is >= 1 and <= 65535))
             errors.Add("PORT must be a number from 1 to 65535.");

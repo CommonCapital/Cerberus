@@ -180,6 +180,8 @@ When you type in the CLI, your request is not answered on the connection that ca
 
 By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (`compose.infra.yml` starts one and sets this for the API) — run against a real broker on 2026-11-14 (PLAN.md §17). `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
 
+**More than one copy of the server.** Set `CERBERUS_REDIS_URL=redis://host:6379` (or `rediss://` for TLS) on every copy and give them the same database. They then share what has to hold across all of them: a reply written by one reaches a client connected to another; stopping a run or answering its question works whichever copy you reach; a conversation keeps its order and each person their fair share; wrong passwords are counted together. Each copy says it is alive every few seconds, and if one dies the work it was doing is marked as failed by the others within about a minute instead of looking as if it were still running. `GET /health/ready` shows `redis` and how many copies are alive. Without the variable there is one copy and nothing changes. Not shared yet: the request-rate limits, and the queue itself unless RabbitMQ is configured — each copy answers what it accepted.
+
 ### 4. Security runs from the CLI
 
 With the backend and the CLI running, `/login`, and:

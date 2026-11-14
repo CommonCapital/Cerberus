@@ -3,12 +3,28 @@ using System.Collections.Concurrent;
 namespace Cerberus.Api.Auth;
 
 /// <summary>
+/// Counts failed sign-ins per account and locks the account for a while after too many
+/// (see <see cref="LoginThrottle"/> for the rule). Behind an interface so that several instances can count together.
+/// </summary>
+public interface ILoginThrottle
+{
+    /// <summary>How long sign-in for this account is still refused, or null if it may be tried.</summary>
+    TimeSpan? LockedFor(string email);
+
+    /// <summary>Records a failed sign-in. Returns true when this failure locked the account.</summary>
+    bool Failed(string email);
+
+    /// <summary>A successful sign-in clears the count.</summary>
+    void Succeeded(string email);
+}
+
+/// <summary>
 /// Slows down password guessing: after a number of failed sign-ins in a row for
 /// one account, further attempts are refused for a while — also with the right
 /// password, so a guesser learns nothing during the lock. Counted per account
 /// name, in memory; a restart clears it.
 /// </summary>
-public sealed class LoginThrottle(Func<DateTime>? clock = null)
+public sealed class LoginThrottle(Func<DateTime>? clock = null) : ILoginThrottle
 {
     public const int MaxFailures = 5;
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
