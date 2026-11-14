@@ -446,7 +446,7 @@ The researcher can also be given tools of outside servers that speak the Model C
 
 Not supported: the stdio transport, OAuth sign-in to a server, resources and prompts, servers per engagement.
 
-Search goes through a SearXNG instance the installation runs (the `web` profile of the compose file), because what agents search for says a lot about what is being reviewed. It has not been run here; the client is tested against canned answers.
+Search goes through a SearXNG instance the installation runs (`compose.web.yml` beside the compose file), because what agents search for says a lot about what is being reviewed. It has not been run here; the client is tested against canned answers.
 
 ### Models: any model of a supported provider
 

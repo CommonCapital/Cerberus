@@ -3,10 +3,11 @@
 #
 #   docker build -f backend/Dockerfile -t cerberus-api .
 #
-# NOTE: written without being built or run (see PLAN.md §15).
+# First built and run on 2026-11-14 (PLAN.md §15). Base images are exact versions, not "10.0":
+# the same Dockerfile gives the same image next month. Raise them together when updating .NET.
 
 # ---- build ----------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404 AS build
 WORKDIR /src
 
 # Restore first, from the project files only, so this layer is cached until a
@@ -29,7 +30,7 @@ RUN dotnet publish backend/src/Cerberus.Api/Cerberus.Api.csproj \
       --configuration Release --no-restore --output /app/publish
 
 # ---- runtime --------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.15 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
@@ -42,7 +43,7 @@ COPY security-skills/LICENSE ./security-skills/LICENSE
 # and the key ring that encrypts stored API keys. /workspace is the code to scan.
 # Optional: a browser for the researcher (CERBERUS_BROWSER=on). It adds several hundred megabytes, so it is
 # left out unless asked for: docker compose build --build-arg WITH_BROWSER=true api
-# Not built or run when this was written (PLAN.md §15). If Chromium refuses to start as this non-root user
+# The browser variant has not been built yet (PLAN.md §15). If Chromium refuses to start as this non-root user
 # for want of user namespaces, the choice is the host's seccomp profile or CERBERUS_BROWSER_NO_SANDBOX=true.
 ARG WITH_BROWSER=false
 RUN if [ "$WITH_BROWSER" = "true" ]; then \

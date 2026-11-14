@@ -123,7 +123,19 @@ docker compose up -d
 docker compose run --rm cli
 ```
 
-`docker-compose.yml` runs the backend, with the CLI, Ollama, RabbitMQ and Redis as opt-in profiles. **These files were written without starting Docker** — expect small fixes on the first run (PLAN.md §15).
+`docker-compose.yml` runs the backend and, on request, the CLI. It needs no `.env`. The API container runs as a non-root user with a read-only file system and no capabilities; the port is published to this machine only.
+
+Optional parts are files of their own, added with `-f`:
+
+```bash
+docker compose -f docker-compose.yml -f compose.infra.yml up -d
+```
+
+- `compose.infra.yml` — RabbitMQ (the API then sends its work over it) and Redis. Needs `RABBITMQ_PASSWORD` in `.env`: there is no default password.
+- `compose.models.yml` — Ollama, for local models. Several GB.
+- `compose.web.yml` — SearXNG, a search service of your own for the agents' research. Needs `SEARXNG_SECRET`.
+
+First built and run on 2026-11-14: the API, the CLI and the infra stack. The models and web stacks have not been started yet (PLAN.md §15).
 
 ### Choosing a model
 
@@ -166,7 +178,7 @@ Off by default. An agent that has read your code knows things that must not be t
 
 When you type in the CLI, your request is not answered on the connection that carries it. The server accepts it, puts it on a queue under your account, and a worker answers it; the reply comes back piece by piece over a live connection (SignalR) that only ever carries your own conversations. If the connection drops for a moment, the CLI reads what it missed and the reply is whole. A second prompt sent while the first is still being answered waits its turn. Several people can use one server at once without one long task holding up everyone else's question.
 
-By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (the `infra` profile of the compose file has one) — this part is written and waits for its first run against a real broker. `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
+By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (`compose.infra.yml` starts one and sets this for the API) — run against a real broker on 2026-11-14 (PLAN.md §17). `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
 
 **More than one copy of the server.** Set `CERBERUS_REDIS_URL=redis://host:6379` (or `rediss://` for TLS) on every copy and give them the same database. They then share what has to hold across all of them: a reply written by one reaches a client connected to another; stopping a run or answering its question works whichever copy you reach; a conversation keeps its order and each person their fair share; wrong passwords are counted together. Each copy says it is alive every few seconds, and if one dies the work it was doing is marked as failed by the others within about a minute instead of looking as if it were still running. `GET /health/ready` shows `redis` and how many copies are alive. Without the variable there is one copy and nothing changes. Not shared yet: the request-rate limits, and the queue itself unless RabbitMQ is configured — each copy answers what it accepted.
 
