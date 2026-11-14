@@ -212,7 +212,13 @@ public sealed partial class MockProvider : IModelProvider
         const int maxFiles = 5;
         var calls = request.Turns.SelectMany(t => t.Parts.OfType<ToolCallPart>()).ToList();
         var results = request.Turns.SelectMany(t => t.Parts.OfType<ToolResultPart>()).ToList();
-        if (calls.Count == 0) return ("listDirectory", new { path = "." }, null);
+        // Told "ask me first" and able to ask: one question before anything else.
+        if (calls.Count == 0 && request.Tools.Any(t => t.Name == "askOperator") &&
+            ChatEvents.TextOf(request.Turns[0]).Contains("ask me first", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("askOperator", new { question = "Which part of this code matters most to you?", options = new[] { "The loaders", "Everything equally" } }, null);
+        }
+        if (calls.All(c => c.Name != "listDirectory")) return ("listDirectory", new { path = "." }, null);
 
         // The operator spoke while it was working: it stops and says so.
         if (request.Turns[^1] is { Role: "user" } spoken)

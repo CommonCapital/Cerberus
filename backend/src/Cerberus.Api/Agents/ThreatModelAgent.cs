@@ -15,7 +15,9 @@ using Cerberus.Triage;
 namespace Cerberus.Api.Agents;
 
 /// <param name="Research">The agent may ask questions on the public internet through the clean-room researcher.</param>
-public sealed record ThreatModelJobParameters(string Model, int MaxSteps = ThreatModelAgent.DefaultSteps, string? Instructions = null, bool Research = false);
+/// <param name="Questions">A person is there: the agent may ask them a question (<see cref="AskOperatorTool"/>).</param>
+public sealed record ThreatModelJobParameters(
+    string Model, int MaxSteps = ThreatModelAgent.DefaultSteps, string? Instructions = null, bool Research = false, bool Questions = false);
 
 public sealed record CodeReference(string File, int Line);
 
@@ -128,11 +130,14 @@ public sealed class ThreatModelAgentRunner(
         var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
         // Where the operator allowed it, the agent can ask questions on the internet — through the clean-room researcher only.
         var researcher = parameters.Research ? await research.ForAsync(job, parameters.Model, credentials, reporter, db, ct) : null;
+        // Where a person is there and this agent works for them directly, it may stop and ask instead of guessing.
+        var asking = parameters.Questions && brief is null ? new AskOperatorTool(reporter) : null;
         IReadOnlyList<IAgentTool> tools =
         [
             .. CodeTools.For(workspace),
             .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
             .. researcher is null ? Array.Empty<IAgentTool>() : [researcher],
+            .. asking is null ? Array.Empty<IAgentTool>() : [asking],
             new RecordComponentTool(workspace, components, reporter),
             new RecordThreatTool(workspace, components, threats, reporter),
             new SastAgentRunner.RememberTool(db, audit, job),
@@ -161,7 +166,7 @@ public sealed class ThreatModelAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, ThreatModelAgent.System + (brief is null ? "" : "\n\n" + brief.Focus) + (memory.Length > 0 ? "\n\n" + memory : ""),
-                ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint),
+                ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint) + (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
                 tools, maxSteps, reporter, ct, messages is null ? null : messages.Take);
             if (outcome.StopNote(maxSteps, "the threat model may be incomplete") is { } stopped)
             {

@@ -284,11 +284,11 @@ export type SubmitJob =
   | { type: "assess"; catalogId: string; path?: string; scanId?: string; sca?: boolean; engagementId?: string }
   | { type: "triage"; scanId: string; model: string; maxFindings?: number }
   /** The SAST agent: a model reads the code under `path` and reports vulnerabilities. */
-  | { type: "sast"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string; research?: boolean }
+  | { type: "sast"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string; research?: boolean; questions?: boolean }
   /** Builds or refreshes the semantic index of the code under `path`, with the server's local embedding model. */
   | { type: "index"; path: string; engagementId?: string }
   /** The threat-model agent: a model maps the components and threats of the code under `path` and writes them up. */
-  | { type: "threat-model"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string; research?: boolean }
+  | { type: "threat-model"; path: string; model: string; maxSteps?: number; instructions?: string; engagementId?: string; research?: boolean; questions?: boolean }
   /** A team review: a lead agent plans, dispatches specialist agents and merges their findings. `maxSteps` is each specialist's. */
   | {
       type: "investigate";
@@ -300,6 +300,8 @@ export type SubmitJob =
       engagementId?: string;
       /** The lead's plan runs without being put to the operator first. */
       approvePlan?: boolean;
+      /** A person is there: the agent may ask them a question while it works. Never set by a pipeline. */
+      questions?: boolean;
     }
   /** The evidence agent: a model suggests answers for controls of an assessment the scanner could not judge. */
   | { type: "evidence"; assessmentId: string; model: string; maxControls?: number; maxSteps?: number; controlIds?: string[] }

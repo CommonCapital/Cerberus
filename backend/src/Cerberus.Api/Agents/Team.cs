@@ -19,7 +19,7 @@ namespace Cerberus.Api.Agents;
 /// <param name="ApprovePlan">The operator approved in advance whatever plan the lead writes, within these limits.</param>
 public sealed record InvestigateJobParameters(
     string Model, int MaxSteps = SastAgent.DefaultSteps, int MaxSpecialists = Team.DefaultSpecialists,
-    string? Instructions = null, bool ApprovePlan = false);
+    string? Instructions = null, bool ApprovePlan = false, bool Questions = false);
 
 /// <summary>One kind of reviewer a lead can send.</summary>
 /// <param name="Brief">For the lead: what this specialist is for, in a line.</param>
@@ -500,7 +500,9 @@ public sealed class LeadAgentRunner(
         var parallelism = local ? 1 : Math.Clamp(options.Parallelism, 1, TeamOptions.MaxParallelism);
         var dispatch = new DispatchTool(job, parameters, run.Id, specialists, parallelism,
             (plan, token) => ApproveAsync(job, parameters, plan, where, parallelism, reporter, token), reporter);
-        IReadOnlyList<IAgentTool> tools = [.. CodeTools.For(workspace), dispatch];
+        // Where a person is there, the lead may ask them something before it plans. Its specialists never do.
+        var asking = parameters.Questions ? new AskOperatorTool(reporter) : null;
+        IReadOnlyList<IAgentTool> tools = [.. CodeTools.For(workspace), dispatch, .. asking is null ? Array.Empty<IAgentTool>() : [asking]];
 
         var title = $"Lead the review with {parameters.Model}";
         await reporter.StepAsync(Team.Name, title, StepStatus.Running);
@@ -512,7 +514,8 @@ public sealed class LeadAgentRunner(
             var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
             outcome = await loop.RunAsync(
                 parameters.Model, credentials, Team.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                Team.Task(job.TargetPath, Math.Clamp(parameters.MaxSpecialists, 1, Team.MaxSpecialists), parameters.MaxSteps, parameters.Instructions),
+                Team.Task(job.TargetPath, Math.Clamp(parameters.MaxSpecialists, 1, Team.MaxSpecialists), parameters.MaxSteps, parameters.Instructions) +
+                (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
                 tools, Team.LeadSteps, reporter, ct, messages.Take);
             if (outcome.StopNote(Team.LeadSteps, "the lead's report may be incomplete") is { } stopped)
             {

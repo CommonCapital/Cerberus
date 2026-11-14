@@ -72,6 +72,9 @@ Job options
                           and a server with web access switched on. Where outside servers are
                           configured (see: cerberus mcp), the researcher may use their tools too;
                           that needs its own approval (use-mcp-servers).
+                          A server tool that may change something asks before each call;
+                          with nobody here that stops the run, unless you always allow
+                          "change-outside-systems" in /permissions.
   --engagement <id>       run under this engagement
 
 Running unattended
