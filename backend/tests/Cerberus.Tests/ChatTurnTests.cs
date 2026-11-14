@@ -195,6 +195,9 @@ public class ChatTurnApiTests(ApiHost host)
         bobHub.On<JsonElement>("chatTurn", _ => Interlocked.Increment(ref bobHeard));
         await aliceHub.StartAsync();
         await bobHub.StartAsync();
+        // A connection counts as started once the handshake is done — a moment before the server has put it
+        // into its user's group. A real client covers that moment by reading the stored turn; here it is waited out.
+        await Task.Delay(250);
 
         var turnId = (await SubmitAsync(alice, session, UserMessage("u1", "hello"))).GetProperty("turnId").GetString()!;
         await done.Task.WaitAsync(Patience);

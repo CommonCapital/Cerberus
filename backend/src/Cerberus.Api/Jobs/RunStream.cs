@@ -38,10 +38,17 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
             await _gate.WaitAsync();
             try
             {
+                var known = _lastSequence.TryGetValue(jobId, out var last);
+                JobEvent? record = null;
+                // Another instance of the service may have written to this run since this one last did (an
+                // answer or a message that arrived there): then the remembered number is taken, the unique
+                // index refuses it, and the number is read afresh.
+                for (var attempt = 0; record is null; attempt++)
+                {
                 using var scope = scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
 
-                if (!_lastSequence.TryGetValue(jobId, out var last))
+                if (!known)
                 {
                     last = await db.JobEvents.Where(e => e.JobId == jobId).MaxAsync(e => (long?)e.Sequence) ?? 0;
                 }
@@ -54,7 +61,7 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
                     data = new { message = $"This run produced more than {MaxEventsPerJob} events; only state changes are recorded from here on." };
                 }
 
-                var record = new JobEvent
+                var next = new JobEvent
                 {
                     JobId = jobId,
                     UserId = userId,
@@ -63,8 +70,17 @@ public sealed class RunStream(IHubContext<JobsHub> hub, IServiceScopeFactory sco
                     Data = JsonSerializer.Serialize(data, JsonOptions),
                     CreatedAt = DateTime.UtcNow,
                 };
-                db.JobEvents.Add(record);
-                await db.SaveChangesAsync();
+                db.JobEvents.Add(next);
+                try
+                {
+                    await db.SaveChangesAsync();
+                    record = next;
+                }
+                catch (DbUpdateException) when (attempt < 3)
+                {
+                    known = false;   // read the number again and try once more
+                }
+                }
                 _lastSequence[jobId] = record.Sequence;
 
                 await hub.Clients.Group(JobsHub.GroupFor(userId)).SendAsync(JobsHub.JobEvent, Describe(record));

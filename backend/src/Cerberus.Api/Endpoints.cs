@@ -593,7 +593,7 @@ public static class Endpoints
     }
 
     private static async Task<IResult> Login(
-        CredentialsRequest body, HttpContext http, AuthService auth, LoginThrottle throttle, CerberusDbContext db,
+        CredentialsRequest body, HttpContext http, AuthService auth, ILoginThrottle throttle, CerberusDbContext db,
         Audit.AuditLog audit, CancellationToken ct)
     {
         if (!IsValid(body))

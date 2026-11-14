@@ -191,11 +191,14 @@ public sealed class ApiHost : IDisposable
 
     public HubConnection JobsHub(string? token) => Hub("/hub/jobs", token);
 
-    public HubConnection Hub(string path, string? token) => new HubConnectionBuilder()
+    public HubConnection Hub(string path, string? token) => HubOf(_factory, path, token);
+
+    /// <summary>A hub connection to one particular instance of the API (see <see cref="StartVariant"/>).</summary>
+    public static HubConnection HubOf(WebApplicationFactory<Program> factory, string path, string? token) => new HubConnectionBuilder()
         .WithUrl($"http://localhost{path}", options =>
         {
             // Route the SignalR client through the in-memory test server.
-            options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();
+            options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
             options.Transports = HttpTransportType.LongPolling;
             if (token is not null) options.AccessTokenProvider = () => Task.FromResult<string?>(token);
         })

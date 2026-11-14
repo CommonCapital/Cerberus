@@ -37,6 +37,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
     public DbSet<OperatorQuestion> OperatorQuestions => Set<OperatorQuestion>();
     public DbSet<Schedule> Schedules => Set<Schedule>();
     public DbSet<RunArtifact> RunArtifacts => Set<RunArtifact>();
+    public DbSet<WorkerInstance> WorkerInstances => Set<WorkerInstance>();
 
     /// <summary>The second lock: a restricted context sees one user's rows of this type, whatever the query says.</summary>
     private void OwnedByUser<T>(ModelBuilder modelBuilder) where T : class, IUserOwned =>
@@ -224,6 +225,8 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
             e.HasIndex(x => new { x.UserId, x.State });
             e.HasIndex(x => new { x.SessionId, x.CreatedAt });
         });
+
+        modelBuilder.Entity<WorkerInstance>(e => e.HasKey(x => x.Id));
 
         modelBuilder.Entity<ChatTurnEvent>(e =>
         {
