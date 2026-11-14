@@ -91,6 +91,11 @@ public static class Team
             ThreatModel: true),
     ];
 
+    /// <summary>The lead, described: the harness runs it from this (see <see cref="AgentHarness"/>). It takes its own steps, not the specialists'.</summary>
+    public static AgentSpec Spec { get; } = new(
+        Name, StepId: Name, System, LeadSteps, IfCutShort: "the lead's report may be incomplete",
+        AgentOffers.Code | AgentOffers.Questions, Called: "lead");
+
     public static Specialist? Find(string? id) => Specialists.FirstOrDefault(s => s.Id.Equals(id?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public const string System =
@@ -474,83 +479,54 @@ public sealed class DispatchTool(
 /// specialists, the operator approves it, the specialists review, and the lead reports what the team found.
 /// The result is one run with the merged findings and a report; each specialist's own run is kept under it.
 /// </summary>
-public sealed class LeadAgentRunner(
-    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions,
-    OperatorInbox inbox, ISpecialistRunner specialists, TeamOptions options)
+public sealed class LeadAgentRunner(AgentHarness harness, CerberusDbContext db, AuditLog audit, ISpecialistRunner specialists, TeamOptions options)
 {
     public async Task<AgentRun> RunAsync(Job job, InvestigateJobParameters parameters, IRunReporter reporter, CancellationToken ct)
     {
-        var provider = ModelRegistry.Find(parameters.Model)?.Provider
-            ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
-        var local = FindingTriager.IsLocal(provider);
-        var workspace = new CodeWorkspace(scanOptions.ScanRoot, job.TargetPath, redact: !local);
-        var credentials = await keys.ResolveCredentialsAsync(job.UserId, ct);
-        var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
-
-        var run = new AgentRun
-        {
-            UserId = job.UserId,
-            EngagementId = job.EngagementId,
-            JobId = job.Id,
-            Agent = Team.Name,
-            Model = parameters.Model,
-            TargetPath = job.TargetPath,
-        };
-        // A local model answers one request at a time: sending two specialists at once only makes both wait.
-        var parallelism = local ? 1 : Math.Clamp(options.Parallelism, 1, TeamOptions.MaxParallelism);
-        var dispatch = new DispatchTool(job, parameters, run.Id, specialists, parallelism,
-            (plan, token) => ApproveAsync(job, parameters, plan, where, parallelism, reporter, token), reporter);
-        // Where a person is there, the lead may ask them something before it plans. Its specialists never do.
-        var asking = parameters.Questions ? new AskOperatorTool(reporter) : null;
-        IReadOnlyList<IAgentTool> tools = [.. CodeTools.For(workspace), dispatch, .. asking is null ? Array.Empty<IAgentTool>() : [asking]];
-
-        var title = $"Lead the review with {parameters.Model}";
-        await reporter.StepAsync(Team.Name, title, StepStatus.Running);
-
-        AgentOutcome? outcome = null;
-        var messages = inbox.Open(job.Id);
-        try
-        {
-            var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
-            outcome = await loop.RunAsync(
-                parameters.Model, credentials, Team.System + (memory.Length > 0 ? "\n\n" + memory : ""),
-                Team.Task(job.TargetPath, Math.Clamp(parameters.MaxSpecialists, 1, Team.MaxSpecialists), parameters.MaxSteps, parameters.Instructions) +
-                (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
-                tools, Team.LeadSteps, reporter, ct, messages.Take);
-            if (outcome.StopNote(Team.LeadSteps, "the lead's report may be incomplete") is { } stopped)
+        var result = await harness.RunAsync(
+            Team.Spec,
+            new AgentRequest(job, parameters.Model, Team.LeadSteps, job.TargetPath, Questions: parameters.Questions),
+            context =>
             {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
-            }
-            await reporter.StepAsync(Team.Name, title, StepStatus.Completed);
-        }
-        finally
+                // A local model answers one request at a time: sending two specialists at once only makes both wait.
+                var parallelism = context.Local ? 1 : Math.Clamp(options.Parallelism, 1, TeamOptions.MaxParallelism);
+                var dispatch = new DispatchTool(job, parameters, context.RunId, specialists, parallelism,
+                    (plan, token) => ApproveAsync(job, parameters, plan, context.SentTo, parallelism, reporter, token), reporter);
+                return new Leading(context, parameters, dispatch);
+            }, reporter, ct);
+        return result.Run!;
+    }
+
+    /// <summary>One team review: what the lead is asked, its one tool for acting, and what is kept of what the team found.</summary>
+    private sealed class Leading(AgentContext context, InvestigateJobParameters parameters, DispatchTool dispatch) : IAgentWork
+    {
+        public string Title => $"Lead the review with {context.Model}";
+
+        public string Assignment => Team.Task(
+            context.TargetPath, Math.Clamp(parameters.MaxSpecialists, 1, Team.MaxSpecialists), parameters.MaxSteps, parameters.Instructions);
+
+        public IReadOnlyList<IAgentTool> Tools { get; } = [dispatch];
+
+        public void Fill(AgentRun run, AgentOutcome? outcome)
         {
-            messages.Dispose();
-            if (messages.Unread.Count > 0)
-            {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The lead had finished before it could read your last {messages.Unread.Count} message(s)." });
-            }
             // Kept even when stopped part-way: what the specialists that finished found is still worth having.
             var outcomes = dispatch.Outcomes;
             var merged = FindingMerger.Merge(outcomes);
-            var reported = outcomes.Sum(o => o.Findings.Count);
-            run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
             run.Findings = JsonSerializer.Serialize(merged, SastAgentRunner.JsonOptions);
             run.FindingCount = merged.Count;
-            run.Steps = outcome?.Steps ?? 0;
-            run.ToolCalls = outcome?.ToolCalls ?? 0;
+            // Done only if the lead finished and so did everyone it sent.
             run.Complete = outcome is { StoppedEarly: false } && outcomes.Count == dispatch.Dispatched.Count && outcomes.All(o => o.Complete);
-            run.Report = TeamReport.Write(job.TargetPath, parameters.Model, dispatch.Dispatched, outcomes, merged, run.Summary, run.Complete, DateTime.UtcNow);
-            db.AgentRuns.Add(run);
-            await db.SaveChangesAsync(CancellationToken.None);
-
-            await audit.AppendAsync(job.UserId, "agent.run", run.Complete ? AuditOutcome.Ok : AuditOutcome.Error,
-                $"Lead agent run {run.Id} on \"{job.TargetPath}\" with {parameters.Model}: {dispatch.Dispatched.Count} specialist(s) dispatched" +
-                (dispatch.Dispatched.Count > 0 ? $" ({string.Join(", ", dispatch.Dispatched.Select(a => a.Specialist))})" : "") +
-                $", {merged.Count} finding(s) after merging {reported} reported{(run.Complete ? "" : ", not completed")}; the code that was read was sent to {where}.",
-                job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
+            run.Report = TeamReport.Write(context.TargetPath, context.Model, dispatch.Dispatched, outcomes, merged, run.Summary, run.Complete, DateTime.UtcNow);
         }
-        return run;
+
+        public AuditLine Audit(AgentRun? run, AgentOutcome? outcome)
+        {
+            var reported = dispatch.Outcomes.Sum(o => o.Findings.Count);
+            return new AuditLine("agent.run", run!.Complete,
+                $"Lead agent run {run.Id} on \"{context.TargetPath}\" with {context.Model}: {dispatch.Dispatched.Count} specialist(s) dispatched" +
+                (dispatch.Dispatched.Count > 0 ? $" ({string.Join(", ", dispatch.Dispatched.Select(a => a.Specialist))})" : "") +
+                $", {run.FindingCount} finding(s) after merging {reported} reported{(run.Complete ? "" : ", not completed")}; the code that was read was sent to {context.SentTo}.");
+        }
     }
 
     /// <summary>

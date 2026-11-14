@@ -65,6 +65,11 @@ public static class ThreatModelAgent
         return -1;
     }
 
+    /// <summary>The agent, described: the harness runs it from this (see <see cref="AgentHarness"/>).</summary>
+    public static AgentSpec Spec { get; } = new(
+        Name, StepId: "threat-model", System, MaxSteps, IfCutShort: "the threat model may be incomplete",
+        AgentOffers.Code | AgentOffers.CodeSearch | AgentOffers.Research | AgentOffers.Questions | AgentOffers.Notes | AgentOffers.Skills);
+
     public const string System =
         """
         You are a security architect building a threat model of one codebase, read-only.
@@ -93,9 +98,7 @@ public static class ThreatModelAgent
 /// (STRIDE), which are written up as a report. Its output is a model for
 /// people to review and feeds no compliance verdict.
 /// </summary>
-public sealed class ThreatModelAgentRunner(
-    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox, Search.CodeSearch search, Web.ResearchTools research)
+public sealed class ThreatModelAgentRunner(AgentHarness harness)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -118,83 +121,48 @@ public sealed class ThreatModelAgentRunner(
 
     public async Task<AgentRun> RunAsync(Job job, ThreatModelJobParameters parameters, IRunReporter reporter, CancellationToken ct, SpecialistBrief? brief = null)
     {
-        var provider = ModelRegistry.Find(parameters.Model)?.Provider
-            ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
-        var local = FindingTriager.IsLocal(provider);
-        var workspace = new CodeWorkspace(scanOptions.ScanRoot, job.TargetPath, redact: !local);
-        var credentials = await keys.ResolveCredentialsAsync(job.UserId, ct);
-        var maxSteps = Math.Clamp(parameters.MaxSteps, 1, ThreatModelAgent.MaxSteps);
+        var result = await harness.RunAsync(
+            ThreatModelAgent.Spec,
+            new AgentRequest(job, parameters.Model, parameters.MaxSteps, job.TargetPath, parameters.Research, parameters.Questions, brief),
+            context => new Modelling(context, parameters.Instructions), reporter, ct);
+        return result.Run!;
+    }
 
-        var components = new List<ThreatComponent>();
-        var threats = new List<Threat>();
-        var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
-        // Where the operator allowed it, the agent can ask questions on the internet — through the clean-room researcher only.
-        var researcher = parameters.Research ? await research.ForAsync(job, parameters.Model, credentials, reporter, db, ct) : null;
-        // Where a person is there and this agent works for them directly, it may stop and ask instead of guessing.
-        var asking = parameters.Questions && brief is null ? new AskOperatorTool(reporter) : null;
-        IReadOnlyList<IAgentTool> tools =
-        [
-            .. CodeTools.For(workspace),
-            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
-            .. researcher is null ? Array.Empty<IAgentTool>() : [researcher],
-            .. asking is null ? Array.Empty<IAgentTool>() : [asking],
-            new RecordComponentTool(workspace, components, reporter),
-            new RecordThreatTool(workspace, components, threats, reporter),
-            new SastAgentRunner.RememberTool(db, audit, job),
-            new SastAgentRunner.SkillTool(ChatTools.SearchSkills, skills),
-            new SastAgentRunner.SkillTool(ChatTools.LoadSkill, skills),
-        ];
+    /// <summary>One threat model: what is asked, the tools components and threats come in through, and the report made of them.</summary>
+    private sealed class Modelling : IAgentWork
+    {
+        private readonly AgentContext _context;
+        private readonly string? _instructions;
+        private readonly List<ThreatComponent> _components = [];
+        private readonly List<Threat> _threats = [];
 
-        var title = $"Model the threats with {parameters.Model}";
-        await reporter.StepAsync("threat-model", title, StepStatus.Running);
-
-        AgentOutcome? outcome = null;
-        // A specialist is steered by its lead, not by the operator: the job's messages are the lead's to read.
-        var messages = brief is null ? inbox.Open(job.Id) : null;
-        var run = new AgentRun
+        public Modelling(AgentContext context, string? instructions)
         {
-            UserId = job.UserId,
-            EngagementId = job.EngagementId,
-            JobId = job.Id,
-            ParentRunId = brief?.ParentRunId,
-            Agent = brief?.Agent ?? ThreatModelAgent.Name,
-            Model = parameters.Model,
-            TargetPath = job.TargetPath,
-        };
-        try
-        {
-            var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
-            outcome = await loop.RunAsync(
-                parameters.Model, credentials, ThreatModelAgent.System + (brief is null ? "" : "\n\n" + brief.Focus) + (memory.Length > 0 ? "\n\n" + memory : ""),
-                ThreatModelAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint) + (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
-                tools, maxSteps, reporter, ct, messages is null ? null : messages.Take);
-            if (outcome.StopNote(maxSteps, "the threat model may be incomplete") is { } stopped)
-            {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
-            }
-            await reporter.StepAsync("threat-model", title, StepStatus.Completed);
+            (_context, _instructions) = (context, instructions);
+            Tools =
+            [
+                new RecordComponentTool(context.Workspace, _components, context.Reporter),
+                new RecordThreatTool(context.Workspace, _components, _threats, context.Reporter),
+            ];
         }
-        finally
+
+        public string Title => $"Model the threats with {_context.Model}";
+
+        public string Assignment => ThreatModelAgent.Task(_context.TargetPath, _context.MaxSteps, _instructions);
+
+        public IReadOnlyList<IAgentTool> Tools { get; }
+
+        public void Fill(AgentRun run, AgentOutcome? outcome)
         {
-            messages?.Dispose();
             // Kept even when stopped part-way: a partial model is still worth reading, marked as such.
-            run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
-            run.Findings = JsonSerializer.Serialize(new ThreatModel(components, threats), JsonOptions);
-            run.FindingCount = threats.Count;
-            run.Steps = outcome?.Steps ?? 0;
-            run.ToolCalls = outcome?.ToolCalls ?? 0;
-            run.Complete = outcome is { StoppedEarly: false };
-            run.Report = ThreatModelReport.Write(job.TargetPath, parameters.Model, components, threats, run.Summary, run.Complete, DateTime.UtcNow);
-            db.AgentRuns.Add(run);
-            await db.SaveChangesAsync(CancellationToken.None);
-
-            var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
-            await audit.AppendAsync(job.UserId, "agent.run", run.Complete ? AuditOutcome.Ok : AuditOutcome.Error,
-                $"Threat-model agent run {run.Id} on \"{job.TargetPath}\" with {parameters.Model}: {components.Count} component(s), {threats.Count} threat(s), " +
-                $"{run.ToolCalls} tool call(s){(run.Complete ? "" : ", not completed")}; the code it read was sent to {where}.",
-                job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
+            run.Findings = JsonSerializer.Serialize(new ThreatModel(_components, _threats), JsonOptions);
+            run.FindingCount = _threats.Count;
+            run.Report = ThreatModelReport.Write(_context.TargetPath, _context.Model, _components, _threats, run.Summary, run.Complete, DateTime.UtcNow);
         }
-        return run;
+
+        public AuditLine Audit(AgentRun? run, AgentOutcome? outcome) => new("agent.run", run!.Complete,
+            $"Threat-model agent run {run.Id} on \"{_context.TargetPath}\" with {_context.Model}: {_components.Count} component(s), {_threats.Count} threat(s), " +
+            $"{run.ToolCalls} tool call(s){(run.Complete ? "" : ", not completed")}; the code it read was sent to {_context.SentTo}.");
     }
 
     /// <summary>The places in the code an entry points at; each must exist.</summary>

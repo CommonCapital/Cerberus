@@ -50,6 +50,11 @@ public static class SastAgent
     public static readonly IReadOnlyList<string> Categories =
         ["injection", "auth", "access-control", "crypto", "secret", "deserialization", "config", "input-validation", "other"];
 
+    /// <summary>The agent, described: the harness runs it from this (see <see cref="AgentHarness"/>).</summary>
+    public static AgentSpec Spec { get; } = new(
+        Name, StepId: "review", System, MaxSteps, IfCutShort: "the review may be incomplete",
+        AgentOffers.Code | AgentOffers.CodeSearch | AgentOffers.Research | AgentOffers.Questions | AgentOffers.Notes | AgentOffers.Skills);
+
     public const string System =
         """
         You are a security code reviewer. You review one codebase for vulnerabilities, read-only, and report what you find.
@@ -81,9 +86,7 @@ public static class SastAgent
 /// are stored apart from the scanner's and never feed a compliance verdict —
 /// the code it reads is untrusted and may try to steer it.
 /// </summary>
-public sealed partial class SastAgentRunner(
-    AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox, Search.CodeSearch search, Web.ResearchTools research)
+public sealed partial class SastAgentRunner(AgentHarness harness)
 {
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -106,86 +109,41 @@ public sealed partial class SastAgentRunner(
 
     public async Task<AgentRun> RunAsync(Job job, SastJobParameters parameters, IRunReporter reporter, CancellationToken ct, SpecialistBrief? brief = null)
     {
-        var provider = ModelRegistry.Find(parameters.Model)?.Provider
-            ?? throw new InvalidOperationException($"Unsupported model: {parameters.Model}");
-        var local = FindingTriager.IsLocal(provider);
-        var workspace = new CodeWorkspace(scanOptions.ScanRoot, job.TargetPath, redact: !local);
-        var credentials = await keys.ResolveCredentialsAsync(job.UserId, ct);
-        var maxSteps = Math.Clamp(parameters.MaxSteps, 1, SastAgent.MaxSteps);
+        var result = await harness.RunAsync(
+            SastAgent.Spec,
+            new AgentRequest(job, parameters.Model, parameters.MaxSteps, job.TargetPath, parameters.Research, parameters.Questions, brief),
+            context => new Review(context, parameters.Instructions), reporter, ct);
+        return result.Run!;
+    }
 
-        var findings = new List<AgentFinding>();
-        // Where the target has a semantic index, the agent can also search the code by meaning.
-        var semantic = await search.ToolForAsync(job.UserId, job.TargetPath, ct);
-        // Where the operator allowed it, the agent can ask questions on the internet — through the clean-room researcher only.
-        var researcher = parameters.Research ? await research.ForAsync(job, parameters.Model, credentials, reporter, db, ct) : null;
-        // Where a person is there and this agent works for them directly, it may stop and ask instead of guessing.
-        var asking = parameters.Questions && brief is null ? new AskOperatorTool(reporter) : null;
-        IReadOnlyList<IAgentTool> tools =
-        [
-            .. CodeTools.For(workspace),
-            .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
-            .. researcher is null ? Array.Empty<IAgentTool>() : [researcher],
-            .. asking is null ? Array.Empty<IAgentTool>() : [asking],
-            new ReportFindingTool(workspace, findings, reporter),
-            new RememberTool(db, audit, job),
-            new SkillTool(ChatTools.SearchSkills, skills),
-            new SkillTool(ChatTools.LoadSkill, skills),
-        ];
+    /// <summary>One review: what is asked, the tool the findings come in through, and what is kept of them.</summary>
+    private sealed class Review : IAgentWork
+    {
+        private readonly AgentContext _context;
+        private readonly string? _instructions;
+        private readonly List<AgentFinding> _findings = [];
 
-        var title = $"Review the code with {parameters.Model}";
-        await reporter.StepAsync("review", title, StepStatus.Running);
-
-        AgentOutcome? outcome = null;
-        // A specialist is steered by its lead, not by the operator: the job's messages are the lead's to read.
-        var messages = brief is null ? inbox.Open(job.Id) : null;
-        var run = new AgentRun
+        public Review(AgentContext context, string? instructions)
         {
-            UserId = job.UserId,
-            EngagementId = job.EngagementId,
-            JobId = job.Id,
-            ParentRunId = brief?.ParentRunId,
-            Agent = brief?.Agent ?? SastAgent.Name,
-            Model = parameters.Model,
-            TargetPath = job.TargetPath,
-        };
-        try
-        {
-            var memory = await Memory.PromptSectionAsync(db, job.UserId, job.EngagementId, job.TargetPath, ct);
-            outcome = await loop.RunAsync(
-                parameters.Model, credentials, SastAgent.System + (brief is null ? "" : "\n\n" + brief.Focus) + (memory.Length > 0 ? "\n\n" + memory : ""),
-                SastAgent.Task(job.TargetPath, maxSteps, parameters.Instructions) + (semantic is null ? "" : "\n\n" + Search.CodeSearch.ToolHint) + (researcher is null ? "" : "\n\n" + Web.Research.ToolHint) + (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
-                tools, maxSteps, reporter, ct, messages is null ? null : messages.Take);
-            if (outcome.StopNote(maxSteps, "the review may be incomplete") is { } stopped)
-            {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = stopped });
-            }
-            await reporter.StepAsync("review", title, StepStatus.Completed);
+            (_context, _instructions) = (context, instructions);
+            Tools = [new ReportFindingTool(context.Workspace, _findings, context.Reporter)];
         }
-        finally
-        {
-            messages?.Dispose();
-            if (messages is { Unread.Count: > 0 })
-            {
-                await reporter.EventAsync(RunEventTypes.Note, new { message = $"The agent had finished before it could read your last {messages.Unread.Count} message(s)." });
-            }
-            // Kept even when stopped part-way: what was found so far is still worth having,
-            // and code may already have left this machine.
-            run.Summary = SecretMasker.MaskText(outcome?.FinalText ?? "");
-            run.Findings = JsonSerializer.Serialize(findings, JsonOptions);
-            run.FindingCount = findings.Count;
-            run.Steps = outcome?.Steps ?? 0;
-            run.ToolCalls = outcome?.ToolCalls ?? 0;
-            run.Complete = outcome is { StoppedEarly: false };
-            db.AgentRuns.Add(run);
-            await db.SaveChangesAsync(CancellationToken.None);
 
-            var where = local ? "a local model" : $"{provider} (credential-shaped values masked)";
-            await audit.AppendAsync(job.UserId, "agent.run", run.Complete ? AuditOutcome.Ok : AuditOutcome.Error,
-                $"{(brief is null ? "SAST agent" : $"Specialist ({brief.Agent})")} run {run.Id} on \"{job.TargetPath}\" with {parameters.Model}: {run.ToolCalls} tool call(s), {findings.Count} finding(s) reported" +
-                $"{(run.Complete ? "" : ", not completed")}; the code it read was sent to {where}.",
-                job.EngagementId, job.TargetPath, CapabilityTier.T0, CancellationToken.None);
+        public string Title => $"Review the code with {_context.Model}";
+
+        public string Assignment => SastAgent.Task(_context.TargetPath, _context.MaxSteps, _instructions);
+
+        public IReadOnlyList<IAgentTool> Tools { get; }
+
+        public void Fill(AgentRun run, AgentOutcome? outcome)
+        {
+            run.Findings = JsonSerializer.Serialize(_findings, JsonOptions);
+            run.FindingCount = _findings.Count;
         }
-        return run;
+
+        public AuditLine Audit(AgentRun? run, AgentOutcome? outcome) => new("agent.run", run!.Complete,
+            $"{(_context.Brief is null ? "SAST agent" : $"Specialist ({_context.Brief.Agent})")} run {run.Id} on \"{_context.TargetPath}\" with {_context.Model}: " +
+            $"{run.ToolCalls} tool call(s), {_findings.Count} finding(s) reported{(run.Complete ? "" : ", not completed")}; the code it read was sent to {_context.SentTo}.");
     }
 
     /// <summary>How the agent hands over a finding. Checked against the code before it is accepted.</summary>

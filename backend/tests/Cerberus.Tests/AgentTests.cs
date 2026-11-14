@@ -33,9 +33,17 @@ public sealed class PlaybackProvider(params ChatEvent[][] steps) : IModelProvide
     public IAsyncEnumerable<string> StreamAsync(ChatCompletionRequest request, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
+    /// <summary>Run before each reply, for a test that wants to do something while the agent is at work.</summary>
+    public Action? BeforeReply { get; set; }
+
+    /// <summary>The request (counted from 1) at which the provider fails, as one that has gone away would. 0: never.</summary>
+    public int FailAt { get; set; }
+
     public async IAsyncEnumerable<ChatEvent> StreamChatAsync(ChatRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Requests.Add(request with { Turns = [.. request.Turns] });
+        BeforeReply?.Invoke();
+        if (FailAt == Requests.Count) throw new HttpRequestException("the provider went away");
         // Past the script: keep asking for the same tool, to test the step limit.
         foreach (var e in steps[Math.Min(Requests.Count - 1, steps.Length - 1)]) yield return e;
         await Task.Yield();
