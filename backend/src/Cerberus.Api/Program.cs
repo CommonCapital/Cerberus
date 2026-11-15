@@ -32,7 +32,42 @@ if (configErrors.Count > 0)
     return 2;
 }
 
+// --- What this installation runs on (PLAN.md §22) ------------------------------
+// Each service that is configured and answers within a few seconds is used; one that does not is replaced by
+// its local stand-in and the service starts anyway: SQLite for PostgreSQL, this process for Redis and RabbitMQ.
+var postgres = new Cerberus.Api.Hosting.PostgresOptions(Environment.GetEnvironmentVariable(Cerberus.Api.Hosting.PostgresOptions.Variable));
+var redis = new Cerberus.Api.Cluster.RedisOptions(Environment.GetEnvironmentVariable("CERBERUS_REDIS_URL"));
+var rabbit = new RabbitMqOptions(Environment.GetEnvironmentVariable("CERBERUS_RABBITMQ_URL"));
+var postgresProbe = new Cerberus.Api.Hosting.PostgresProbe(postgres);
+var backing = await Cerberus.Api.Hosting.BackingServices.DecideAsync(
+    [postgresProbe, new Cerberus.Api.Hosting.RedisProbe(redis), new Cerberus.Api.Hosting.RabbitMqProbe(rabbit)],
+    Cerberus.Api.Hosting.BackingServices.WaitFrom(Environment.GetEnvironmentVariable), CancellationToken.None);
+if (backing.Uses("PostgreSQL"))
+{
+    // The last check before PostgreSQL is chosen: its schema can be made there (a user without the right to
+    // create tables would otherwise stop every request later).
+    try
+    {
+        postgresProbe.PrepareSchema();
+    }
+    catch (Exception ex)
+    {
+        backing = backing.WithFallback("PostgreSQL", Cerberus.Api.Hosting.BackingServices.Explain(ex));
+    }
+}
+foreach (var choice in backing.Choices) Console.WriteLine($"Cerberus: {choice.Describe()}.");
+if (backing.FellBack.Count > 0 && Environment.GetEnvironmentVariable(Cerberus.Api.Hosting.BackingServices.RequireVariable)?.Trim() == "true")
+{
+    Console.Error.WriteLine($"Cerberus cannot start: {Cerberus.Api.Hosting.BackingServices.RequireVariable} is true and a configured service is not there.");
+    foreach (var missing in backing.FellBack) Console.Error.WriteLine($"  - {missing.Name} at {missing.Where} {missing.Problem} ({missing.Variable}).");
+    return 3;
+}
+if (!backing.Uses("Redis")) redis = new Cerberus.Api.Cluster.RedisOptions(null);
+if (!backing.Uses("RabbitMQ")) rabbit = rabbit with { Url = null };
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton(backing);
+builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Hosting.BackingServicesCheck>();
 
 // --- Controls the installation sets for everyone (PLAN.md §21) ------------
 // Groups of tools switched off whatever a request or a model asks for; checked above, so this cannot fail.
@@ -50,11 +85,11 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 Cerberus.Api.Security.ServiceHardening.AddServiceHardening(
     builder.Services, Cerberus.Api.Security.ServiceLimits.FromEnvironment(Environment.GetEnvironmentVariable));
 
-// --- Database: local SQLite (no hosted Postgres) ---------------------------
+// --- Database: PostgreSQL when it was found above, else a local SQLite file ----------
 var dbPath = Environment.GetEnvironmentVariable("CERBERUS_DB")
     ?? Path.Combine(builder.Environment.ContentRootPath, "cerberus.db");
-builder.Services.AddDbContext<CerberusDbContext>(options =>
-    options.UseSqlite($"Data Source={dbPath}"));
+if (backing.Uses("PostgreSQL")) builder.Services.AddDbContext<CerberusDbContext>(postgres.Configure);
+else builder.Services.AddDbContext<CerberusDbContext>(options => options.UseSqlite($"Data Source={dbPath}"));
 // Whose rows a context may see: one per scope, unrestricted until a request restricts it (see DataOwner).
 builder.Services.AddScoped<DataOwner>();
 
@@ -67,7 +102,6 @@ builder.Services.AddSingleton<Cerberus.Api.Cluster.OrphanSweeper>();
 builder.Services.AddHostedService<Cerberus.Api.Cluster.InstanceHeartbeat>();
 // With Redis configured the instances share what must hold over all of them: signals (stop this job, here is
 // the answer), places (one turn per conversation, a few per user) and the sign-in count. Without it: one process.
-var redis = new Cerberus.Api.Cluster.RedisOptions(Environment.GetEnvironmentVariable("CERBERUS_REDIS_URL"));
 builder.Services.AddSingleton(redis);
 if (redis.Enabled)
 {
@@ -169,7 +203,6 @@ builder.Services.AddSingleton<Cerberus.Authorization.IOwnershipProbe, NetworkOwn
 
 // --- Job pipeline (in-process bus locally; RabbitMQ in production) ----------
 // With a broker configured, work travels over RabbitMQ; without one, inside this process.
-var rabbit = new RabbitMqOptions(Environment.GetEnvironmentVariable("CERBERUS_RABBITMQ_URL"));
 builder.Services.AddSingleton(rabbit);
 if (rabbit.Enabled) builder.Services.AddSingleton<IMessageBus, RabbitMqBus>();
 else builder.Services.AddSingleton<IMessageBus, InProcMessageBus>();

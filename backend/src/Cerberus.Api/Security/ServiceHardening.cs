@@ -59,7 +59,7 @@ public static class ServiceConfig
 
     private static readonly string[] TrueFalse =
     [
-        "CERBERUS_REQUIRE_ENGAGEMENT", "CERBERUS_ALLOW_LOCAL_TARGETS", "CERBERUS_EMBEDDING_ALLOW_REMOTE", "CERBERUS_BROWSER_NO_SANDBOX",
+        "CERBERUS_REQUIRE_ENGAGEMENT", "CERBERUS_ALLOW_LOCAL_TARGETS", Cerberus.Api.Hosting.BackingServices.RequireVariable, "CERBERUS_EMBEDDING_ALLOW_REMOTE", "CERBERUS_BROWSER_NO_SANDBOX",
     ];
 
     private static readonly string[] OnOff = ["CERBERUS_WEB", "CERBERUS_BROWSER"];
@@ -101,6 +101,12 @@ public static class ServiceConfig
             errors.Add("CERBERUS_RABBITMQ_URL must be an amqp:// or amqps:// address.");
         if (Value("CERBERUS_REDIS_URL") is { } shared && !IsUrl(shared, "redis", "rediss"))
             errors.Add("CERBERUS_REDIS_URL must be a redis:// or rediss:// address.");
+        if (Cerberus.Api.Hosting.PostgresOptions.Problem(Value(Cerberus.Api.Hosting.PostgresOptions.Variable)) is { } database) errors.Add(database);
+        if (Value(Cerberus.Api.Hosting.BackingServices.WaitVariable) is { } wait &&
+            !(double.TryParse(wait, NumberStyles.Float, CultureInfo.InvariantCulture, out var waitSeconds) && waitSeconds is >= 0 and <= 600))
+        {
+            errors.Add($"{Cerberus.Api.Hosting.BackingServices.WaitVariable} must be a number of seconds from 0 to 600.");
+        }
         if (Cerberus.Api.Controls.DisabledTools.Problem(Value(Cerberus.Api.Controls.DisabledTools.Variable)) is { } disabled) errors.Add(disabled);
         if (Cerberus.Api.Controls.ModelRoles.Problem(Value(Cerberus.Api.Controls.ModelRoles.Variable)) is { } fast) errors.Add(fast);
 

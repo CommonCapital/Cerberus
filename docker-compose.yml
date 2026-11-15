@@ -5,7 +5,7 @@
 #
 # Optional parts are files of their own, added with -f (see each file's header):
 #   docker compose -f docker-compose.yml -f compose.models.yml up -d   # + Ollama (local models; heavy)
-#   docker compose -f docker-compose.yml -f compose.infra.yml up -d    # + RabbitMQ and Redis
+#   docker compose -f docker-compose.yml -f compose.infra.yml up -d    # + PostgreSQL, RabbitMQ and Redis
 #   docker compose -f docker-compose.yml -f compose.web.yml up -d      # + SearXNG, a search service of your own
 #
 # They are separate files, not profiles, because two of them need a secret, and a required
@@ -19,7 +19,7 @@ name: cerberus
 
 services:
   # The backend: auth, sessions, chat, scans, compliance, jobs, approvals,
-  # questions, skills, and the SignalR hubs. One process, SQLite on a volume.
+  # questions, skills, and the SignalR hubs. One process, SQLite on a volume (PostgreSQL with compose.infra.yml).
   api:
     build:
       context: .

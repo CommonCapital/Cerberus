@@ -77,6 +77,8 @@ bun run dev:server
 
 It listens on `http://localhost:3000` and creates its SQLite database on first run. This is the one backend: the CLI needs nothing else.
 
+**Services are optional.** The server runs on its own: SQLite for data, a queue inside the process, nothing shared. Point it at services of your own and it uses each one that answers when it starts: `CERBERUS_POSTGRES_URL=postgres://user:password@localhost:5432/cerberus` keeps the data in PostgreSQL (the database is created if it does not exist), `CERBERUS_REDIS_URL` and `CERBERUS_RABBITMQ_URL` as below. A configured service that does not answer within a few seconds (`CERBERUS_SERVICE_WAIT_SECONDS`, default 5) is replaced by its local stand-in, and the server starts anyway; the start-up lines and `GET /health/ready` (`services`) say what is in use and what stands in for what. It decides once, at start-up: restart it after starting a service. Data written to SQLite meanwhile stays in that file and is not moved to PostgreSQL later. For an installation that must not run on stand-ins (several copies, or a compose deployment), set `CERBERUS_REQUIRE_SERVICES=true`: a missing service then stops the start with a message saying which. `compose.infra.yml` brings up PostgreSQL, RabbitMQ and Redis as containers and sets that.
+
 ### 3. The CLI
 
 ```bash
@@ -289,7 +291,7 @@ cerberus schedule add scan . --every 1d --name "Nightly scan"
 
 ## Local-first by design
 
-No Clerk, no Polar, no hosted Postgres. Authorization is self-hosted (email/password sessions), the database is local SQLite, models run via your own keys or local Ollama, and (per the roadmap) tool execution runs in a self-hosted sandbox. Azure is an optional production deploy target behind the same interfaces, never a requirement to run.
+No Clerk, no Polar, no hosted Postgres. Authorization is self-hosted (email/password sessions), the database is local SQLite or a PostgreSQL of your own, models run via your own keys or local Ollama, and (per the roadmap) tool execution runs in a self-hosted sandbox. Azure is an optional production deploy target behind the same interfaces, never a requirement to run.
 
 ## License
 

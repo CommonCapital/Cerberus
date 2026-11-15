@@ -22,6 +22,14 @@ public sealed class ApiHost : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "cerberus-it-" + Guid.NewGuid().ToString("n"));
     private readonly WebApplicationFactory<Program> _factory;
 
+    /// <summary>
+    /// A PostgreSQL server to run the API tests on instead of SQLite, e.g. <c>postgres://cerberus@127.0.0.1:5439</c>
+    /// (CERBERUS_TEST_POSTGRES_URL). Each host makes a database of its own there and drops it at the end.
+    /// </summary>
+    public static readonly string? PostgresServer = Environment.GetEnvironmentVariable("CERBERUS_TEST_POSTGRES_URL") is { Length: > 0 } server ? server.TrimEnd('/') : null;
+
+    private readonly string? _postgresDatabase;
+
     public ApiHost()
     {
         var scanRoot = Path.Combine(_root, "scan");
@@ -36,6 +44,15 @@ public sealed class ApiHost : IDisposable
             "legacy = hashlib.md5(x)  # cerberus:ignore crypto.weak-hash\n");
 
         Environment.SetEnvironmentVariable("CERBERUS_DB", Path.Combine(_root, "test.db"));
+        // A service a test configures but does not run is given up on after a second, not five.
+        Environment.SetEnvironmentVariable(Cerberus.Api.Hosting.BackingServices.WaitVariable, "1");
+        if (PostgresServer is not null)
+        {
+            _postgresDatabase = "cerberus_it_" + Guid.NewGuid().ToString("n");
+            Environment.SetEnvironmentVariable(Cerberus.Api.Hosting.PostgresOptions.Variable, $"{PostgresServer}/{_postgresDatabase}");
+            // On PostgreSQL or not at all: a run that quietly fell back to SQLite would prove nothing.
+            Environment.SetEnvironmentVariable(Cerberus.Api.Hosting.BackingServices.RequireVariable, "true");
+        }
         Environment.SetEnvironmentVariable("CERBERUS_KEYRING", Path.Combine(_root, "keys"));
         Environment.SetEnvironmentVariable("CERBERUS_SCAN_ROOT", scanRoot);
         Environment.SetEnvironmentVariable("CERBERUS_CATALOG_ROOT", FindCatalogs());
@@ -144,20 +161,22 @@ public sealed class ApiHost : IDisposable
     /// environment setting. The setting is only read at startup, so it is
     /// restored as soon as the instance is up.
     /// </summary>
-    public WebApplicationFactory<Program> StartVariant(string variable, string value)
+    public WebApplicationFactory<Program> StartVariant(string variable, string value) => StartVariant((variable, value));
+
+    /// <summary>An instance started with several settings changed at once (null clears one).</summary>
+    public WebApplicationFactory<Program> StartVariant(params (string Variable, string? Value)[] settings)
     {
-        // Put back afterwards as it was — not cleared: the host's own settings must be there for the next variant too.
-        var before = Environment.GetEnvironmentVariable(variable);
-        Environment.SetEnvironmentVariable(variable, value);
+        var before = settings.Select(s => (s.Variable, Value: Environment.GetEnvironmentVariable(s.Variable))).ToList();
+        foreach (var (variable, value) in settings) Environment.SetEnvironmentVariable(variable, value);
         try
         {
             var factory = NewFactory();
-            factory.CreateClient().Dispose();   // forces startup while the setting is in place
+            factory.CreateClient().Dispose();   // forces startup while the settings are in place
             return factory;
         }
         finally
         {
-            Environment.SetEnvironmentVariable(variable, before);
+            foreach (var (variable, value) in before) Environment.SetEnvironmentVariable(variable, value);
         }
     }
 
@@ -215,6 +234,7 @@ public sealed class ApiHost : IDisposable
     {
         _factory.Dispose();
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
+        if (_postgresDatabase is not null) PostgresTestServer.Drop(PostgresServer!, _postgresDatabase);
     }
 }
 
