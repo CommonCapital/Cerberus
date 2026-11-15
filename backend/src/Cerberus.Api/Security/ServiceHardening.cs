@@ -154,7 +154,8 @@ public static class ServiceConfig
 /// the job of what sits in front of the service), and — behind a reverse proxy
 /// — a per-client limit, because the address seen is then the proxy's. One
 /// person signed in twice has two tokens and so twice the per-user allowance.
-/// Counted in this process; several instances each count on their own (§22).
+/// Counted in this process — or, where Redis is configured, in Redis over every
+/// instance of the service (<see cref="Cluster.SharedRateLimit"/>).
 /// </summary>
 public static class ServiceHardening
 {
@@ -169,27 +170,43 @@ public static class ServiceHardening
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.OnRejected = async (context, ct) =>
-            {
-                var wait = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter : TimeSpan.FromSeconds(10);
-                context.HttpContext.Response.Headers.RetryAfter =
-                    Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
-                await context.HttpContext.Response.WriteAsJsonAsync(new { error = "Too many requests. Try again shortly." }, ct);
-            };
-
-            // Both must allow a request: the address it comes from, and the sign-in token it carries.
-            options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
-                PartitionedRateLimiter.Create<HttpContext, string>(http =>
-                    limits.RequestsPerMinutePerAddress <= 0 || IsExempt(http)
-                        ? RateLimitPartition.GetNoLimiter("-")
-                        : PerMinute("a:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"), limits.RequestsPerMinutePerAddress)),
-                PartitionedRateLimiter.Create<HttpContext, string>(http =>
-                    limits.RequestsPerMinutePerUser <= 0 || IsExempt(http) ||
-                    Auth.RequireAuthFilter.ExtractBearerToken(http.Request.Headers.Authorization) is not { } token
-                        ? RateLimitPartition.GetNoLimiter("-")
-                        : PerMinute("u:" + Fingerprint(token), limits.RequestsPerMinutePerUser)));
+            options.OnRejected = (context, ct) => new ValueTask(RefuseAsync(context.HttpContext,
+                context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter : TimeSpan.FromSeconds(10), ct));
+            options.GlobalLimiter = LocalLimiter(limits);
         });
     }
+
+    /// <summary>The 429 every limiter answers with: Retry-After in whole seconds, and a line of JSON.</summary>
+    public static async Task RefuseAsync(HttpContext http, TimeSpan wait, CancellationToken ct)
+    {
+        http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        http.Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+        await http.Response.WriteAsJsonAsync(new { error = "Too many requests. Try again shortly." }, ct);
+    }
+
+    /// <summary>
+    /// What a request is counted under: its address ("a:…") and its sign-in token's digest ("u:…"), each null when
+    /// that limit does not apply to it (the liveness probe is never counted; a request without a token has no user).
+    /// </summary>
+    public static (string? Address, string? User) Keys(HttpContext http)
+    {
+        if (IsExempt(http)) return (null, null);
+        var address = "a:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        var user = Auth.RequireAuthFilter.ExtractBearerToken(http.Request.Headers.Authorization) is { } token ? "u:" + Fingerprint(token) : null;
+        return (address, user);
+    }
+
+    /// <summary>The limits counted in this process: both must allow a request — its address, and its sign-in token.</summary>
+    public static PartitionedRateLimiter<HttpContext> LocalLimiter(ServiceLimits limits) =>
+        PartitionedRateLimiter.CreateChained(
+            PartitionedRateLimiter.Create<HttpContext, string>(http =>
+                limits.RequestsPerMinutePerAddress <= 0 || Keys(http).Address is not { } address
+                    ? RateLimitPartition.GetNoLimiter("-")
+                    : PerMinute(address, limits.RequestsPerMinutePerAddress)),
+            PartitionedRateLimiter.Create<HttpContext, string>(http =>
+                limits.RequestsPerMinutePerUser <= 0 || Keys(http).User is not { } user
+                    ? RateLimitPartition.GetNoLimiter("-")
+                    : PerMinute(user, limits.RequestsPerMinutePerUser)));
 
     private static RateLimitPartition<string> PerMinute(string key, int permits) =>
         RateLimitPartition.GetSlidingWindowLimiter(key, _ => new SlidingWindowRateLimiterOptions
@@ -239,8 +256,10 @@ public static class ServiceHardening
             app.UseCors(policy => policy.WithOrigins([.. limits.CorsOrigins]).AllowAnyHeader().AllowAnyMethod().AllowCredentials());
         }
 
-        // Counted first, so that a stream of oversized requests is limited like any other.
-        app.UseRateLimiter();
+        // Counted first, so that a stream of oversized requests is limited like any other. Where Redis is
+        // configured, over every instance of the service; otherwise in this process.
+        if (app.Services.GetService<Cluster.SharedRateLimit>() is not null) Cluster.SharedRateLimit.Use(app);
+        else app.UseRateLimiter();
 
         app.Use(async (context, next) =>
         {

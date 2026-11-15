@@ -45,11 +45,24 @@ public sealed record RedisOptions(string? Url)
 /// <summary>The one connection to Redis that signals, places and counters share. Opened on first use.</summary>
 public sealed class RedisLink(RedisOptions options) : IAsyncDisposable
 {
-    private readonly Lazy<Task<ConnectionMultiplexer>> _connection = new(() => ConnectionMultiplexer.ConnectAsync(options.Configuration()));
+    // Started on the thread pool: the first connection attempt to a Redis that is not there takes seconds,
+    // and must not take them from whichever request happened to come first.
+    private readonly Lazy<Task<ConnectionMultiplexer>> _connection = new(() => Task.Run(() => ConnectionMultiplexer.ConnectAsync(options.Configuration())));
 
     public Task<ConnectionMultiplexer> ConnectionAsync() => _connection.Value;
 
     public async Task<IDatabase> DatabaseAsync() => (await ConnectionAsync()).GetDatabase();
+
+    /// <summary>
+    /// Without waiting: Redis if it is connected right now, else null (and a first connection is started if none
+    /// was). For what sits in the way of every request: when Redis is away, the caller falls back at once instead
+    /// of waiting seconds for a timeout. (Found by measuring: each request took about 5 s with Redis down.)
+    /// </summary>
+    public IDatabase? DatabaseIfUp()
+    {
+        var connecting = _connection.Value;
+        return connecting.IsCompletedSuccessfully && connecting.Result.IsConnected ? connecting.Result.GetDatabase() : null;
+    }
 
     /// <summary>Null when Redis answers; otherwise what is wrong, in a line without the address.</summary>
     public async Task<string?> ProblemAsync(CancellationToken ct)
@@ -103,8 +116,8 @@ public sealed class RedisLoginThrottle(RedisLink link, ILogger<RedisLoginThrottl
     {
         try
         {
-            var connection = link.ConnectionAsync().GetAwaiter().GetResult();
-            return connection.IsConnected ? connection.GetDatabase() : null;
+            // Not waiting for a connection that is not there: a sign-in must not hang on Redis.
+            return link.DatabaseIfUp();
         }
         catch (RedisException)
         {
