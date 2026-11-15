@@ -30,7 +30,7 @@ RUN dotnet publish backend/src/Cerberus.Api/Cerberus.Api.csproj \
       --configuration Release --no-restore --output /app/publish
 
 # ---- runtime --------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.15 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
