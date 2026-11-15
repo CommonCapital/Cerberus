@@ -44,7 +44,9 @@ public sealed class ChatHub(IModelProviderResolver resolver) : Hub
         if (!string.IsNullOrWhiteSpace(token) && http is not null)
         {
             var auth = http.RequestServices.GetRequiredService<AuthService>();
-            userId = await auth.ValidateTokenAsync(token, Context.ConnectionAborted);
+            // API tokens use HTTP turn submission/replay, which checks revocation on every request.
+            // Long-lived hub connections accept interactive sign-in sessions only.
+            userId = await auth.ValidateSessionTokenAsync(token, Context.ConnectionAborted);
         }
         if (userId is null)
         {

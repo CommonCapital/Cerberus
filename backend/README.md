@@ -2,6 +2,8 @@
 
 **The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite, or a PostgreSQL of your own when one is configured and answers) + SignalR, with no hosted services. It has every capability of the original TypeScript server — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The legacy TypeScript server and Prisma packages have been removed; the CLI uses explicit HTTP contracts against this backend. See "Parity with the TypeScript server" below for the historical parity audit.
 
+Named API tokens for pipelines are managed through `/auth/tokens` using an ordinary sign-in session. Creation returns the secret once; subsequent reads return metadata only. Tokens have the owner’s REST access and normal engagement/approval checks, expire after 90 days by default (1–365 configurable), and can be revoked independently of sign-in. Their full values are not stored; validation uses an indexed SHA-256 digest. Management cannot be performed using an API token. Both SignalR hubs require a sign-in session; pipeline clients use HTTP event replay, which validates the credential on every request. See the root README’s CI section for the endpoint bodies and limits. Per-token scopes, OIDC and organisational roles remain pending.
+
 ## Projects
 
 | Project | Role |
@@ -66,6 +68,9 @@ docker compose up -d
 | POST | `/auth/register` | — | `{ email, password }` → `{ token }` |
 | POST | `/auth/login` | — | `{ email, password }` → `{ token }` |
 | POST | `/auth/logout` | Bearer | Revokes the token |
+| GET | `/auth/tokens` | Sign-in session | Own named API-token metadata, never bearer values or hashes |
+| POST | `/auth/tokens` | Sign-in session | `{ name, expiresInDays? }` → 201 with metadata and a one-time `token`; default 90 days, range 1–365 |
+| DELETE | `/auth/tokens/{id}` | Sign-in session | Revokes one owned API token; idempotent 204, other user's or unknown id → 404 |
 | GET | `/sessions` | Bearer | List sessions (helpers' conversations are not listed) |
 | GET | `/sessions/{id}` | Bearer | Session + parsed messages |
 | POST | `/sessions` | Bearer | `{ title, parentId? }` → created session (the title is kept as one line); with `parentId`, a helper's conversation under that session |

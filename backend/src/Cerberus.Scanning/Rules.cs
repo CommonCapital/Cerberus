@@ -61,6 +61,10 @@ public static class Rules
             R(@"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----"), UseSecretStore),
         new("secret.github-token", "GitHub token", Severity.High, "secret", "CWE-798", "high",
             R(@"\b(?:gh[pousr]_[0-9A-Za-z]{36,}|github_pat_[0-9A-Za-z_]{40,})\b"), UseSecretStore),
+        new("secret.cerberus-api-token", "Cerberus personal API token", Severity.High, "secret", "CWE-798", "high",
+            // Exactly the unpadded 256-bit credential. Word boundaries would mishandle '-' and '_';
+            // do not redact its short display prefix or a fragment of a longer identifier.
+            R(@"(?<![A-Za-z0-9_-])cerb_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])"), UseSecretStore),
         new("secret.slack-token", "Slack token", Severity.High, "secret", "CWE-798", "high",
             R(@"\bxox[baprs]-[0-9A-Za-z-]{10,}"), UseSecretStore),
         new("secret.google-api-key", "Google API key", Severity.High, "secret", "CWE-798", "high",

@@ -8,6 +8,7 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public List<AuthSession> AuthSessions { get; set; } = [];
+    public List<ApiToken> ApiTokens { get; set; } = [];
     public List<Session> Sessions { get; set; } = [];
     public List<UserApiKey> ApiKeys { get; set; } = [];
     public List<Scan> Scans { get; set; } = [];
@@ -25,6 +26,22 @@ public class AuthSession
     public User? User { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>A named, revocable pipeline credential. Only its SHA-256 digest is stored, never its bearer value.</summary>
+public class ApiToken : IUserOwned
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string UserId { get; set; } = string.Empty;
+    public User? User { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string TokenHash { get; set; } = string.Empty;
+
+    /// <summary>The first twelve characters, for distinguishing credentials; never enough to authenticate.</summary>
+    public string TokenPrefix { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
 }
 
 /// <summary>A user's API key for a cloud model provider, encrypted at rest.</summary>

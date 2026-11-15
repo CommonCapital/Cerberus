@@ -15,6 +15,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
 
     public DbSet<User> Users => Set<User>();
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
     public DbSet<Scan> Scans => Set<Scan>();
@@ -83,6 +84,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
         // Every type with an owner. A sign-in session is not among them: it is looked up by its
         // secret token before the user is known. Users have no owner but themselves.
         OwnedByUser<UserApiKey>(modelBuilder);
+        OwnedByUser<ApiToken>(modelBuilder);
         OwnedByUser<Scan>(modelBuilder);
         OwnedByUser<ComplianceAssessment>(modelBuilder);
         OwnedByUser<Engagement>(modelBuilder);
@@ -121,6 +123,18 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
             e.HasKey(a => a.Id);
             e.HasIndex(a => a.Token).IsUnique();
             e.HasIndex(a => a.UserId);
+        });
+
+        modelBuilder.Entity<ApiToken>(e =>
+        {
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Name).HasMaxLength(100);
+            e.Property(t => t.TokenHash).HasMaxLength(64);
+            e.Property(t => t.TokenPrefix).HasMaxLength(12);
+            e.HasIndex(t => t.TokenHash).IsUnique();
+            e.HasIndex(t => new { t.UserId, t.CreatedAt });
+            e.HasOne(t => t.User).WithMany(u => u.ApiTokens).HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Session>(e =>

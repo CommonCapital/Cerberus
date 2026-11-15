@@ -13,6 +13,28 @@ public class EgressGuardTests
     private static readonly EgressGuard Guard = new(["Acme Bank", "pay.acme.example", "olena@acme.example"], ["Project Nightjar"]);
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_Cerberus_personal_token_cannot_leave_in_a_research_question(bool encoded)
+    {
+        // Assembled here so a credential-shaped literal is never committed to the repository.
+        var token = "cerb_" + new string('B', 40) + "-_A";
+        var value = encoded ? string.Concat(token.Select(c => $"%{(int)c:X2}")) : token;
+        var refusal = new EgressGuard().Refuse($"Check https://example.org/?credential={value}");
+        Assert.NotNull(refusal);
+        Assert.Contains("credential", refusal);
+        Assert.DoesNotContain(token, refusal);
+        Assert.DoesNotContain(value, refusal);
+    }
+
+    [Fact]
+    public void A_Cerberus_display_prefix_is_not_mistaken_for_a_complete_token()
+    {
+        var prefix = "cerb_" + new string('C', 7);
+        Assert.Null(new EgressGuard().Refuse($"What does the credential prefix {prefix} identify?"));
+    }
+
+    [Theory]
     [InlineData("Is it safe to call pickle.loads on data from outside in Python?")]
     [InlineData("CVE-2024-3094 xz backdoor affected versions")]
     [InlineData("https://nvd.nist.gov/vuln/detail/CVE-2021-44228")]

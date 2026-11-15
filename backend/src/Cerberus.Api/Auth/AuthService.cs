@@ -6,9 +6,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Cerberus.Api.Auth;
 
 /// <summary>Local, self-hosted authentication (replaces Clerk).</summary>
-public sealed class AuthService(CerberusDbContext db)
+public sealed class AuthService(CerberusDbContext db, ApiTokenService? apiTokens = null)
 {
     private static readonly TimeSpan SessionTtl = TimeSpan.FromDays(30);
+    private readonly ApiTokenService _apiTokens = apiTokens ?? new ApiTokenService(db);
 
     public async Task<string> RegisterAsync(string email, string password, CancellationToken ct = default)
     {
@@ -33,12 +34,19 @@ public sealed class AuthService(CerberusDbContext db)
         return await CreateSessionAsync(user.Id, ct);
     }
 
-    public async Task<string?> ValidateTokenAsync(string token, CancellationToken ct = default)
+    public Task<string?> ValidateTokenAsync(string token, CancellationToken ct = default) =>
+        ApiTokenService.IsApiToken(token)
+            ? _apiTokens.ValidateAsync(token, ct)
+            : ValidateSessionTokenAsync(token, ct);
+
+    /// <summary>Interactive login only: API tokens cannot create or manage other credentials.</summary>
+    public async Task<string?> ValidateSessionTokenAsync(string token, CancellationToken ct = default)
     {
+        if (ApiTokenService.IsApiToken(token)) return null;
         var session = await db.AuthSessions.FirstOrDefaultAsync(a => a.Token == token, ct);
         if (session is null) return null;
 
-        if (session.ExpiresAt < DateTime.UtcNow)
+        if (StoredTime.Utc(session.ExpiresAt) <= DateTime.UtcNow)
         {
             db.AuthSessions.Remove(session);
             await db.SaveChangesAsync(ct);
@@ -49,6 +57,11 @@ public sealed class AuthService(CerberusDbContext db)
 
     public async Task LogoutAsync(string token, CancellationToken ct = default)
     {
+        if (ApiTokenService.IsApiToken(token))
+        {
+            await _apiTokens.RevokeBearerAsync(token, ct);
+            return;
+        }
         var session = await db.AuthSessions.FirstOrDefaultAsync(a => a.Token == token, ct);
         if (session is not null)
         {
