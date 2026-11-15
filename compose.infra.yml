@@ -4,6 +4,10 @@
 #
 # Needs RABBITMQ_PASSWORD in .env: there is no default password. With this file the API sends
 # its work over RabbitMQ; without it the queue lives inside the API process.
+#
+# The API declares its queues itself, as quorum queues with a dead-letter queue (cerberus.dead-letters).
+# A volume from before that holds classic queues: once they are empty, delete cerberus.jobs and
+# cerberus.chat-turns (management UI on port 15672), or remove the volume; they are made again.
 
 services:
   api:
