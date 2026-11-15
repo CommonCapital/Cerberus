@@ -28,15 +28,36 @@ public sealed record RabbitMqOptions(string? Url, ushort Prefetch = 32)
 /// <item>A message is two ids — the work's and its user's. Anything else that arrives is rejected, not run.</item>
 /// <item>A broker that is away does not lose work: what could not be published is kept and tried again, and
 /// what is stored as waiting is published again when the service starts. Consumers reconnect on their own.</item>
+/// <item>The work queues are quorum queues (replicated where the broker is a cluster). A message that is
+/// rejected, or that has been handed out <see cref="DeliveryLimit"/> times without being finished (a worker
+/// that keeps crashing on it), goes to <see cref="DeadLetters"/> to be looked at, instead of being dropped or
+/// coming round for ever.</item>
+/// <item>A consumer the broker ends — its queue deleted, a failover — starts again and declares its queue again.</item>
 /// </list>
-/// Written against the client library and the protocol; no broker was available where it was written
-/// (see PLAN.md §17 for how to verify it).
+/// Verified against RabbitMQ 4.4 on 2026-11-15 (PLAN.md §17), which is where the last two came from.
 /// </summary>
 public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> logger) : IMessageBus, IAsyncDisposable
 {
     public const string MessageType = "cerberus.work.v1";
     public const int MaxIdLength = 100;
     public static readonly TimeSpan RetryEvery = TimeSpan.FromSeconds(5);
+
+    /// <summary>Where rejected messages, and messages handed out too often, are kept for a person to look at.</summary>
+    public const string DeadLetters = "cerberus.dead-letters";
+
+    /// <summary>How often a message may be handed out before it is set aside.</summary>
+    public const int DeliveryLimit = 5;
+
+    /// <summary>What a work queue is declared with. A queue that exists with other settings is not changed — see <see cref="DeclareAsync"/>.</summary>
+    public static IDictionary<string, object?> WorkQueueArguments { get; } = new Dictionary<string, object?>
+    {
+        ["x-queue-type"] = "quorum",
+        ["x-dead-letter-exchange"] = "",
+        ["x-dead-letter-routing-key"] = DeadLetters,
+        ["x-delivery-limit"] = DeliveryLimit,
+    };
+
+    private static IDictionary<string, object?> DeadLetterArguments { get; } = new Dictionary<string, object?> { ["x-queue-type"] = "quorum" };
 
     private readonly SemaphoreSlim _connecting = new(1, 1);
     private readonly SemaphoreSlim _publishing = new(1, 1);
@@ -45,6 +66,8 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
     private IConnection? _connection;
     private IChannel? _publisher;
     private int _retrying;
+    // Set when a queue exists on the broker with settings this version does not declare: what the operator must do.
+    private volatile string? _settingsProblem;
 
     public string Transport => "RabbitMQ";
 
@@ -78,9 +101,10 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
         try
         {
             var connection = await ConnectionAsync(ct);
-            return connection.IsOpen
-                ? _parked.IsEmpty ? null : $"{_parked.Count} message(s) are waiting to be handed to the broker"
-                : "the connection to the broker is down; reconnecting";
+            return !connection.IsOpen ? "the connection to the broker is down; reconnecting"
+                : _settingsProblem is { } settings ? settings
+                : _parked.IsEmpty ? null
+                : $"{_parked.Count} message(s) are waiting to be handed to the broker";
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -108,7 +132,8 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
                 // With confirmations a publish returns only when the broker has the message.
                 _publisher = await connection.CreateChannelAsync(
                     new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true), ct);
-                foreach (var name in WorkQueues.All) await DeclareAsync(_publisher, name, ct);
+                await DeclareAsync(_publisher, DeadLetters, DeadLetterArguments, ct);
+                foreach (var name in WorkQueues.All) await DeclareAsync(_publisher, name, WorkQueueArguments, ct);
             }
             var properties = new BasicProperties { Persistent = true, ContentType = "application/json", Type = MessageType, MessageId = message.Id };
             await _publisher.BasicPublishAsync(exchange: "", routingKey: queue, mandatory: true, basicProperties: properties, body: Encode(message), cancellationToken: ct);
@@ -117,6 +142,17 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogWarning("Could not hand a message to the broker at {Where} ({Problem}); it is kept and tried again.", options.Where, ex.GetType().Name);
+            // A fresh channel next time, which declares the queues again: one may have been deleted under us,
+            // and a publish to a queue that is not there is returned, not stored.
+            try
+            {
+                if (_publisher is not null) await _publisher.DisposeAsync();
+            }
+            catch (Exception closing) when (closing is not OperationCanceledException)
+            {
+                // It is being replaced anyway.
+            }
+            _publisher = null;
             return false;
         }
         finally
@@ -132,11 +168,12 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
             while (!_stopping.IsCancellationRequested && !_parked.IsEmpty)
             {
                 await Task.Delay(RetryEvery, _stopping.Token);
-                for (var left = _parked.Count; left > 0 && _parked.TryDequeue(out var parked); left--)
+                // Taken off the list only once the broker has it: until then it counts as waiting (readiness says
+                // so), and the order is kept. (Taking it off first made "nothing waiting" true too early.)
+                while (_parked.TryPeek(out var parked))
                 {
-                    if (await TryPublishAsync(parked.Queue, parked.Message, _stopping.Token)) continue;
-                    _parked.Enqueue(parked);
-                    break;   // still away: wait before the next try
+                    if (!await TryPublishAsync(parked.Queue, parked.Message, _stopping.Token)) break;   // still away: wait
+                    _parked.TryDequeue(out _);
                 }
             }
         }
@@ -167,7 +204,8 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
             {
                 var connection = await ConnectionAsync(ct);
                 await using var channel = await connection.CreateChannelAsync(cancellationToken: ct);
-                await DeclareAsync(channel, queue, ct);
+                await DeclareAsync(channel, DeadLetters, DeadLetterArguments, ct);
+                await DeclareAsync(channel, queue, WorkQueueArguments, ct);
                 // A job consumer does one job at a time and must not sit on others; turns wait in the worker for their place.
                 await channel.BasicQosAsync(0, queue == WorkQueues.Jobs ? (ushort)1 : Math.Max((ushort)1, options.Prefetch), false, ct);
 
@@ -197,10 +235,18 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
                         }
                     }));
                 };
-                // Closed for good (not a connection the client is restoring): start over with a new channel.
+                // The broker ended this consumer — its queue was deleted, or moved in a failover: start over, which
+                // declares the queue again. (Found in the live check: before, consuming simply stopped.)
+                consumer.UnregisteredAsync += (_, _) =>
+                {
+                    if (!ct.IsCancellationRequested) closed.TrySetResult();
+                    return Task.CompletedTask;
+                };
+                // The channel closed while the connection stays up — a channel error, not a lost connection, which the
+                // client restores by itself: nothing restores this one, so start over with a new channel.
                 channel.ChannelShutdownAsync += (_, reason) =>
                 {
-                    if (reason.Initiator != ShutdownInitiator.Library || !connection.IsOpen) return Task.CompletedTask;
+                    if (reason.Initiator == ShutdownInitiator.Application || !connection.IsOpen) return Task.CompletedTask;
                     closed.TrySetResult();
                     return Task.CompletedTask;
                 };
@@ -228,8 +274,29 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
         inbox.TryComplete();
     }
 
-    private static Task DeclareAsync(IChannel channel, string queue, CancellationToken ct) =>
-        channel.QueueDeclareAsync(queue, durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: ct);
+    /// <summary>
+    /// Declares a queue with the settings this version wants. A queue that already exists with other settings —
+    /// declared by an earlier version — is refused by the broker (406), and the broker closes the channel. That
+    /// is said plainly, in the log and in readiness, with what to do; nothing is deleted on its own, because the
+    /// queue may still hold work.
+    /// </summary>
+    private async Task DeclareAsync(IChannel channel, string queue, IDictionary<string, object?> arguments, CancellationToken ct)
+    {
+        try
+        {
+            await channel.QueueDeclareAsync(queue, durable: true, exclusive: false, autoDelete: false, arguments: arguments, cancellationToken: ct);
+        }
+        catch (RabbitMQ.Client.Exceptions.OperationInterruptedException ex) when (ex.ShutdownReason?.ReplyCode == Constants.PreconditionFailed)
+        {
+            _settingsProblem = $"the queue {queue} exists on the broker with other settings than this version uses " +
+                               "(an older version declared it); once it is empty, delete it and it is declared again";
+            logger.LogError("The queue {Queue} exists on the broker at {Where} with other settings than this version uses ({Reason}). " +
+                            "Let it empty, delete it (management UI or rabbitmqctl delete_queue), and it is declared again.",
+                queue, options.Where, ex.ShutdownReason?.ReplyText);
+            throw;
+        }
+        if (_settingsProblem?.Contains($"the queue {queue} ", StringComparison.Ordinal) == true) _settingsProblem = null;
+    }
 
     private async Task<IConnection> ConnectionAsync(CancellationToken ct)
     {
@@ -255,8 +322,12 @@ public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> lo
         }
     }
 
+    private int _disposed;
+
+    /// <summary>Closes the connection. Safe to call more than once (the container and an owner may both do it).</summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         _stopping.Cancel();
         try
         {
