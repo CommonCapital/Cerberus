@@ -68,7 +68,7 @@ public static class CommandRules
 }
 
 /// <summary>
-/// Permission modes (PLAN.md §6.5): how much runs without asking. A user has a
+/// Permission modes: how much runs without asking. A user has a
 /// default policy; an engagement may override it. The CLI reads the same
 /// policy to decide which chat tool calls to ask about.
 /// </summary>

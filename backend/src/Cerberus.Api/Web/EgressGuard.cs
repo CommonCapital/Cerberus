@@ -5,7 +5,7 @@ using Cerberus.Scanning;
 namespace Cerberus.Api.Web;
 
 /// <summary>
-/// What may leave this machine in a question to the internet (PLAN.md §21).
+/// What may leave this machine in a question to the internet.
 /// An agent that has read the code under review knows things that must not
 /// be typed into a search box: credentials, the names and addresses of the
 /// systems being tested, pieces of the code itself. This check is

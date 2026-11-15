@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Cerberus.Compliance;
 
-/// <summary>A control-catalog framework loaded from JSON (frameworks are data, not code — see PLAN.md §10).</summary>
+/// <summary>A control-catalog framework loaded from JSON (frameworks are data, not code).</summary>
 public sealed record Catalog(
     string Id,
     string Name,

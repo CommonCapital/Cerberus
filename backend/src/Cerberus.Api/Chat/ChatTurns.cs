@@ -35,7 +35,7 @@ public sealed record ChatTurnOptions(
 }
 
 /// <summary>
-/// Delivers one turn's reply to its user and keeps it (PLAN.md §22). Each chunk gets the turn's next sequence
+/// Delivers one turn's reply to its user and keeps it. Each chunk gets the turn's next sequence
 /// number and is pushed to the user's connections at once; chunks are stored in small batches — at once when
 /// they are more than a fragment of text. Nothing depends on the push arriving: a client that was away reads
 /// what it missed by sequence number, and what is not stored yet is still answered from here.
@@ -168,7 +168,7 @@ public sealed class ChatWorkerHealth
 }
 
 /// <summary>
-/// Answers the turns that were queued (PLAN.md §22, "dialogue over the queue"). A message names a turn and its
+/// Answers the turns that were queued. A message names a turn and its
 /// user; the turn itself is in the database. The order of a conversation is kept — one turn of a session at a
 /// time, the earlier first — and the places are shared fairly: a few per user at a time, so that one user's
 /// burst leaves room for everybody else's question. The reply goes to the user's connections as it is written

@@ -46,7 +46,7 @@ public sealed class OllamaCatalog(HttpClient http) : ILocalModelCatalog
 }
 
 /// <summary>
-/// What the operator can choose from (PLAN.md §6): every provider, whether it can be used right now
+/// What the operator can choose from: every provider, whether it can be used right now
 /// (a key is there; the local server answers), the models offered for it, and how to name any other
 /// model of that provider. The list is an offer, not a limit — see <see cref="ModelRegistry"/>.
 /// </summary>

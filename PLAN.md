@@ -936,3 +936,28 @@ And when every item of §17 carries a date and a result instead of "has never be
 ---
 
 *End of plan. This document captures the full scope discussed: de-clouding (no Clerk/Polar/Neon), local DB + **Alibaba OpenSandbox** sandbox + own authorization, dual LLM support (user API keys + Ollama), .NET backend with TypeScript CLI + web frontends, a fully local deployment (Docker Compose; no cloud target), the multi-agent security fleet powered by a vendored **818-skill** framework-mapped library, and the three product phases — Scan & Detect, Enterprise Compliance (enterprise-grade), and Aggressive Hacking "break & solve" — all bound by an enforced authorization & safety spine whose network-level enforcement is the OpenSandbox FQDN egress allowlist.*
+
+## 25. Open-source release (2026-11-15)
+
+**This file is private.** It stays in this repository and is left out of the public one, as are `AI_SERVICE_DOTNET_FINDINGS.local.md` (git-excluded) and anything under `.git/`. The public tree must not point at it: no "PLAN.md §…" in code, comments or the public READMEs (removed on 2026-11-15; keep it that way — `git grep PLAN.md -- . ':(exclude)PLAN.md'` must find nothing).
+
+**Decided (by the owner, 2026-11-15):**
+- **Licence: Apache-2.0** (`LICENSE`, `NOTICE`; copyright "The Cerberus Authors"; `backend/Directory.Build.props` and every `package.json` say so). Vendored `security-skills/` stays Apache-2.0 with its own notices.
+- **Fresh history for the public repository.** The history of this repository holds a company's questionnaire word for word and its name (the first compliance catalog, 2026-11-08 to 2026-11-15), so it is never published. The public repository starts from one commit of the cleaned tree (branch `public-release`, an orphan); later releases are new commits on that branch, never a push of `main`'s history.
+- **The ESAP catalog is gone** from the tree. In its place `catalogs/vendor-security.{json,md}`: 32 controls in 6 sections, written for Cerberus (own selection, own wording, own deadlines: 30 days standard, 90 at most), id `vendor-security`, now the default catalog. Mentions of ESAP elsewhere in this file are history.
+- **The TypeScript server stays** as the lighter server for machines without .NET (sign-in, sessions, chat; the security features need the .NET backend). Checked 2026-11-15: it starts and answers sign-up and sessions.
+- **The terminal client's origin:** it began as the NightCode project (code-with-antonio/nightcode). The owner reports having the author's permission. That repository has **no licence file**, so get the permission in writing — or the author adding a licence — before the public release: publishing under Apache-2.0 relicenses that code. The former name was removed from the code (the `~/.nightcode` carry-over and the former default account are gone).
+
+**Added for contributors:** `CONTRIBUTING.md`, `SECURITY.md` (GitHub private vulnerability reporting — switch it on in the public repository's settings), `CODE_OF_CONDUCT.md`, issue and pull-request templates, `.github/workflows/ci.yml` (backend on SQLite and on PostgreSQL with Redis installed; CLI types and tests), `.github/dependabot.yml`, a "Responsible use" section in the README.
+
+**Publishing a release** (from a clean checkout of `main` after the changes are merged):
+```bash
+git worktree add --detach ../cerberus-public main
+cd ../cerberus-public
+git checkout --orphan public-release          # first release only; later: git checkout public-release && git checkout main -- .
+git rm -q --cached PLAN.md && rm PLAN.md
+git grep -n -i -E "PLAN\.md|EQUANS|nightcode|ai-service-dotnet|Codex_Clone" -- . ':(exclude)security-skills'   # must print nothing
+git commit -m "Cerberus <version>"
+git push <public-remote> public-release:main
+```
+**Left for the owner:** create the public repository; written permission for the NightCode-derived code; switch on private vulnerability reporting and branch protection; decide whether contributions need a DCO sign-off or a CLA (none is asked for now); a contact for conduct reports besides GitHub.

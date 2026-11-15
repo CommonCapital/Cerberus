@@ -7,7 +7,7 @@ using Cerberus.Scanning;
 namespace Cerberus.Api.Chat;
 
 /// <summary>
-/// Session titles (PLAN.md §19): a chat starts out named after the first
+/// Session titles: a chat starts out named after the first
 /// characters of its first message; once it is under way, the model that is
 /// answering is asked for a few words that say what it is about. A title is
 /// shown in lists, so whatever the model returns is cut down to one short

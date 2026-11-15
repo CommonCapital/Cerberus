@@ -7,7 +7,7 @@ using Cerberus.Jobs;
 namespace Cerberus.Api.Health;
 
 /// <summary>
-/// Things the server binary can do instead of serving (PLAN.md §21), so an
+/// Things the server binary can do instead of serving, so an
 /// installation needs no extra tools:
 /// <list type="bullet">
 /// <item><c>health</c> — asks the service running on this machine whether it is

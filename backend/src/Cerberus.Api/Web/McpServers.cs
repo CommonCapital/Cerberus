@@ -25,7 +25,7 @@ public sealed record McpServerState(
     IReadOnlyList<ExposedTool> Exposed, IReadOnlyList<WithheldTool> Withheld);
 
 /// <summary>
-/// Which of a server's tools an agent gets to see (PLAN.md §21). A server lists whatever it has; that is an
+/// Which of a server's tools an agent gets to see. A server lists whatever it has; that is an
 /// offer, not a decision. The decision is the installation's:
 /// <list type="bullet">
 /// <item>tools the administrator named for this server are exposed — exactly those;</item>

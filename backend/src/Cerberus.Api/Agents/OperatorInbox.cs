@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 namespace Cerberus.Api.Agents;
 
 /// <summary>
-/// Messages from the operator to agents that are running (PLAN.md §6.5,
-/// interrupt and steer). A run that can be steered opens an inbox for its
+/// Messages from the operator to agents that are running (interrupt and
+/// steer). A run that can be steered opens an inbox for its
 /// job; a message posted while it is open is read by the agent before its
 /// next step. In memory only: a message is for the run in progress.
 /// </summary>

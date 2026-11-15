@@ -5,7 +5,7 @@ namespace Cerberus.Api.Agents;
 
 /// <summary>
 /// Limits on an agent run that are enforced in code rather than asked for in
-/// the prompt (PLAN.md §21). A model can loop: ask for the same thing again
+/// the prompt. A model can loop: ask for the same thing again
 /// and again, or keep making calls that fail. The step limit ends that
 /// eventually; this ends it as soon as it is visible, and says why:
 /// <list type="bullet">

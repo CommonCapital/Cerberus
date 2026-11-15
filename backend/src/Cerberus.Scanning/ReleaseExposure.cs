@@ -16,7 +16,7 @@ public sealed record ReleaseIssue(
     int Line = 1);
 
 /// <summary>
-/// What a release exposes (PLAN.md §23, B3): checks on built output rather than
+/// What a release exposes: checks on built output rather than
 /// source — the files a line-based source scan skips. Static and in-process;
 /// nothing is executed.
 ///

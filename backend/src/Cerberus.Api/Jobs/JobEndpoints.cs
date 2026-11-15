@@ -23,7 +23,7 @@ public sealed record SubmitJobRequest(
 
 public sealed record JobMessageRequest(string? Text);
 
-/// <summary>Background jobs (PLAN.md M3): submit, inspect, cancel.</summary>
+/// <summary>Background jobs: submit, inspect, cancel.</summary>
 public static class JobEndpoints
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -390,7 +390,7 @@ public static class JobEndpoints
         }
         else if (type == JobTypes.Assess)
         {
-            var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
+            var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "vendor-security" : body.CatalogId!;
             if (catalogs.Get(catalogId) is null) return BadRequest($"Unknown catalog '{catalogId}'");
 
             string? scanId = null;

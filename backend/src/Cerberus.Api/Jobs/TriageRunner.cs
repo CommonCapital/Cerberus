@@ -15,7 +15,7 @@ namespace Cerberus.Api.Jobs;
 public sealed record TriageJobParameters(string ScanId, string Model, int MaxFindings = 15, bool IncludeTestsAndDocs = false);
 
 /// <summary>
-/// Runs LLM triage over a stored scan's findings (PLAN.md §9, "LLM layer") and
+/// Runs LLM triage over a stored scan's findings and
 /// saves each opinion on the scan as it arrives, so a cancelled or timed-out
 /// run keeps what it finished. Authorization is the caller's job.
 /// </summary>

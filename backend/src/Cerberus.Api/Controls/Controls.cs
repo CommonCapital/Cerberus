@@ -5,7 +5,7 @@ using Cerberus.Triage;
 namespace Cerberus.Api.Controls;
 
 /// <summary>
-/// The kill switch for kinds of tools (PLAN.md §21): an installation can switch whole groups of capability off,
+/// The kill switch for kinds of tools: an installation can switch whole groups of capability off,
 /// for every user and every agent, whatever a request or a model asks for (CERBERUS_DISABLED_TOOLS). A group
 /// that is off is not offered at all — the model never learns it exists — and where a feature depends on it
 /// (research on the internet, outside servers) the feature is off too. An unknown name stops the service at
@@ -89,7 +89,7 @@ public sealed record AgentLimits(TimeSpan? TimeLimit = null);
 
 /// <summary>
 /// Which model does the small jobs around a conversation — its title, the summary of its older part — when the
-/// installation names a cheaper one (CERBERUS_FAST_MODEL; PLAN.md §21, "a fast-model role"). The conversation's
+/// installation names a cheaper one (CERBERUS_FAST_MODEL). The conversation's
 /// own model is used instead whenever the fast one would change where the conversation's text goes:
 /// <list type="bullet">
 /// <item>a fast model on this machine (Ollama) may always do it;</item>

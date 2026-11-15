@@ -20,7 +20,7 @@ public sealed record UpdateScheduleRequest(string? Name, JsonElement? Every, boo
 public sealed record ScheduleFiring(string Kind, string Detail, string? JobId);
 
 /// <summary>
-/// Recurring runs (PLAN.md §22): a schedule is a stored job request and an
+/// Recurring runs: a schedule is a stored job request and an
 /// interval. When it is due, the request is submitted <i>through the same
 /// path as a request from the operator</i> — the same validation, the same
 /// engagement scope, the same permission policy. A scheduled run that needs

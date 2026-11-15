@@ -18,7 +18,7 @@ public sealed record SkillDocument(SkillSummary Summary, string Content, bool Tr
 public sealed record SkillOptions(string SkillsRoot);
 
 /// <summary>
-/// Which skills an agent may load, by capability tier (PLAN.md §3, §7.5).
+/// Which skills an agent may load, by capability tier.
 /// Skills that describe how to attack a system are procedures for the
 /// intrusive tiers; an agent working at a passive tier has no use for them and
 /// must not receive them. The rule is deliberately coarse — by the library's

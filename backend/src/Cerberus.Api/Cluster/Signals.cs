@@ -27,7 +27,7 @@ public static class Topics
 }
 
 /// <summary>
-/// A word from one instance to all of them (PLAN.md §22 item 7). A request can arrive at any instance, but a
+/// A word from one instance to all of them. A request can arrive at any instance, but a
 /// running job, a turn being answered and a job waiting for an answer each live in exactly one: the instance
 /// that got the request passes it on, and the one that has the work acts on it. The others hear it and have
 /// nothing to do. The decision itself is in the database before anything is said here — a signal that is

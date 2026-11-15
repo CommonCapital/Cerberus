@@ -35,7 +35,7 @@ public static class ApprovalStatus
 }
 
 /// <summary>
-/// Human in the loop (PLAN.md §6.5): a job that needs consent is stored in
+/// Human in the loop: a job that needs consent is stored in
 /// <c>AwaitingApproval</c> with a request describing exactly what will happen.
 /// Nothing runs until the operator approves; a denial ends the job cleanly.
 /// The wait lives in the database, so it survives restarts and can be answered

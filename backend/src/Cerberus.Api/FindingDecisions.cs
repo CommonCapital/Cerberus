@@ -27,7 +27,7 @@ public static class DecisionStatuses
 }
 
 /// <summary>
-/// The operator's decisions on findings (PLAN.md §9, a finding's status). A
+/// The operator's decisions on findings. A
 /// decision is tied to what the finding is — its rule, file and code — not to
 /// one scan, so it carries over to later scans of the same code, also when
 /// lines above it move. Decisions are the operator's alone; a model cannot make one.

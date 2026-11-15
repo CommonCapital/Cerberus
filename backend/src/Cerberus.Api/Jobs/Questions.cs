@@ -24,7 +24,7 @@ public static class QuestionStatus
 }
 
 /// <summary>
-/// Where running jobs put questions to the operator and wait (PLAN.md §6.5).
+/// Where running jobs put questions to the operator and wait.
 /// The question is stored and announced on the run's stream; the job moves to
 /// AwaitingInput with its time limit paused; the answer arrives through
 /// <c>POST /questions/{id}/answer</c> and wakes the job up.

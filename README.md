@@ -14,9 +14,7 @@
 
 </div>
 
-> **Status: active rewrite.** Cerberus is being built on a de-clouded terminal-agent chassis. See **[PLAN.md](PLAN.md)** for the full architecture and roadmap. This README reflects what exists today.
->
-> **Taking the project over?** Start at [PLAN.md §24](PLAN.md#24-handoff--everything-left-to-100): where it stands, how to work in it, what to verify first, and the ordered list of everything that is left.
+> **Status: under active development.** This README describes what exists today; what is planned is marked as such. Cerberus is a security tool: use it only on systems you own or are authorized to test (see [Responsible use](#responsible-use)).
 
 ---
 
@@ -25,7 +23,7 @@
 Cerberus runs an **engagement** against a **target** (a repo, a running service, an infrastructure description) through three phases, all bound by an enforced authorization & safety spine (scope, verified target ownership, capability tiers, rate caps, kill switch, audit):
 
 1. **Scan & Detect** — SAST, dependency/CVE analysis, secret detection, and LLM-driven system-design/threat-model review (CodeQL-class).
-2. **Enterprise Compliance** — grade the target against rigid control catalogs and produce an auditable compliance matrix with action plans and deadlines. A built-in, vendor-neutral catalog ships at [`catalogs/enterprise-sap.json`](catalogs/enterprise-sap.json).
+2. **Enterprise Compliance** — grade the target against rigid control catalogs and produce an auditable compliance matrix with action plans and deadlines. Two catalogs ship as data in [`catalogs/`](catalogs/): a vendor security assessment written for Cerberus, and the OWASP Top 10.
 3. **Aggressive Hacking ("break & solve")** — authorized, scoped exploitation and resilience testing, then automated remediation. Built last, gated by the authorization spine.
 
 Agents are powered by a vendored library of **818 framework-mapped cybersecurity skills** under [`security-skills/`](security-skills/) (MITRE ATT&CK / NIST CSF / D3FEND / OWASP, Apache-2.0).
@@ -37,22 +35,21 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 | Area | Status |
 |---|---|
 | TypeScript CLI | ✅ chat, plus `/scan`, `/findings`, `/review`, `/sast`, `/threatmodel`, `/index`, `/assess`, `/assessments` and `/runs` against the .NET backend |
-| TypeScript server (`packages/server`) | 🗄 superseded by the .NET backend, which has all of its features; kept for reference |
+| TypeScript server (`packages/server`) | ✅ a lighter server for machines without .NET: sign-in, sessions and the chat agent. The security features (scans, compliance, jobs, agents) need the .NET backend |
 | .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
-| Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
+| Sandbox, agent fleet, web frontend | 📋 planned |
 
 ## Repository layout
 
 ```
-packages/        # TypeScript baseline (de-clouded)
+packages/        # TypeScript: the terminal client and a lighter server
   cli/           #   OpenTUI + React terminal client; runs project tools locally
   server/        #   Hono API: local auth, sessions, AI streaming
   database/      #   Prisma schema + client (local SQLite)
   shared/        #   Shared Zod schemas, tool contracts, model registry
-backend/         # .NET backend (the target server; replaces packages/server)
-catalogs/        # Compliance control catalogs as data (ESAP, + planned OWASP/ISO/SOC2/NIST)
+backend/         # .NET backend (the full server)
+catalogs/        # Compliance control catalogs as data (vendor security, OWASP Top 10)
 security-skills/ # Vendored 818 cybersecurity skills + framework mappings (Apache-2.0)
-PLAN.md          # Full architecture and build roadmap
 ```
 
 ## Getting started
@@ -93,7 +90,7 @@ bun run dev:cli
 
 The CLI signs in to the backend automatically (a local account is created on first `/login`). Chat runs its file and shell tools on your machine, in the directory the CLI was started in — and **asks first** before a tool that edits files or runs a command: `y` allows it once, `a` always allows it, `n` refuses (the model is told). For a file edit, "always" means that kind of action; for a shell command it means **that command** — `a` on `git status -s` remembers `git status`, not every command. A command line runs without asking only if every command in it is one you allowed; anything with redirection, substitution or a subshell, anything that names a secrets file, and commands such as `rm`, `sudo`, `curl` or `python` are asked about every time and are never offered an "always". `/permissions` shows the current policy, switches between *default* and *ask* (everything asks, including reads), and withdraws an "always allow" — a kind of action or a single command rule.
 
-**What the chat agent knows and how its tools behave** (several of these follow a comparison with opencode — PLAN.md §19):
+**What the chat agent knows and how its tools behave:**
 
 - **Your project.** With every message the CLI tells the agent the working directory, platform, date and git branch, and sends the nearest `AGENTS.md` (or `CERBERUS.md`, `CLAUDE.md`) — from the directory the CLI runs in, else from a parent up to the repository root. Put how to build, test and behave in your project there. Do not start the CLI inside a repository you do not trust: its instructions file would be read too.
 - **Reading.** Files come back with line numbers, 2000 lines at a time; the agent reads on with an offset. Reading a file that probably holds secrets (`.env`, key files) asks you every time, and searches skip `.env` files.
@@ -113,7 +110,7 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **A busy provider.** If the model provider is overloaded or rate-limiting, the reply waits and tries again (up to 5 times) and says so, instead of failing.
 - **Saying no.** In the permission prompt, `t` denies and lets you tell the agent what to do instead.
 
-> **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). The original TypeScript server in `packages/server` speaks the same auth, session and chat API and still runs (`bun run --cwd packages/database db:push`, then `bun run dev:server`), but it is superseded: the .NET backend has every one of its features (see the parity table in [`backend/README.md`](backend/README.md)) and all the security features exist only there. Do not run both on port 3000.
+> **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). Without .NET, the TypeScript server in `packages/server` serves the same sign-in, session and chat API (`bun run --cwd packages/database db:push`, then `bun run dev:server`): enough for the chat agent, not for scans, compliance, jobs or the security agents, which exist only in the .NET backend (see the parity table in [`backend/README.md`](backend/README.md)). Do not run both on port 3000.
 
 ### Or: everything in containers
 
@@ -137,7 +134,7 @@ docker compose -f docker-compose.yml -f compose.infra.yml up -d
 - `compose.models.yml` — Ollama, for local models. Several GB.
 - `compose.web.yml` — SearXNG, a search service of your own for the agents' research. Needs `SEARXNG_SECRET`.
 
-First built and run on 2026-11-14: the API, the CLI and the infra stack. The models and web stacks have not been started yet (PLAN.md §15).
+First built and run on 2026-11-14: the API, the CLI and the infra stack. The models and web stacks have not been started yet.
 
 ### Choosing a model
 
@@ -180,7 +177,7 @@ Off by default. An agent that has read your code knows things that must not be t
 
 When you type in the CLI, your request is not answered on the connection that carries it. The server accepts it, puts it on a queue under your account, and a worker answers it; the reply comes back piece by piece over a live connection (SignalR) that only ever carries your own conversations. If the connection drops for a moment, the CLI reads what it missed and the reply is whole. A second prompt sent while the first is still being answered waits its turn. Several people can use one server at once without one long task holding up everyone else's question.
 
-By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (`compose.infra.yml` starts one and sets this for the API) — verified against RabbitMQ 4.1 and 4.4 (PLAN.md §17). Work that keeps failing is set aside in `cerberus.dead-letters` instead of being lost. **If your broker already ran an earlier Cerberus**, readiness will say its queues have other settings: once they are empty, delete `cerberus.jobs` and `cerberus.chat-turns` (or the broker's volume) and they are made again as quorum queues. `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
+By default the queue lives inside the server. Set `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` to put RabbitMQ between accepting work and doing it (`compose.infra.yml` starts one and sets this for the API) — verified against RabbitMQ 4.1 and 4.4. Work that keeps failing is set aside in `cerberus.dead-letters` instead of being lost. **If your broker already ran an earlier Cerberus**, readiness will say its queues have other settings: once they are empty, delete `cerberus.jobs` and `cerberus.chat-turns` (or the broker's volume) and they are made again as quorum queues. `CERBERUS_CHAT_TRANSPORT=http` in the CLI's environment goes back to the direct stream.
 
 **Locking a server down.** `CERBERUS_DISABLED_TOOLS` switches whole kinds of tools off for everyone — for example `web,browser,mcp` keeps every agent off the internet and outside servers, and `shell,file-edits` keeps the chat agent to reading. A misspelt name stops the server at start-up rather than leaving something on. `CERBERUS_AGENT_TIME_LIMIT_SECONDS` stops an agent that runs too long and still gets its summary. `CERBERUS_FAST_MODEL` lets a cheaper model write chat titles and summaries, but never sends a conversation anywhere its own model does not already send it.
 
@@ -261,8 +258,20 @@ cerberus schedule add scan . --every 1d --name "Nightly scan"
 
 ## Local-first by design
 
-No Clerk, no Polar, no hosted Postgres. Authorization is self-hosted (email/password sessions), the database is local SQLite or a PostgreSQL of your own, models run via your own keys or local Ollama, and (per the roadmap) tool execution runs in a self-hosted sandbox. Azure is an optional production deploy target behind the same interfaces, never a requirement to run.
+Nothing hosted is required. Authorization is self-hosted (email/password sessions), the database is local SQLite or a PostgreSQL of your own, models run via your own keys or local Ollama, and tool execution is planned to run in a self-hosted sandbox. A cloud deployment is possible behind the same interfaces, never a requirement to run.
+
+## Responsible use
+
+Cerberus finds weaknesses, and later phases try to exploit them. Use it only on systems you own or have written permission to test, within the scope of that permission. Its safeguards — engagements with a scope, proof of control for hosts and domains, capability tiers, an operator's approval before a consequential tool runs, and an append-only audit log — are there to keep a run inside that permission; do not remove or work around them. You are responsible for complying with the law where you and the target are. The software comes without warranty (see the licence).
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for setting up, running the tests and what a pull request needs, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work together.
+
+## Security
+
+Found a vulnerability in Cerberus itself? Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## License
 
-The vendored `security-skills/` library is Apache-2.0 (see `security-skills/LICENSE`); its attribution is preserved.
+Cerberus is licensed under the [Apache License 2.0](LICENSE). Third-party material keeps its own licence, listed in [NOTICE](NOTICE): the vendored `security-skills/` library is Apache-2.0 and its attribution is preserved.

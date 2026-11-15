@@ -153,7 +153,7 @@ public static class EvidenceAgent
 }
 
 /// <summary>
-/// The compliance evidence agent (PLAN.md §6, M6): for controls the engine
+/// The compliance evidence agent: for controls the engine
 /// could not judge, a model looks in the code for evidence and suggests an
 /// answer. Suggestions are stored beside the assessment and never change its
 /// verdicts or score; only the operator's acceptance does.

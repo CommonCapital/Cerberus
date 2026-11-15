@@ -1,4 +1,4 @@
-# A database, a message broker and Redis for Cerberus (PLAN.md §22).
+# A database, a message broker and Redis for Cerberus.
 #
 #   docker compose -f docker-compose.yml -f compose.infra.yml up -d
 #

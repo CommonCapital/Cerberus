@@ -6,7 +6,7 @@
 # It is interactive: run it with a terminal attached, e.g.
 #   docker compose run --rm cli
 #
-# First built and run on 2026-11-14 (PLAN.md §15). The base image is an exact version.
+# First built and run on 2026-11-14. The base image is an exact version.
 
 FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
