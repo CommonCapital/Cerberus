@@ -12,13 +12,13 @@
     "db:push": "bunx prisma db push"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "prisma": "^7.7.0"
+    "@types/node": "^26.6.6",
+    "prisma": "^7.10.1"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.0",
+    "@libsql/client": "^0.18.0",
     "@prisma/adapter-libsql": "^7.7.0",
-    "@prisma/client": "^7.7.0",
-    "dotenv": "^17.4.1"
+    "@prisma/client": "^7.10.1",
+    "dotenv": "^18.0.10"
   }
 }
