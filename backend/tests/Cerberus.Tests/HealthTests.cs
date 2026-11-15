@@ -153,9 +153,14 @@ public class HealthApiTests(ApiHost host)
         var report = JsonDocument.Parse(body).RootElement;
         Assert.Equal("healthy", report.GetProperty("status").GetString());
         var checks = report.GetProperty("checks").EnumerateArray().ToDictionary(c => c.GetProperty("name").GetString()!, c => c);
-        Assert.Equal(["catalogs", "chat-worker", "database", "embeddings", "job-worker", "key-ring", "mcp", "queue", "scan-root", "skills", "tools"], checks.Keys.Order().ToArray());
+        Assert.Equal(["catalogs", "chat-worker", "database", "embeddings", "job-worker", "key-ring", "mcp", "queue", "scan-root", "services", "skills", "tools"], checks.Keys.Order().ToArray());
         Assert.All(checks.Values, c => Assert.Equal("healthy", c.GetProperty("status").GetString()));
         Assert.Equal("running", checks["job-worker"].GetProperty("detail").GetString());
+        // What the installation runs on, without saying where it is.
+        var services = checks["services"].GetProperty("detail").GetString()!;
+        Assert.Contains(ApiHost.PostgresServer is null ? "the local SQLite file (no PostgreSQL configured)" : "PostgreSQL in use", services);
+        Assert.Contains("the queue inside this process (no RabbitMQ configured)", services);
+        Assert.Equal(ApiHost.PostgresServer is null ? "reachable (SQLite)" : "reachable (PostgreSQL)", checks["database"].GetProperty("detail").GetString());
         Assert.EndsWith(" loaded", checks["skills"].GetProperty("detail").GetString());
 
         // Nothing an anonymous caller could use: no paths, no addresses.

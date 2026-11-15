@@ -107,7 +107,7 @@ public sealed class DatabaseCheck(IServiceScopeFactory scopes) : IReadinessCheck
         var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
         if (!await db.Database.CanConnectAsync(ct)) return (false, "cannot be opened");
         await db.Users.AsNoTracking().Select(u => u.Id).FirstOrDefaultAsync(ct);   // throws if the schema is not there
-        return (true, "reachable");
+        return (true, db.IsPostgres ? "reachable (PostgreSQL)" : "reachable (SQLite)");
     }
 }
 
