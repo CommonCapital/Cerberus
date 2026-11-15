@@ -52,7 +52,7 @@ type Msg = { id: string; role: string; parts: readonly Part[]; metadata?: { shel
  * last reply is not waiting for a tool to run or for the operator's say-so.
  * Only then may the next prompt be sent.
  */
-export function isIdle(messages: readonly Msg[], status: string): boolean {
+export function isIdle(messages: readonly Pick<Msg, "role" | "parts">[], status: string): boolean {
   if (status !== "ready") return false;
   const last = messages.at(-1);
   if (!last || last.role !== "assistant") return true;

@@ -91,7 +91,7 @@ The CLI signs in to the backend automatically (a local account is created on fir
 
 **What the chat agent knows and how its tools behave** (several of these follow a comparison with opencode — PLAN.md §19):
 
-- **Your project.** With every message the CLI tells the agent the working directory, platform, date and git branch, and sends the nearest `AGENTS.md` (or `CERBERUS.md`, `CLAUDE.md`) — from the directory the CLI runs in, else from a parent up to the repository root. Put how to build, test and behave in your project there. Do not start the CLI inside a repository you do not trust: its instructions file would be read too.
+- **Your project.** Every message includes the working directory, platform, date, git branch and applicable instructions. The CLI first reads `~/.cerberus/AGENTS.md` (or the directory selected by `CERBERUS_HOME`), then one file in each directory from the repository root through the directory where you launched it. In each directory it prefers `AGENTS.md`, then `CERBERUS.md`, then `CLAUDE.md`; empty or unreadable files fall through. Global defaults come first, then outer-to-inner project notes, with their directory scope stated. The combined instructions are limited to 20,000 characters and 16 sources, reserving space for closer sources and marking truncation. File reads are bounded; instruction-file symlinks and paths escaping the relevant root are refused. Sources are refreshed for every message. Directories deeper than the launch directory are not discovered automatically while reading code yet. Project notes never override your requests, PLAN mode or tool approvals; only launch the CLI in projects whose instructions you trust.
 - **Reading.** Files come back with line numbers, 2000 lines at a time; the agent reads on with an offset. Reading a file that probably holds secrets (`.env`, key files) asks you every time, and searches skip `.env` files.
 - **Editing.** An edit must match the file, but near-misses a model commonly makes — other line endings, "tidied" quotes and dashes, trailing spaces — still match, and the file keeps its own line endings. The conversation shows what changed as a diff.
 - **Commands.** A command is stopped after 2 minutes unless the agent asks for longer. Long output is shown as its beginning and end; all of it is saved to a temporary file the agent can read.
@@ -101,7 +101,7 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **Tasks.** For work of several steps the agent keeps a task list, shown above the input as it changes: what is done, what is under way, what waits for what. It is the agent's own plan — it updates it as it goes, and it survives a summarised conversation.
 - **Your own slash commands.** A Markdown file `.cerberus/commands/fix-tests.md` in your project (or in `~/.cerberus/commands/` for all projects) becomes `/fix-tests`. Its text is the prompt; `$ARGUMENTS` is replaced by what you type after the name, `$1`, `$2` by single words (the last one takes the rest). An optional first block `---` / `description: …` / `---` sets what the menu shows. Existing `.opencode/commands` and `.claude/commands` files work too. A command only sends a message as you; it runs nothing by itself.
 - **Long conversations.** When a chat nears the model's limit, the earlier part is summarised for the model so the conversation can go on; you are told, and nothing disappears from your screen. `/compact` does it on demand. Local models are assumed to have a small window (8k tokens) unless the backend is started with `CERBERUS_CONTEXT_TOKENS`.
-- **Helpers.** For a question that needs a lot of looking around, the agent can hand it to a helper: a second conversation with the same model that reads and searches on its own and reports back, so the main conversation stays short. You see "Task: …" with what the helper is doing, then how its report begins. A helper cannot change files or run commands, and it asks you before reading a file that probably holds secrets, just as the agent does. Esc stops it.
+- **Helpers.** For a question that needs a lot of looking around, the agent can hand it to a helper: a second conversation with the same model that reads and searches on its own and reports back, so the main conversation stays short. You see "Task: …" with what the helper is doing, then how its report begins. A helper cannot change files or run commands, and it asks you before reading a file that probably holds secrets, just as the agent does. Esc stops it. One user prompt can start at most **four helpers**, one at a time. Failed starts use up an attempt; replaying the same tool call does not start another helper. Tool continuations share that allowance; a new prompt gets a new one. Interrupting or leaving the conversation cancels its active and queued helpers, and a late response cannot restart them.
 - **Readable replies.** A reply's markdown is shown as headings, lists, tables and highlighted code. When the agent looks around — several reads, searches and listings in a row — those calls are folded into one line that counts them; `ctrl+o` shows each one and folds them again. What it changed or ran is always shown in full.
 - **Named conversations.** After its first reply a new conversation is given a short name by the model, so `/sessions` lists what each one was about rather than the first words you typed. `/rename` gives it a name of your own.
 - **Fork.** `/fork` copies the conversation you are in — all of it, or up to the reply to an earlier prompt — and puts you in the copy, so you can try another approach without losing the first. The original stays as it is; `/sessions` lists both.
@@ -135,6 +135,13 @@ bun run test:scripts
 ```
 
 The launcher tests use a stand-in `dotnet` executable and start no real server. Building the API or testing it still requires the .NET 10 SDK.
+
+With that SDK installed, backend checks can also run sequentially:
+
+```bash
+DOTNET_PROCESSOR_COUNT=2 dotnet build backend/Cerberus.slnx --disable-build-servers -m:1 -p:UseSharedCompilation=false -p:BuildInParallel=false -p:RestoreDisableParallel=true
+DOTNET_PROCESSOR_COUNT=2 dotnet test backend/Cerberus.slnx --no-build --no-restore -- xUnit.MaxParallelThreads=1 xUnit.ParallelizeTestCollections=false
+```
 
 ### Or: everything in containers
 

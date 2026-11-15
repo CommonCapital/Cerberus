@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
-import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
-import { MAX_ROUNDS, pendingCalls, reportOf, runHelper, type HelperDeps } from "./subagent";
+import { Chat } from "@ai-sdk/react";
+import { lastAssistantMessageIsCompleteWithToolCalls, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
+import { MAX_ROUNDS, pendingCalls, reportOf, runHelper, settleInterruptedHelpers, type HelperDeps } from "./subagent";
+import { HelperReply, MAX_HELPERS_PER_REPLY } from "./helper-budget";
+import { isIdle } from "./chat-flow";
 
 // A scripted model: each time the helper's conversation is sent, the next reply of the script comes back.
 type Reply = UIMessageChunk[] | Error;
@@ -176,13 +179,173 @@ test("an interrupted helper stops and has no report", async () => {
   });
 
   await expect(runHelper({ ...task, signal: controller.signal }, deps)).rejects.toThrow("interrupted");
-  expect(seen.sent.length).toBeLessThanOrEqual(2);
+  expect(seen.sent).toHaveLength(1);   // no continuation is sent after the interrupted read
 
   const already = new AbortController();
   already.abort();
   const second = harness([say("never")]);
   await expect(runHelper({ ...task, signal: already.signal }, second.deps)).rejects.toThrow("interrupted");
   expect(second.seen.sessions).toEqual([]);   // nothing was started
+});
+
+test("stopping while the child session is being created never starts a model request", async () => {
+  const controller = new AbortController();
+  let finishSession!: (id: string) => void;
+  const creating = new Promise<string>((resolve) => { finishSession = resolve; });
+  const { deps, seen } = harness([say("never requested")], { createSession: () => creating });
+  const pending = runHelper({ ...task, signal: controller.signal }, deps);
+  controller.abort();
+  finishSession("late-child");
+  await expect(pending).rejects.toThrow("interrupted");
+  expect(seen.model).toBe("");   // not even a transport is created
+  expect(seen.sent).toEqual([]);
+  expect(seen.progress).toEqual([]);
+});
+
+test("stopping from the initial progress callback does not send the prompt", async () => {
+  const controller = new AbortController();
+  const { deps, seen } = harness([say("never requested")], { onProgress: () => controller.abort() });
+  await expect(runHelper({ ...task, signal: controller.signal }, deps)).rejects.toThrow("interrupted");
+  expect(seen.sent).toEqual([]);
+});
+
+test("the per-reply budget caps real helper session creation even when every model request fails", async () => {
+  const budget = new HelperReply<Awaited<ReturnType<typeof runHelper>>>();
+  const { deps, seen } = harness(Array.from({ length: MAX_HELPERS_PER_REPLY }, () => new Error("offline")));
+  for (let i = 0; i < MAX_HELPERS_PER_REPLY; i++) {
+    await expect(budget.request(`task-${i}`, (signal) => runHelper({ ...task, signal }, deps)).result).rejects.toThrow("offline");
+  }
+  await expect(budget.request("one-more", (signal) => runHelper({ ...task, signal }, deps)).result).rejects.toThrow("limit of 4 helpers");
+  expect(seen.sessions).toHaveLength(MAX_HELPERS_PER_REPLY);
+  expect(seen.sent).toHaveLength(MAX_HELPERS_PER_REPLY);
+});
+
+test("a replay of a task call reuses its report without creating another child", async () => {
+  const budget = new HelperReply<Awaited<ReturnType<typeof runHelper>>>();
+  const { deps, seen } = harness([say("one report")]);
+  const request = () => budget.request("task-1", (signal) => runHelper({ ...task, signal }, deps));
+  const first = request();
+  const replay = request();
+  expect(replay.first).toBe(false);
+  expect(await first.result).toEqual(await replay.result);
+  expect((await request().result).report).toBe("one report");
+  expect(seen.sessions).toHaveLength(1);
+  expect(seen.sent).toHaveLength(1);
+});
+
+test("stopping a parent task settles it without another model call, and the next prompt works", async () => {
+  let reply = new HelperReply<string>();
+  let finishHelper!: (report: string) => void;
+  const slowHelper = new Promise<string>((resolve) => { finishHelper = resolve; });
+  const { deps, seen } = harness([callTool("task-1", "task", { prompt: "look around" }), say("The new prompt was answered.")]);
+  let helperResult: Promise<string> | undefined;
+  const chat = new Chat<UIMessage>({
+    transport: deps.transport("parent", "echo"),
+    onToolCall({ toolCall }) {
+      helperResult = reply.request(toolCall.toolCallId, () => slowHelper).result;
+      void helperResult.catch(() => {});
+    },
+    sendAutomaticallyWhen: (options) => !reply.signal.aborted && lastAssistantMessageIsCompleteWithToolCalls(options),
+  });
+
+  await chat.sendMessage({ text: "First prompt" });
+  expect(isIdle(chat.messages, chat.status)).toBe(false);
+  reply.cancel();
+  await chat.stop();
+  await settleInterruptedHelpers(chat.lastMessage, (toolCallId, errorText) =>
+    chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
+  await expect(helperResult!).rejects.toThrow("interrupted");
+  expect(isIdle(chat.messages, chat.status)).toBe(true);
+  expect(chat.lastMessage?.parts.find((part) => part.type === "tool-task")).toMatchObject({ state: "output-error" });
+  expect(seen.sent).toHaveLength(1);   // settling the tool never resumes the stopped model
+
+  reply = new HelperReply<string>();   // what submit does, not a tool continuation
+  await chat.sendMessage({ text: "Next prompt" });
+  expect(reportOf(chat.lastMessage)).toBe("The new prompt was answered.");
+  expect(isIdle(chat.messages, chat.status)).toBe(true);
+  expect(seen.sent).toHaveLength(2);
+  expect(await reply.request("task-1", async () => "new allowance").result).toBe("new allowance");
+  finishHelper("a late old report");
+  await Promise.resolve();
+  expect(reportOf(chat.lastMessage)).toBe("The new prompt was answered.");
+});
+
+test("settling a task after the parent fails preserves the main error and does not resume", async () => {
+  const reply = new HelperReply<string>();
+  const { deps, seen } = harness([[
+    ...callTool("task-1", "task", { prompt: "look around" }),
+    { type: "error", errorText: "The main model failed." },
+  ]]);
+  let settling = Promise.resolve();
+  const chat = new Chat<UIMessage>({
+    transport: deps.transport("parent", "echo"),
+    onError() {
+      reply.cancel();
+      settling = settleInterruptedHelpers(chat.lastMessage, (toolCallId, errorText) =>
+        chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
+    },
+    sendAutomaticallyWhen: (options) => !reply.signal.aborted && lastAssistantMessageIsCompleteWithToolCalls(options),
+  });
+  await chat.sendMessage({ text: "First prompt" });
+  await settling;
+  expect(chat.status).toBe("error");
+  expect(chat.error?.message).toBe("The main model failed.");
+  expect(chat.lastMessage?.parts.find((part) => part.type === "tool-task")).toMatchObject({ state: "output-error" });
+  expect(seen.sent).toHaveLength(1);
+});
+
+test("stopping during a task's incomplete JSON settles it and permits the next prompt", async () => {
+  let reply = new HelperReply<string>();
+  let sawPartial!: () => void;
+  const partialSeen = new Promise<void>((resolve) => { sawPartial = resolve; });
+  let requests = 0;
+  let helperCalls = 0;
+  const transport: ChatTransport<UIMessage> = {
+    sendMessages: async ({ abortSignal }) => {
+      requests++;
+      if (requests > 1) {
+        return new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            for (const chunk of say("The next prompt works.")) controller.enqueue(chunk);
+            controller.close();
+          },
+        });
+      }
+      return new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue({ type: "start", messageId: "partial-task" });
+          controller.enqueue({ type: "start-step" });
+          controller.enqueue({ type: "tool-input-start", toolCallId: "task-half", toolName: "task" });
+          controller.enqueue({ type: "tool-input-delta", toolCallId: "task-half", inputTextDelta: '{"prompt":"not finished' });
+          controller.enqueue({ type: "data-partial-ready", data: true, transient: true });
+          abortSignal?.addEventListener("abort", () => controller.close(), { once: true });
+        },
+      });
+    },
+    reconnectToStream: async () => null,
+  };
+  const chat = new Chat<UIMessage>({
+    transport,
+    onData() { sawPartial(); },
+    onToolCall() { helperCalls++; },
+    sendAutomaticallyWhen: (options) => !reply.signal.aborted && lastAssistantMessageIsCompleteWithToolCalls(options),
+  });
+  const first = chat.sendMessage({ text: "Start a helper" });
+  await partialSeen;
+  expect(chat.lastMessage?.parts.find((part) => part.type === "tool-task")).toMatchObject({ state: "input-streaming" });
+  expect(helperCalls).toBe(0);
+  reply.cancel();
+  await chat.stop();
+  await first;
+  await settleInterruptedHelpers(chat.lastMessage, (toolCallId, errorText) =>
+    chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
+  expect(isIdle(chat.messages, chat.status)).toBe(true);
+  expect(requests).toBe(1);
+  reply = new HelperReply<string>();
+  await chat.sendMessage({ text: "Try again" });
+  expect(reportOf(chat.lastMessage)).toBe("The next prompt works.");
+  expect(isIdle(chat.messages, chat.status)).toBe(true);
+  expect(requests).toBe(2);
 });
 
 test("a task without a prompt is refused before anything is started", async () => {
