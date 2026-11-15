@@ -43,15 +43,20 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
     private void OwnedByUser<T>(ModelBuilder modelBuilder) where T : class, IUserOwned =>
         modelBuilder.Entity<T>().HasQueryFilter(e => !OwnerRestricted || e.UserId == OwnerId);
 
+    /// <summary>Whether this context writes to PostgreSQL (else SQLite).</summary>
+    public bool IsPostgres => Database.ProviderName == PostgresStorage.Provider;
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         RefuseForeignWrites();
+        if (IsPostgres) PostgresStorage.CleanText(ChangeTracker);
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         RefuseForeignWrites();
+        if (IsPostgres) PostgresStorage.CleanText(ChangeTracker);
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -258,5 +263,7 @@ public class CerberusDbContext(DbContextOptions<CerberusDbContext> options, Data
             e.HasOne(a => a.User).WithMany(u => u.ComplianceAssessments).HasForeignKey(a => a.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        if (IsPostgres) PostgresStorage.Apply(modelBuilder);
     }
 }

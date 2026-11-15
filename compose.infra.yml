@@ -1,9 +1,12 @@
-# A message broker and a cache for Cerberus (PLAN.md §22).
+# A database, a message broker and Redis for Cerberus (PLAN.md §22).
 #
 #   docker compose -f docker-compose.yml -f compose.infra.yml up -d
 #
-# Needs RABBITMQ_PASSWORD in .env: there is no default password. With this file the API sends
-# its work over RabbitMQ; without it the queue lives inside the API process.
+# Needs POSTGRES_PASSWORD and RABBITMQ_PASSWORD in .env: there are no default passwords. With this
+# file the API keeps its data in PostgreSQL, sends its work over RabbitMQ and shares signals, places
+# in line and counts through Redis; without it, all of that stays inside the API (SQLite on a volume).
+# Here the services are required (CERBERUS_REQUIRE_SERVICES): the API waits for them to be healthy and
+# does not start on its own stand-ins if one is missing. Data already in the SQLite volume is not moved.
 #
 # The API declares its queues itself, as quorum queues with a dead-letter queue (cerberus.dead-letters).
 # A volume from before that holds classic queues: once they are empty, delete cerberus.jobs and
@@ -12,10 +15,36 @@
 services:
   api:
     environment:
+      CERBERUS_POSTGRES_URL: postgres://${POSTGRES_USER:-cerberus}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to use compose.infra.yml}@postgres:5432/${POSTGRES_DB:-cerberus}
       CERBERUS_RABBITMQ_URL: amqp://${RABBITMQ_USER:-cerberus}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env to use compose.infra.yml}@rabbitmq:5672/
+      CERBERUS_REDIS_URL: redis://redis:6379
+      CERBERUS_REQUIRE_SERVICES: "true"
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    ports:
+      # Published on this machine only, for psql and backups. Change the left side if 5432 is taken.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cerberus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to use compose.infra.yml}
+      POSTGRES_DB: ${POSTGRES_DB:-cerberus}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ is a $ for the container's shell: its own POSTGRES_USER and POSTGRES_DB, not compose's.
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   rabbitmq:
     image: rabbitmq:4.1-management
@@ -36,7 +65,7 @@ services:
       retries: 10
       start_period: 20s
 
-  # Cache for IDistributedCache, when something needs one. Unused today (PLAN.md §24.4, A1).
+  # What several copies of the API share: signals, places in line, sign-in and request counts, the SignalR backplane.
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -44,7 +73,13 @@ services:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
 volumes:
+  postgres-data:
   rabbitmq-data:
   redis-data:
