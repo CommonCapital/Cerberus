@@ -1,0 +1,112 @@
+{
+  "id": "owasp-top10",
+  "name": "OWASP Top 10 (2021)",
+  "version": "2021",
+  "description": "Test fixture: the structure of a catalog with placeholder text.",
+  "frameworkAlignment": [
+    "OWASP Top 10"
+  ],
+  "responseScale": [
+    "Compliant",
+    "Partially compliant",
+    "Non-compliant",
+    "Not applicable"
+  ],
+  "sections": [
+    {
+      "id": null,
+      "name": "Web Application Security Risks",
+      "controls": [
+        {
+          "id": "A01",
+          "title": "Broken Access Control",
+          "requirement": "Placeholder requirement for A01.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "A02",
+          "title": "Cryptographic Failures",
+          "requirement": "Placeholder requirement for A02.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "crypto",
+            "config"
+          ]
+        },
+        {
+          "id": "A03",
+          "title": "Injection",
+          "requirement": "Placeholder requirement for A03.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "injection"
+          ]
+        },
+        {
+          "id": "A04",
+          "title": "Insecure Design",
+          "requirement": "Placeholder requirement for A04.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "A05",
+          "title": "Security Misconfiguration",
+          "requirement": "Placeholder requirement for A05.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "config"
+          ]
+        },
+        {
+          "id": "A06",
+          "title": "Vulnerable and Outdated Components",
+          "requirement": "Placeholder requirement for A06.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "dependency"
+          ]
+        },
+        {
+          "id": "A07",
+          "title": "Identification and Authentication Failures",
+          "requirement": "Placeholder requirement for A07.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "secret"
+          ]
+        },
+        {
+          "id": "A08",
+          "title": "Software and Data Integrity Failures",
+          "requirement": "Placeholder requirement for A08.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "deserialization"
+          ]
+        },
+        {
+          "id": "A09",
+          "title": "Security Logging and Monitoring Failures",
+          "requirement": "Placeholder requirement for A09.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "A10",
+          "title": "Server-Side Request Forgery (SSRF)",
+          "requirement": "Placeholder requirement for A10.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    }
+  ]
+}

@@ -205,7 +205,7 @@ public class SkillApiTests(ApiHost host)
         var (client, _) = await host.NewUserAsync();
 
         var page = await client.GetFromJsonAsync<JsonElement>("/skills?q=tls&limit=5");
-        Assert.Equal(818, page.GetProperty("total").GetInt32());
+        Assert.Equal(818 + 31, page.GetProperty("total").GetInt32());   // the security library and the general skills
         var skills = page.GetProperty("skills").EnumerateArray().ToList();
         Assert.InRange(skills.Count, 1, 5);
 
@@ -265,5 +265,74 @@ public class SkillApiTests(ApiHost host)
         var prompt = host.Model.Requests.Skip(sentBefore).Last().Messages.Single().Content;
         Assert.Contains("Reference procedures from the platform's skills library", prompt);
         Assert.All(named, name => Assert.Contains($"- {name}: ", prompt));
+    }
+}
+
+public class SkillFoldersTests
+{
+    private static string Repo()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "security-skills"))) dir = dir.Parent;
+        return dir!.FullName;
+    }
+
+    private static void Skill(string root, string name, string description)
+    {
+        Directory.CreateDirectory(Path.Combine(root, name));
+        File.WriteAllText(Path.Combine(root, name, "SKILL.md"), $"---\nname: {name}\ndescription: {description}\n---\n\nBody of {description}.\n");
+    }
+
+    [Fact]
+    public void Several_folders_are_read_and_the_earlier_one_wins_a_name()
+    {
+        var first = Path.Combine(Path.GetTempPath(), $"skills-a-{Guid.NewGuid():n}");
+        var second = Path.Combine(Path.GetTempPath(), $"skills-b-{Guid.NewGuid():n}");
+        try
+        {
+            Skill(first, "threat-hunting", "from the first folder");
+            Skill(second, "threat-hunting", "from the second folder");
+            Skill(second, "report-writing", "only in the second folder");
+            var missing = Path.Combine(Path.GetTempPath(), $"skills-none-{Guid.NewGuid():n}");
+
+            var library = new SkillLibrary(new SkillOptions(string.Join(Path.PathSeparator, first, missing, second)));
+
+            Assert.Equal(2, library.Count);
+            Assert.Equal("from the first folder", library.Find("threat-hunting")!.Description);
+            Assert.Contains("only in the second folder", library.Read("report-writing", Cerberus.Authorization.CapabilityTier.T0)!.Content);
+        }
+        finally
+        {
+            Directory.Delete(first, recursive: true);
+            Directory.Delete(second, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void The_general_skills_load_and_each_has_a_licence_that_covers_it()
+    {
+        var general = Path.Combine(Repo(), "skills");
+        var library = new SkillLibrary(new SkillOptions(general));
+
+        Assert.Equal(Directory.GetDirectories(general).Length, library.Count);
+        Assert.All(library.All, s => Assert.False(string.IsNullOrWhiteSpace(s.Description), s.Name));
+        foreach (var directory in Directory.GetDirectories(general))
+        {
+            var text = File.ReadAllText(Path.Combine(directory, "SKILL.md"));
+            Assert.DoesNotContain("license: Proprietary", text);
+            // A skill that points at its licence file has one, and it is Apache-2.0.
+            if (text.Contains("LICENSE.txt", StringComparison.Ordinal))
+                Assert.Contains("Apache License", File.ReadAllText(Path.Combine(directory, "LICENSE.txt")));
+        }
+    }
+
+    [Fact]
+    public void By_default_the_security_and_general_skills_are_both_available()
+    {
+        var both = string.Join(Path.PathSeparator, Path.Combine(Repo(), "security-skills", "skills"), Path.Combine(Repo(), "skills"));
+        var library = new SkillLibrary(new SkillOptions(both));
+
+        Assert.NotNull(library.Find("mcp-builder"));
+        Assert.True(library.Count > 818);
     }
 }

@@ -149,16 +149,53 @@ public class CatalogLoaderTests
     private static readonly HashSet<string> ScannerCategories =
         new(Rules.Categories.Append("dependency"), StringComparer.OrdinalIgnoreCase);
 
-    private static CatalogLoader RepoCatalogs()
+    private static CatalogLoader RepoCatalogs() => new(new CatalogOptions(ApiHost.FindCatalogs()));
+
+    /// <summary>The installation's own catalogs (catalogs/ in the repository), where it has them: they are not published.</summary>
+    private static CatalogLoader? InstalledCatalogs()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "catalogs"))) dir = dir.Parent;
-        Assert.NotNull(dir);
-        return new CatalogLoader(new CatalogOptions(Path.Combine(dir!.FullName, "catalogs")));
+        if (dir is null) return null;
+        var loader = new CatalogLoader(new CatalogOptions(Path.Combine(dir.FullName, "catalogs")));
+        return loader.All.Count > 0 ? loader : null;
     }
 
     [Fact]
-    public void Shipped_catalogs_load()
+    public void Installed_catalogs_are_well_formed_where_there_are_any()
+    {
+        // Same rules as for the test catalogs below; nothing to check in a checkout without catalogs.
+        foreach (var catalog in InstalledCatalogs()?.All ?? [])
+        {
+            var ids = catalog.Controls.Select(c => c.Id).ToList();
+            Assert.Equal(ids.Count, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.All(catalog.Controls.SelectMany(c => c.ScannerCategories ?? []), category => Assert.Contains(category, ScannerCategories));
+            Assert.All(catalog.Controls, c => Assert.False(string.IsNullOrWhiteSpace(c.Requirement)));
+        }
+    }
+
+    [Fact]
+    public void Without_a_named_catalog_the_preferred_one_is_used_then_the_first_and_with_none_there_is_none()
+    {
+        Assert.Equal("vendor-security", RepoCatalogs().Default?.Id);
+
+        var root = Path.Combine(Path.GetTempPath(), $"cerberus-catalogs-{Guid.NewGuid():n}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Assert.Null(new CatalogLoader(new CatalogOptions(root)).Default);
+            File.Copy(Path.Combine(ApiHost.FindCatalogs(), "owasp-top10.json"), Path.Combine(root, "owasp-top10.json"));
+            Assert.Equal("owasp-top10", new CatalogLoader(new CatalogOptions(root)).Default?.Id);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        Assert.Contains("CERBERUS_CATALOG_ROOT", CatalogLoader.NoneInstalled);
+    }
+
+    [Fact]
+    public void Catalogs_load()
     {
         var loader = RepoCatalogs();
 
@@ -174,7 +211,7 @@ public class CatalogLoaderTests
     }
 
     [Fact]
-    public void Shipped_catalogs_have_unique_ids_and_only_known_scanner_categories()
+    public void Catalogs_have_unique_ids_and_only_known_scanner_categories()
     {
         foreach (var catalog in RepoCatalogs().All)
         {

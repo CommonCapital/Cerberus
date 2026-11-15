@@ -1,6 +1,6 @@
 # Cerberus backend (.NET)
 
-**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite, or a PostgreSQL of your own when one is configured and answers) + SignalR, with no hosted services. It has every capability of the original TypeScript server (`packages/server`) — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The TypeScript server is superseded and kept only for reference; the CLI talks to this one. See "Parity with the TypeScript server" below.
+**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite, or a PostgreSQL of your own when one is configured and answers) + SignalR, with no hosted services. It has every capability of the original TypeScript server (`frontend/server`) — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The TypeScript server is superseded and kept only for reference; the CLI talks to this one. See "Parity with the TypeScript server" below.
 
 ## Projects
 
@@ -150,7 +150,7 @@ A schedule is a stored job request and an interval. Firing it submits the reques
 
 Limits on an agent run enforced in code (`LoopGuard`), for the SAST, threat-model and evidence agents: the same call — same tool, same arguments, in whatever order or spacing they were written — runs at most twice and is then answered with a note instead of being run; a run has a budget of tool calls (five per step of its step limit, at least 20), and calls beyond it are not made; three steps in a row in which every call was repeated or failed stop the run. A run stopped by the guard, like one that reaches its step limit, gets one last turn without tools to say what it did and did not get to; the run is stored as incomplete and its stream carries the reason.
 
-### `/engagements` and `/audit` — authorization & safety spine (first slice)
+### `/engagements` and `/audit` — authorization & safety spine
 
 An **engagement** states what may be tested: a list of in-scope targets, a maximum capability tier (T0 passive, T1 active-safe; T2/T3 cannot be granted yet) and an optional time window. `POST /scan` and `POST /compliance/assess` accept an `engagementId`; the run is then checked by `ScopePolicy` (`Cerberus.Authorization`) **before any work starts** and refused with 403 when:
 
@@ -170,7 +170,7 @@ A domain target proven at its apex covers its subdomains. An IP address or `host
 
 **Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that. `GET /audit/export` downloads the full log with each event's `previousHash` and `hash`, as JSON Lines or CSV (CSV fields that a spreadsheet would treat as a formula are prefixed with an apostrophe).
 
-### `/jobs` — background job pipeline (first slice)
+### `/jobs` — background job pipeline
 
 `POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Two job types exist: `scan` (`resultId` is the scan id, `GET /scans/{id}`) and `assess` (a compliance assessment of `catalogId` over a stored `scanId` or a fresh `path`; `resultId` is the assessment id, `GET /compliance/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`.
 
@@ -303,7 +303,7 @@ Nothing is unpacked or executed; files over 128 MB are not read. A library that 
 
 Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. For code you do not control, scan with `"exclusions": "ignore"`: every file is scanned and nothing is suppressed. A scan *job* asks you about this when the target actually excludes something (see `/questions`).
 
-**Measured** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
+**Performance** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
 
 
 ### LLM triage of findings (`triage` job)
@@ -348,7 +348,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **The model** is whatever the local Ollama serves under `CERBERUS_EMBEDDING_MODEL` (default `nomic-embed-text`; `ollama pull nomic-embed-text`, 274 MB), reached at `CERBERUS_EMBEDDING_URL` (default: `OLLAMA_BASE_URL`, else `http://localhost:11434/v1`). Building an index sends every chunk to that server, so anything but this machine (or the compose service `ollama`) is refused unless `CERBERUS_EMBEDDING_ALLOW_REMOTE=true`. Credential-shaped values are masked before embedding.
 - **Searching:** `POST /code-search {"path":"…","query":"…","limit"?: 8}` embeds the question with the same model and returns the closest chunks, best first: file, lines, name, score, a preview as the file is now, and `stale` when the file changed since it was indexed. A path below an indexed directory uses that index and returns only what lies under it. Vectors are compared in memory (a target has thousands of chunks, not millions), so there is no vector database to run.
 - **Agents** working on a target that has an index get a `searchCode` tool and are told so; without an index nothing changes for them. A hit is a lead to read, not a finding — the tool's answer says so.
-- **Measured** on this repository's `backend/src` with `nomic-embed-text`: 81 files, 990 chunks, 53 s to index, about 30 ms per search, 1 s to re-index when nothing changed. Of five test questions, four had the right code in the top three; closeness in meaning is approximate, which is why hits come with the code to check.
+- **Performance** on this repository's `backend/src` with `nomic-embed-text`: 81 files, 990 chunks, 53 s to index, about 30 ms per search, 1 s to re-index when nothing changed. Of five test questions, four had the right code in the top three; closeness in meaning is approximate, which is why hits come with the code to check.
 
 ### The threat-model agent (`threat-model` job)
 
@@ -520,40 +520,17 @@ A reply that stops at a tool the client runs ends its turn with `replyStored: fa
 
 ### Skills library
 
-The vendored library under `security-skills/skills` (818 skills) is indexed at startup from each skill's front matter. Agents reach it in two ways: the chat agent calls `searchSkills` / `loadSkill`, and the triage reviewer is pointed at the skills matching each finding (the result records which). Access follows the capability tier: skills in the library's offensive subdomains need tier T2, which cannot be granted yet, so an agent at the passive tier neither finds nor loads them. `GET /skills` lists the whole catalog with the tier each skill needs; `GET /skills/{name}` returns the text only for skills a grantable tier may load.
+The vendored security library under `security-skills/skills` (818 skills) and the general skills under `skills/` (31) are indexed at startup from each skill's front matter. Agents reach it in two ways: the chat agent calls `searchSkills` / `loadSkill`, and the triage reviewer is pointed at the skills matching each finding (the result records which). Access follows the capability tier: skills in the library's offensive subdomains need tier T2, which cannot be granted yet, so an agent at the passive tier neither finds nor loads them. `GET /skills` lists the whole catalog with the tier each skill needs; `GET /skills/{name}` returns the text only for skills a grantable tier may load.
 
-### Parity with the TypeScript server
+### The TypeScript backend
 
-Checked feature by feature against `packages/server`:
+`frontend/server` (Hono) with `frontend/database` (Prisma, SQLite) serves the same API to the same clients, so the CLI works with either. Today it covers sign-in, sessions and the chat agent with the same request and response shapes, status codes, tool contracts and model ids as this backend; the other features are being ported. The two keep separate databases: an account made on one does not exist on the other. The CLI starts the TypeScript backend itself when nothing answers at a local `API_URL`.
 
-| TypeScript server | .NET backend |
-|---|---|
-| `POST /auth/register`, `/login`, `/logout` — same bodies, status codes and messages; 30-day session tokens | ✅ same (tested) |
-| `GET/POST /sessions`, `GET /sessions/:id` — same shapes; 400 on a missing title; 404 for another user's session | ✅ same (tested) |
-| `POST /chat` request validation (id, ≥1 message, mode enum, supported model) | ✅ same; `mode` is also accepted in lower case |
-| Stored messages merged with incoming ones by id | ✅ |
-| Tools by mode (4 read-only in PLAN, 7 in BUILD), executed by the CLI | ✅ same names, descriptions and input schemas |
-| Reply continues the resubmitted assistant message; not stored while tool calls are pending | ✅ |
-| System prompt with modes, tool list and rules | ✅ ported, plus the security framing and skills tools |
-| `messageMetadata`: mode, model, durationMs, usage | ✅ usage has `inputTokens`, `outputTokens`, `totalTokens` (the AI SDK's extra usage fields are not filled) |
-| Model list (Anthropic, OpenAI, Ollama) | ✅ same ids, plus `echo` and `codestral` |
-| Anthropic thinking on Opus/Sonnet (fixed 10,000-token budget) | 🟡 adaptive thinking with summaries instead — the fixed budget is deprecated on those models. **Not yet run against the real API.** |
-| OpenAI reasoning summaries on `gpt-5.4` (via the Responses API) | ⬜ not ported: the backend uses Chat Completions, which does not return them. Replies and tool calls work; the reasoning text is not shown. |
-| Model keys from the environment | ✅ plus per-user encrypted keys |
-| JSON error bodies (`{ "error": … }`) for bad input and unexpected failures | ✅ |
-| Strict validation of every message part against the tool schemas | 🟡 lighter: messages need an id, a role and parts; tool inputs are checked to be JSON objects for a known tool |
+## Known limitations
 
-Beyond parity: server-run tools, per-user keys, and everything under scans, compliance, jobs, approvals, questions, engagements, audit and skills.
-
-Accounts are not shared between the two servers (each has its own database); the CLI simply registers on whichever it talks to.
-
-## Status & follow-ups
-
-- The CLI's login, sessions, chat with tool calls, `/scan` and `/runs` all work against this backend. Chat was verified by driving the running backend with the CLI's own AI SDK chat client and local tools, using the `echo` stand-in.
-- **Not verified against real models** (none has been called in development so far): tool calling and thinking with Anthropic, tool calling with OpenAI and Ollama, and LLM triage. The provider code is tested against canned streams in the providers' documented formats.
-- **Seen once, not explained:** `SkillApiTests.Skills_reserved_for_intrusive_tiers_are_listed_but_not_handed_out` failed one time while opening the SQLite connection during user registration; 18 further full runs passed. If it recurs, capture the inner `SqliteException` — the suspects are lock contention with a background job of an earlier test, or the shared test database file.
-- **Seen once, timing (2026-11-15):** `JobTimeLimitTests.Time_spent_waiting_for_a_person_does_not_count` failed once in a full run on PostgreSQL. It uses no database: a job with a 150 ms limit pauses its clock as its first step, and fails if, on a loaded machine, that first step comes more than 150 ms after the start. It passed alone and in the next runs; give it a longer limit if it comes back.
-- **Follow-ups:** OpenAI reasoning summaries (Responses API); moving the model list to current Claude models.
+- **Live models:** the provider code is tested against recorded streams in each provider's documented format. Tool calling and adaptive thinking with Anthropic, tool calling with OpenAI and Ollama, and model triage have not yet been exercised against the live APIs.
+- **OpenAI reasoning summaries** are not shown: the backend uses Chat Completions, which does not return them (replies and tool calls work).
+- **Message validation** is lighter than the TypeScript backend's: a message needs an id, a role and parts, and a tool input must be a JSON object for a known tool.
 
 ## Tests
 

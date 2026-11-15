@@ -390,8 +390,10 @@ public static class JobEndpoints
         }
         else if (type == JobTypes.Assess)
         {
-            var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "vendor-security" : body.CatalogId!;
-            if (catalogs.Get(catalogId) is null) return BadRequest($"Unknown catalog '{catalogId}'");
+            var named = !string.IsNullOrWhiteSpace(body.CatalogId);
+            var chosen = named ? catalogs.Get(body.CatalogId!) : catalogs.Default;
+            if (chosen is null) return BadRequest(named ? $"Unknown catalog '{body.CatalogId}'" : Cerberus.Compliance.CatalogLoader.NoneInstalled);
+            var catalogId = chosen.Id;
 
             string? scanId = null;
             if (!string.IsNullOrWhiteSpace(body.ScanId))

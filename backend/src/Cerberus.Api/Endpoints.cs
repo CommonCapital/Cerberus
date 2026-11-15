@@ -90,13 +90,13 @@ public static class Endpoints
         CatalogLoader loader, AssessmentRunner runner, AuditLog audit, RunPolicy policy, CancellationToken ct)
     {
         var userId = UserId(http);
-        var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "vendor-security" : body.CatalogId!;
-
-        var catalog = loader.Get(catalogId);
+        var named = !string.IsNullOrWhiteSpace(body.CatalogId);
+        var catalog = named ? loader.Get(body.CatalogId!) : loader.Default;
         if (catalog is null)
         {
-            return Results.Json(new { error = $"Unknown catalog '{catalogId}'" }, statusCode: 400);
+            return Results.Json(new { error = named ? $"Unknown catalog '{body.CatalogId}'" : CatalogLoader.NoneInstalled }, statusCode: 400);
         }
+        var catalogId = catalog.Id;
 
         // Findings come from a persisted scan (preferred) or a fresh scan of a path.
         Scan? scan = null;

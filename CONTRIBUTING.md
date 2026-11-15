@@ -39,7 +39,7 @@ cd backend && dotnet test Cerberus.slnx
 CERBERUS_TEST_POSTGRES_URL=postgres://user:password@localhost:5432 dotnet test Cerberus.slnx
 
 # CLI: types and tests.
-cd packages/cli && bunx tsc --noEmit && bun test src
+cd frontend/cli && bunx tsc --noEmit && bun test src
 ```
 
 Tests that need Redis, RabbitMQ or PostgreSQL are skipped, with a reason, when the server is not available; the rest run anywhere.

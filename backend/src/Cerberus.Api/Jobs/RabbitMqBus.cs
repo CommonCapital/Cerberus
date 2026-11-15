@@ -34,7 +34,7 @@ public sealed record RabbitMqOptions(string? Url, ushort Prefetch = 32)
 /// coming round for ever.</item>
 /// <item>A consumer the broker ends — its queue deleted, a failover — starts again and declares its queue again.</item>
 /// </list>
-/// Verified against RabbitMQ 4.4 on 2026-11-15, which is where the last two came from.
+/// Verified against RabbitMQ 4.1 and 4.4.
 /// </summary>
 public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> logger) : IMessageBus, IAsyncDisposable
 {

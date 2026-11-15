@@ -7,7 +7,7 @@
 <!-- The tests added or changed, and anything run by hand. -->
 
 - [ ] `dotnet test backend/Cerberus.slnx` passes (backend changes)
-- [ ] `bunx tsc --noEmit` and `bun test src` pass in `packages/cli` (CLI changes)
+- [ ] `bunx tsc --noEmit` and `bun test src` pass in `frontend/cli` (CLI changes)
 - [ ] Documentation updated where behaviour, a setting or an endpoint changed
 - [ ] No secrets, personal data or third-party text without a compatible licence
 

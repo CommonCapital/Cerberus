@@ -8,11 +8,11 @@ This product includes third-party material under its own licence:
 - security-skills/ — a library of cybersecurity skills and framework mappings,
   Copyright 2026 mukul975, licensed under the Apache License, Version 2.0
   (security-skills/LICENSE and the LICENSE file in each skill's folder).
-  Its reference material keeps the licence files it came with.
 
-- catalogs/owasp-top10.json — the OWASP Top 10 (2021) categories as controls.
-  The category names are OWASP's; the requirement text is written for Cerberus.
-  The authoritative descriptions are at https://owasp.org/Top10/.
+- skills/ — general skills. Those with a LICENSE.txt in their folder are from
+  https://github.com/anthropics/skills, Copyright 2026 Anthropic, PBC, licensed
+  under the Apache License, Version 2.0. agent-md-creator and web-research are
+  MIT-licensed, as stated in their front matter.
 
 Dependencies installed by the .NET and Bun package managers are not part of
 this repository; each is distributed under its own licence.

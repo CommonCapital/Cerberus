@@ -78,6 +78,19 @@ public sealed class CatalogLoader
 
     public Catalog? Get(string id) => _catalogs.GetValueOrDefault(id);
 
+    /// <summary>The catalog used when a request names none.</summary>
+    public const string PreferredDefault = "vendor-security";
+
+    /// <summary>
+    /// The catalog an assessment uses when none is named: <see cref="PreferredDefault"/> where it is installed,
+    /// else the first by id; null when there are none (catalogs are data an installation brings).
+    /// </summary>
+    public Catalog? Default => Get(PreferredDefault) ?? _catalogs.Values.OrderBy(c => c.Id, StringComparer.Ordinal).FirstOrDefault();
+
+    /// <summary>What to say when an assessment is asked for and no catalog is installed.</summary>
+    public const string NoneInstalled =
+        "No compliance catalogs are installed. Put catalog files in the folder CERBERUS_CATALOG_ROOT names (catalogs/ by default); catalogs/README.md describes the format.";
+
     public static CatalogSummary Summarize(Catalog c) => new(
         c.Id, c.Name, c.Version, c.FrameworkAlignment,
         c.Sections.Count, c.ControlCount,

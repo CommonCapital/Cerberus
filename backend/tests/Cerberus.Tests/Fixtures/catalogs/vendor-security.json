@@ -1,0 +1,317 @@
+{
+  "id": "vendor-security",
+  "name": "Vendor Security Assessment",
+  "version": "1.0",
+  "description": "Test fixture: the structure of a catalog with placeholder text.",
+  "frameworkAlignment": [
+    "ISO/IEC 27001",
+    "NIST CSF 2.0",
+    "OWASP Top 10",
+    "SOC 2"
+  ],
+  "responseScale": [
+    "Compliant",
+    "Partially compliant",
+    "Non-compliant",
+    "Not applicable"
+  ],
+  "methodology": {
+    "correctiveActions": {
+      "standardDays": 30,
+      "maxDays": 90
+    }
+  },
+  "sections": [
+    {
+      "id": "GOV",
+      "name": "Section GOV",
+      "controls": [
+        {
+          "id": "GOV-01",
+          "title": "Control GOV-01",
+          "requirement": "Placeholder requirement for GOV-01.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-02",
+          "title": "Control GOV-02",
+          "requirement": "Placeholder requirement for GOV-02.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-03",
+          "title": "Control GOV-03",
+          "requirement": "Placeholder requirement for GOV-03.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-04",
+          "title": "Control GOV-04",
+          "requirement": "Placeholder requirement for GOV-04.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-05",
+          "title": "Control GOV-05",
+          "requirement": "Placeholder requirement for GOV-05.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-06",
+          "title": "Control GOV-06",
+          "requirement": "Placeholder requirement for GOV-06.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "IAM",
+      "name": "Section IAM",
+      "controls": [
+        {
+          "id": "IAM-01",
+          "title": "Control IAM-01",
+          "requirement": "Placeholder requirement for IAM-01.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-02",
+          "title": "Control IAM-02",
+          "requirement": "Placeholder requirement for IAM-02.",
+          "evidenceHints": [],
+          "autoEvaluable": true
+        },
+        {
+          "id": "IAM-03",
+          "title": "Control IAM-03",
+          "requirement": "Placeholder requirement for IAM-03.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-04",
+          "title": "Control IAM-04",
+          "requirement": "Placeholder requirement for IAM-04.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-05",
+          "title": "Control IAM-05",
+          "requirement": "Placeholder requirement for IAM-05.",
+          "evidenceHints": [],
+          "autoEvaluable": true
+        }
+      ]
+    },
+    {
+      "id": "DAT",
+      "name": "Section DAT",
+      "controls": [
+        {
+          "id": "DAT-01",
+          "title": "Control DAT-01",
+          "requirement": "Placeholder requirement for DAT-01.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "crypto"
+          ]
+        },
+        {
+          "id": "DAT-02",
+          "title": "Control DAT-02",
+          "requirement": "Placeholder requirement for DAT-02.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "crypto"
+          ]
+        },
+        {
+          "id": "DAT-03",
+          "title": "Control DAT-03",
+          "requirement": "Placeholder requirement for DAT-03.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "secret"
+          ]
+        },
+        {
+          "id": "DAT-04",
+          "title": "Control DAT-04",
+          "requirement": "Placeholder requirement for DAT-04.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DAT-05",
+          "title": "Control DAT-05",
+          "requirement": "Placeholder requirement for DAT-05.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DAT-06",
+          "title": "Control DAT-06",
+          "requirement": "Placeholder requirement for DAT-06.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "DEV",
+      "name": "Section DEV",
+      "controls": [
+        {
+          "id": "DEV-01",
+          "title": "Control DEV-01",
+          "requirement": "Placeholder requirement for DEV-01.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DEV-02",
+          "title": "Control DEV-02",
+          "requirement": "Placeholder requirement for DEV-02.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "injection",
+            "deserialization"
+          ]
+        },
+        {
+          "id": "DEV-03",
+          "title": "Control DEV-03",
+          "requirement": "Placeholder requirement for DEV-03.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "injection",
+            "crypto",
+            "secret"
+          ]
+        },
+        {
+          "id": "DEV-04",
+          "title": "Control DEV-04",
+          "requirement": "Placeholder requirement for DEV-04.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "dependency"
+          ]
+        },
+        {
+          "id": "DEV-05",
+          "title": "Control DEV-05",
+          "requirement": "Placeholder requirement for DEV-05.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "OPS",
+      "name": "Section OPS",
+      "controls": [
+        {
+          "id": "OPS-01",
+          "title": "Control OPS-01",
+          "requirement": "Placeholder requirement for OPS-01.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "dependency"
+          ]
+        },
+        {
+          "id": "OPS-02",
+          "title": "Control OPS-02",
+          "requirement": "Placeholder requirement for OPS-02.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "config"
+          ]
+        },
+        {
+          "id": "OPS-03",
+          "title": "Control OPS-03",
+          "requirement": "Placeholder requirement for OPS-03.",
+          "evidenceHints": [],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "config",
+            "dependency"
+          ]
+        },
+        {
+          "id": "OPS-04",
+          "title": "Control OPS-04",
+          "requirement": "Placeholder requirement for OPS-04.",
+          "evidenceHints": [],
+          "autoEvaluable": true
+        },
+        {
+          "id": "OPS-05",
+          "title": "Control OPS-05",
+          "requirement": "Placeholder requirement for OPS-05.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "OPS-06",
+          "title": "Control OPS-06",
+          "requirement": "Placeholder requirement for OPS-06.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "RES",
+      "name": "Section RES",
+      "controls": [
+        {
+          "id": "RES-01",
+          "title": "Control RES-01",
+          "requirement": "Placeholder requirement for RES-01.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-02",
+          "title": "Control RES-02",
+          "requirement": "Placeholder requirement for RES-02.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-03",
+          "title": "Control RES-03",
+          "requirement": "Placeholder requirement for RES-03.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-04",
+          "title": "Control RES-04",
+          "requirement": "Placeholder requirement for RES-04.",
+          "evidenceHints": [],
+          "autoEvaluable": false
+        }
+      ]
+    }
+  ]
+}
