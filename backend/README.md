@@ -1,6 +1,6 @@
 # Cerberus backend (.NET)
 
-**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite) + SignalR, with no hosted services. It has every capability of the original TypeScript server (`packages/server`) — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The TypeScript server is superseded and kept only for reference; the CLI talks to this one. See "Parity with the TypeScript server" below.
+**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite) + SignalR, with no hosted services. It has every capability of the original TypeScript server — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The legacy TypeScript server and Prisma packages have been removed; the CLI uses explicit HTTP contracts against this backend. See "Parity with the TypeScript server" below for the historical parity audit.
 
 ## Projects
 
@@ -23,6 +23,8 @@
 cd backend
 dotnet run --project src/Cerberus.Api
 ```
+
+For a low-concurrency launch without persistent build servers or watchers, run `bun run dev:server:lite` from the repository root. It requires the .NET 10 SDK and preserves `PORT`, `CERBERUS_DB` and `CERBERUS_KEYRING`; see the root README for the limits and verification commands.
 
 Environment:
 

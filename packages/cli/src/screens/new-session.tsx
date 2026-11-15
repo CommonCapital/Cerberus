@@ -6,7 +6,6 @@ import { SessionShell } from "../components/session-shell";
 import { UserMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { apiClient } from "../lib/api-client";
-import { getErrorMessage } from "../lib/http-errors";
 
 const newSessionStateSchema = z.object({
   message: z.string(),
@@ -41,17 +40,11 @@ export function NewSession() {
     let ignore = false;
     const createSession = async () => {
       try {
-        const res = await apiClient.sessions.$post({
-          json: {
-            title: state.message.slice(0, 100),
-          },
+        const session = await apiClient.createSession({
+          title: state.message.slice(0, 100),
         });
 
         if (ignore) return;
-        if (!res.ok) {
-          throw new Error(await getErrorMessage(res));
-        }
-        const session = await res.json();
         navigate(
           `/sessions/${session.id}`,
           { replace: true, state: { session, initialPrompt: state } }

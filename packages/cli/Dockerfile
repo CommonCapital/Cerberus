@@ -11,20 +11,15 @@
 FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
-# Install the workspace's dependencies from the lockfile. Install scripts are
-# skipped: the only one generates the TypeScript server's database client,
-# which the CLI does not use.
+# Install only the CLI and shared contracts. No server, database client or
+# generated code is needed; install scripts stay disabled.
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages/cli/package.json      packages/cli/
-COPY packages/server/package.json   packages/server/
 COPY packages/shared/package.json   packages/shared/
-COPY packages/database/package.json packages/database/
 RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY packages/cli    packages/cli
 COPY packages/shared packages/shared
-# Only its types are imported by the CLI (the typed client for auth, sessions and chat).
-COPY packages/server packages/server
 
 # The API it talks to, and where its session token is kept between runs.
 ENV API_URL=http://api:3000 \

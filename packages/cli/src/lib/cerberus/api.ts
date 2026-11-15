@@ -1,4 +1,5 @@
 import { clearAuth, getAuth } from "../auth";
+import { ApiError, baseUrl } from "../http-transport";
 import type { ModelListing } from "../model-choices";
 import type { McpListing } from "../../headless/mcp";
 import type { QueuePosition } from "./queue";
@@ -6,10 +7,9 @@ import { explainSubmitError, getCurrentEngagement, setCurrentEngagement, underEn
 
 // Client for the Cerberus (.NET) backend's job, approval and question
 // endpoints. It talks to the same server address as the rest of the CLI
-// (API_URL) with the same session token, using plain fetch: these endpoints
-// are not part of the TypeScript server's typed (hono) client.
+// (API_URL) with the same session token, using plain fetch.
 
-export const baseUrl = () => (process.env.API_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+export { ApiError, baseUrl } from "../http-transport";
 
 export type JobState =
   | "AwaitingApproval"
@@ -207,15 +207,6 @@ export type ScheduleInfo = {
 };
 
 export type Catalog = { id: string; name: string; version: string; controlCount: number };
-
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const auth = getAuth();

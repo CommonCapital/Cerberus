@@ -98,7 +98,7 @@ export function useChat(
 
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
-      api: apiClient.chat.$url().toString(),
+      api: apiClient.chatUrl(),
       // The request is queued on the server and the reply comes over SignalR (see lib/cerberus/turn-fetch.ts).
       fetch: chatFetch(),
       headers() {

@@ -4,15 +4,11 @@ import { format } from "date-fns";
 import { useNavigate } from "react-router";
 import { useDialog } from "../../providers/dialog";
 import { useToast } from "../../providers/toast";
-import { apiClient } from "../../lib/api-client";
-import { getErrorMessage } from "../../lib/http-errors";
+import { apiClient, type SessionSummary } from "../../lib/api-client";
 import { DialogSearchList } from "../dialog-search-list";
-import type { InferResponseType } from "hono/client";
-
-type Session = InferResponseType<(typeof apiClient.sessions)["$get"], 200>[number];
 
 export const SessionsDialogContent = () => {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const { close } = useDialog();
   const navigate = useNavigate();
@@ -23,12 +19,7 @@ export const SessionsDialogContent = () => {
 
     const fetchSessions = async () => {
       try {
-        const res = await apiClient.sessions.$get();
-        if (!res.ok) {
-          throw new Error(await getErrorMessage(res));
-        }
-
-        const data = await res.json();
+        const data = await apiClient.sessions();
 
         if (!ignore) {
           setSessions(data);
@@ -53,7 +44,7 @@ export const SessionsDialogContent = () => {
   }, [close, show]);
 
   const handleSelect = useCallback(
-    (session: Session) => {
+    (session: SessionSummary) => {
       close();
       navigate(`/sessions/${session.id}`);
     },

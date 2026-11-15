@@ -4,7 +4,6 @@ import { z } from "zod";
 import { TextAttributes } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { type ModeType, type SupportedChatModelId } from "@cerberus/shared";
-import type { InferResponseType } from "hono/client";
 import { SessionShell } from "../components/session-shell";
 import { 
   UserMessage, 
@@ -23,12 +22,9 @@ import { describeOutcome, journalFor } from "../lib/undo-journal";
 import { ShellMessage } from "../components/messages/shell-message";
 import { usePromptConfig } from "../providers/prompt-config";
 import type { Message } from "../hooks/use-chat";
-import { apiClient } from "../lib/api-client";
-import { getErrorMessage } from "../lib/http-errors";
+import { apiClient, type SessionData } from "../lib/api-client";
 import { useKeyboardLayer } from "../providers/keyboard-layer";
 import { ToolPermissionPrompt, useToolPermission } from "../providers/tool-permission";
-
-type SessionData = InferResponseType<(typeof apiClient.sessions)[":id"]["$get"], 200>;
 
 const sessionLocationSchema = z.object({
   session: z.custom<SessionData>((val) => val != null && typeof val === "object" && "id" in val),
@@ -255,12 +251,8 @@ export function Session() {
     let ignore = false;
     const fetchSession = async () => {
       try {
-        const res = await apiClient.sessions[":id"].$get({ 
-          param: { id },
-        });
+        const resolved = await apiClient.session(id);
         if (ignore) return;
-        if (!res.ok) throw new Error(await getErrorMessage(res));
-        const resolved = await res.json();
         setSession(resolved);
       } catch (err) {
         if (ignore) return;

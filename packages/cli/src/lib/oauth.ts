@@ -15,40 +15,56 @@ const DEFAULT_PASSWORD = "local-dev-password";
  */
 const FORMER_DEFAULT_EMAIL = "local@nightcode.dev";
 
-export async function performLogin(): Promise<{ token: string }> {
-  const email = process.env.CERBERUS_EMAIL ?? DEFAULT_EMAIL;
-  const password = process.env.CERBERUS_PASSWORD ?? DEFAULT_PASSWORD;
+export type LoginDeps = Pick<typeof apiClient, "login" | "register"> & {
+  saveAuth: typeof saveAuth;
+  email: () => string | undefined;
+  password: () => string | undefined;
+};
+
+const loginIo: LoginDeps = {
+  login: apiClient.login,
+  register: apiClient.register,
+  saveAuth,
+  email: () => process.env.CERBERUS_EMAIL,
+  password: () => process.env.CERBERUS_PASSWORD,
+};
+
+export async function performLogin(deps: LoginDeps = loginIo): Promise<{ token: string }> {
+  const configuredEmail = deps.email();
+  const email = configuredEmail ?? DEFAULT_EMAIL;
+  const password = deps.password() ?? DEFAULT_PASSWORD;
   const json = { email, password };
 
   // Try to sign in; if the account does not exist yet, create it.
-  const login = await apiClient.auth.login.$post({ json });
+  const login = await deps.login(json);
   if (login.ok) {
-    return persistToken(await login.json());
+    return persistToken(await login.json(), deps.saveAuth);
   }
   if (login.status !== 401) {
     throw new Error(await getErrorMessage(login));
   }
 
   // With the defaults in use: an account from before the rename keeps being the operator's account.
-  if (!process.env.CERBERUS_EMAIL) {
-    const former = await apiClient.auth.login.$post({ json: { email: FORMER_DEFAULT_EMAIL, password } });
+  if (!configuredEmail) {
+    const former = await deps.login({ email: FORMER_DEFAULT_EMAIL, password });
     if (former.ok) {
-      return persistToken(await former.json());
+      return persistToken(await former.json(), deps.saveAuth);
     }
+    if (former.status !== 401) throw new Error(await getErrorMessage(former));
   }
 
-  const register = await apiClient.auth.register.$post({ json });
+  const register = await deps.register(json);
   if (!register.ok) {
     throw new Error(await getErrorMessage(register));
   }
-  return persistToken(await register.json());
+  return persistToken(await register.json(), deps.saveAuth);
 }
 
-function persistToken(data: unknown): { token: string } {
-  const token = (data as { token?: unknown }).token;
-  if (typeof token !== "string") {
+function persistToken(data: unknown, save: typeof saveAuth): { token: string } {
+  const token = data && typeof data === "object" ? (data as { token?: unknown }).token : undefined;
+  if (typeof token !== "string" || token.trim().length === 0) {
     throw new Error("Login response did not include a token");
   }
-  saveAuth({ token });
+  save({ token });
   return { token };
 }

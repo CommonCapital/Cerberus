@@ -37,19 +37,17 @@ Agents are powered by a vendored library of **818 framework-mapped cybersecurity
 | Area | Status |
 |---|---|
 | TypeScript CLI | ✅ chat, plus `/scan`, `/findings`, `/review`, `/sast`, `/threatmodel`, `/index`, `/assess`, `/assessments` and `/runs` against the .NET backend |
-| TypeScript server (`packages/server`) | 🗄 superseded by the .NET backend, which has all of its features; kept for reference |
 | .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
 | Sandbox, agent fleet, web frontend | 📋 planned — see [PLAN.md](PLAN.md) |
 
 ## Repository layout
 
 ```
-packages/        # TypeScript baseline (de-clouded)
+packages/        # TypeScript client and shared contracts
   cli/           #   OpenTUI + React terminal client; runs project tools locally
-  server/        #   Hono API: local auth, sessions, AI streaming
-  database/      #   Prisma schema + client (local SQLite)
   shared/        #   Shared Zod schemas, tool contracts, model registry
-backend/         # .NET backend (the target server; replaces packages/server)
+backend/         # .NET backend (the only server and database implementation)
+scripts/         # Lightweight local development launcher
 catalogs/        # Compliance control catalogs as data (ESAP, + planned OWASP/ISO/SOC2/NIST)
 security-skills/ # Vendored 818 cybersecurity skills + framework mappings (Apache-2.0)
 PLAN.md          # Full architecture and build roadmap
@@ -59,7 +57,7 @@ PLAN.md          # Full architecture and build roadmap
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (for the TypeScript CLI + server)
+- [Bun](https://bun.sh) (for the TypeScript CLI; lockfile checked with 1.4.4)
 - [.NET 10 SDK](https://dotnet.microsoft.com) (for the backend)
 - A model to answer: [Ollama](https://ollama.com) for fully-local models, and/or your own API key for Claude (Anthropic), GPT (OpenAI) or DeepSeek
 
@@ -69,12 +67,12 @@ PLAN.md          # Full architecture and build roadmap
 cp .env.example .env
 ```
 
-Everything defaults to local. `DATABASE_URL` points at a local SQLite file; add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` only if you want cloud models (otherwise use Ollama).
+Everything defaults to local. The backend creates a SQLite file under its API content root; set `CERBERUS_DB` to choose another path. Add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` only if you want cloud models. Bun loads the root `.env` when running the commands below; when running `dotnet` directly, export the backend variables in your shell instead.
 
 ### 2. The backend (.NET)
 
 ```bash
-cd backend && dotnet run --project src/Cerberus.Api
+bun run dev:server
 ```
 
 It listens on `http://localhost:3000` and creates its SQLite database on first run. This is the one backend: the CLI needs nothing else.
@@ -82,11 +80,11 @@ It listens on `http://localhost:3000` and creates its SQLite database on first r
 ### 3. The CLI
 
 ```bash
-bun install
+bun install --frozen-lockfile --ignore-scripts --network-concurrency 2
 ```
 
 ```bash
-bun run dev:cli
+bun run start:cli
 ```
 
 The CLI signs in to the backend automatically (a local account is created on first `/login`). Chat runs its file and shell tools on your machine, in the directory the CLI was started in — and **asks first** before a tool that edits files or runs a command: `y` allows it once, `a` always allows it, `n` refuses (the model is told). For a file edit, "always" means that kind of action; for a shell command it means **that command** — `a` on `git status -s` remembers `git status`, not every command. A command line runs without asking only if every command in it is one you allowed; anything with redirection, substitution or a subshell, anything that names a secrets file, and commands such as `rm`, `sudo`, `curl` or `python` are asked about every time and are never offered an "always". `/permissions` shows the current policy, switches between *default* and *ask* (everything asks, including reads), and withdraws an "always allow" — a kind of action or a single command rule.
@@ -111,7 +109,32 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **A busy provider.** If the model provider is overloaded or rate-limiting, the reply waits and tries again (up to 5 times) and says so, instead of failing.
 - **Saying no.** In the permission prompt, `t` denies and lets you tell the agent what to do instead.
 
-> **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). The original TypeScript server in `packages/server` speaks the same auth, session and chat API and still runs (`bun run --cwd packages/database db:push`, then `bun run dev:server`), but it is superseded: the .NET backend has every one of its features (see the parity table in [`backend/README.md`](backend/README.md)) and all the security features exist only there. Do not run both on port 3000.
+The CLI uses a single address (`API_URL`, default `http://localhost:3000`) and explicit HTTP contracts for the .NET backend. The legacy TypeScript server and Prisma packages have been removed; installing the CLI does not generate a database client or start a server. Existing .NET databases are unchanged. A database from the retired Prisma server has a different schema: keep a backup and use a separate `CERBERUS_DB` for .NET; this change does not migrate legacy data.
+
+### On a laptop with limited memory
+
+After installing the CLI dependencies, start these in two terminals:
+
+```bash
+bun run dev:server:lite
+```
+
+```bash
+bun run start:cli
+```
+
+The API launcher checks for the .NET 10 SDK, builds with one MSBuild node and sequential restore, disables persistent build/compiler servers, then runs the API in the foreground at lower priority. It allows one job, one chat turn and one team specialist at a time, and tells .NET to use a processor count of two. The CLI has no watcher; `dev:cli` remains available when automatic restarts are wanted. Ctrl+C stops each foreground process.
+
+This starts no Docker stack or model. SQLite and the in-process queue are the defaults; leave `CERBERUS_REDIS_URL` and `CERBERUS_RABBITMQ_URL` unset for that setup. Avoid starting a local model on an 8 GB machine; passive rule-based scans with `--no-sca` need no model, and agent work can use your own cloud API key with the existing consent gate. These are concurrency limits, not an operating-system memory or CPU quota.
+
+For changes confined to the CLI, run checks sequentially without starting the backend:
+
+```bash
+bun run check:cli
+bun run test:scripts
+```
+
+The launcher tests use a stand-in `dotnet` executable and start no real server. Building the API or testing it still requires the .NET 10 SDK.
 
 ### Or: everything in containers
 
