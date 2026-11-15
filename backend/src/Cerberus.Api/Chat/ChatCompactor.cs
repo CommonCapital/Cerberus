@@ -30,7 +30,7 @@ public sealed record Compaction(string Summary, string Through, int Messages);
 /// operator, who keeps seeing everything — by a summary written by the model.
 /// The last exchange is always kept word for word.
 /// </summary>
-public sealed class ChatCompactor(IModelProviderResolver resolver)
+public sealed class ChatCompactor(IModelProviderResolver resolver, Controls.ModelRoles? roles = null)
 {
     /// <summary>Characters per token, roughly; used where the provider's own count is not at hand.</summary>
     private const int CharsPerToken = 4;
@@ -147,6 +147,8 @@ public sealed class ChatCompactor(IModelProviderResolver resolver)
     public async Task<Compaction?> CompactAsync(
         IReadOnlyList<JsonObject> messages, string? summary, string? through, string model, ModelCredentials credentials, CancellationToken ct)
     {
+        // A cheaper model where the installation names one — if it keeps the text where it goes and can read as much.
+        model = roles?.ForSummary(model, credentials) ?? model;
         var visible = After(messages, through);
         var cut = CutIndex(visible);
         if (cut < 0) return null;

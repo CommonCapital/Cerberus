@@ -33,6 +33,16 @@ if (configErrors.Count > 0)
 }
 
 var builder = WebApplication.CreateBuilder(args);
+
+// --- Controls the installation sets for everyone (PLAN.md §21) ------------
+// Groups of tools switched off whatever a request or a model asks for; checked above, so this cannot fail.
+var disabledTools = Cerberus.Api.Controls.DisabledTools.Parse(Environment.GetEnvironmentVariable(Cerberus.Api.Controls.DisabledTools.Variable));
+builder.Services.AddSingleton(disabledTools);
+builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Controls.DisabledToolsCheck>();
+builder.Services.AddSingleton(new Cerberus.Api.Controls.AgentLimits(
+    double.TryParse(Environment.GetEnvironmentVariable("CERBERUS_AGENT_TIME_LIMIT_SECONDS"), System.Globalization.NumberStyles.Float,
+        System.Globalization.CultureInfo.InvariantCulture, out var agentSeconds) && agentSeconds > 0 ? TimeSpan.FromSeconds(agentSeconds) : null));
+builder.Services.AddSingleton(new Cerberus.Api.Controls.ModelRoles(Environment.GetEnvironmentVariable(Cerberus.Api.Controls.ModelRoles.Variable)));
 // Nothing in a response needs to say which server software this is.
 builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 
@@ -198,20 +208,22 @@ builder.Services.AddSingleton<Cerberus.Api.Search.CodeSearch>();
 builder.Services.AddScoped<Cerberus.Api.Search.CodeIndexer>();
 // --- Internet access for agents: off unless switched on; search only through a self-hosted SearXNG ---
 builder.Services.AddSingleton(new Cerberus.Api.Web.WebOptions(
-    Enabled: Environment.GetEnvironmentVariable("CERBERUS_WEB") == "on",
+    Enabled: Environment.GetEnvironmentVariable("CERBERUS_WEB") == "on" && !disabledTools.IsOff("web"),
     SearchUrl: Environment.GetEnvironmentVariable("CERBERUS_SEARXNG_URL"),
     BlockedTerms: (Environment.GetEnvironmentVariable("CERBERUS_EGRESS_BLOCKED_TERMS") ?? "")
-        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+    SwitchedOff: disabledTools.IsOff("web")));
 builder.Services.AddSingleton<Cerberus.Api.Web.IWebFetcher, Cerberus.Api.Web.SafeFetcher>();
 builder.Services.AddSingleton<Cerberus.Api.Web.IWebSearch, Cerberus.Api.Web.SearxngSearch>();
 // A browser for the researcher: its own switch on top of web access, an empty profile per page, one way out.
 builder.Services.AddSingleton(new Cerberus.Api.Web.BrowserOptions(
-    Enabled: Environment.GetEnvironmentVariable("CERBERUS_BROWSER") == "on",
+    Enabled: Environment.GetEnvironmentVariable("CERBERUS_BROWSER") == "on" && !disabledTools.IsOff("browser"),
     Path: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_PATH"),
     NoSandbox: Environment.GetEnvironmentVariable("CERBERUS_BROWSER_NO_SANDBOX") == "true"));
 builder.Services.AddSingleton<Cerberus.Api.Web.IAgentBrowser, Cerberus.Api.Web.ChromeBrowser>();
 // MCP servers: named in a file by the administrator; their allowed tools go to the researcher, nowhere else.
-builder.Services.AddSingleton(Cerberus.Api.Web.McpOptions.Load(
+// Switched off as a group, they are not even read: no agent can reach them, and none are listed.
+builder.Services.AddSingleton(disabledTools.IsOff("mcp") ? Cerberus.Api.Web.McpOptions.None : Cerberus.Api.Web.McpOptions.Load(
     Environment.GetEnvironmentVariable("CERBERUS_MCP_CONFIG"), Environment.GetEnvironmentVariable));
 builder.Services.AddSingleton<Cerberus.Api.Web.IMcpServers, Cerberus.Api.Web.McpServers>();
 builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Health.McpCheck>();

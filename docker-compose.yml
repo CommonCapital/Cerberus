@@ -52,6 +52,12 @@ services:
       # CERBERUS_JOB_CONCURRENCY: "2"
       # The most jobs one person may run at once (0 = no limit; the next free place goes to whoever has fewest either way):
       # CERBERUS_JOB_PER_USER: "0"
+      # Switch whole groups of tools off for everyone (web, browser, mcp, shell, file-edits, helpers, notes, skills, questions):
+      # CERBERUS_DISABLED_TOOLS: "shell,file-edits"
+      # Stop an agent run after this long and ask it for its summary:
+      # CERBERUS_AGENT_TIME_LIMIT_SECONDS: "480"
+      # A cheaper model for chat titles and summaries (used only where it sends the text nowhere new):
+      # CERBERUS_FAST_MODEL: "claude-haiku-5-5"
       # RabbitMQ between accepting work and doing it: compose.infra.yml sets CERBERUS_RABBITMQ_URL for this service.
       # Chat turns answered at once, in all and per user:
       # CERBERUS_CHAT_CONCURRENCY: "4"
