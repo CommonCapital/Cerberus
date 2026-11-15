@@ -151,21 +151,24 @@ public class CatalogLoaderTests
 
     private static CatalogLoader RepoCatalogs() => new(new CatalogOptions(ApiHost.FindCatalogs()));
 
-    /// <summary>The installation's own catalogs (catalogs/ in the repository), where it has them: they are not published.</summary>
-    private static CatalogLoader? InstalledCatalogs()
+    /// <summary>The catalogs that ship in the repository's catalogs/ folder.</summary>
+    private static CatalogLoader ShippedCatalogs()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "catalogs"))) dir = dir.Parent;
-        if (dir is null) return null;
-        var loader = new CatalogLoader(new CatalogOptions(Path.Combine(dir.FullName, "catalogs")));
-        return loader.All.Count > 0 ? loader : null;
+        Assert.NotNull(dir);
+        return new CatalogLoader(new CatalogOptions(Path.Combine(dir!.FullName, "catalogs")));
     }
 
     [Fact]
-    public void Installed_catalogs_are_well_formed_where_there_are_any()
+    public void Shipped_catalogs_load_and_are_well_formed()
     {
-        // Same rules as for the test catalogs below; nothing to check in a checkout without catalogs.
-        foreach (var catalog in InstalledCatalogs()?.All ?? [])
+        var shipped = ShippedCatalogs();
+        Assert.Equal(32, shipped.Get("vendor-security")?.ControlCount);
+        Assert.Equal(90, shipped.Get("vendor-security")?.Methodology?.CorrectiveActions?.MaxDays);
+        Assert.Equal(10, shipped.Get("owasp-top10")?.ControlCount);
+        // Same rules as for the test catalogs below.
+        foreach (var catalog in shipped.All)
         {
             var ids = catalog.Controls.Select(c => c.Id).ToList();
             Assert.Equal(ids.Count, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());

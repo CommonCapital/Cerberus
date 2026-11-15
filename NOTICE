@@ -14,5 +14,9 @@ This product includes third-party material under its own licence:
   under the Apache License, Version 2.0. agent-md-creator and web-research are
   MIT-licensed, as stated in their front matter.
 
+- catalogs/owasp-top10.json — the OWASP Top 10 (2021) categories as controls.
+  The category names are OWASP's; the requirement text is written for Cerberus.
+  The authoritative descriptions are at https://owasp.org/Top10/.
+
 Dependencies installed by the .NET and Bun package managers are not part of
 this repository; each is distributed under its own licence.

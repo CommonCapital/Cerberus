@@ -14,7 +14,7 @@
 
 </div>
 
-> **Status: under active development.** This README describes what exists today; what is planned is marked as such. Cerberus is a security tool: use it only on systems you own or are authorized to test (see [Responsible use](#responsible-use)).
+> **Status: under active development.** This README describes what exists today; what is planned is marked as such. The architecture, roadmap and status are in [PLAN.md](PLAN.md) — §24 lists what is left and how to pick it up. Cerberus is a security tool: use it only on systems you own or are authorized to test (see [Responsible use](#responsible-use)).
 
 ---
 
@@ -23,7 +23,7 @@
 Cerberus runs an **engagement** against a **target** (a repo, a running service, an infrastructure description) through three phases, all bound by an enforced authorization & safety spine (scope, verified target ownership, capability tiers, rate caps, kill switch, audit):
 
 1. **Scan and detect** — static analysis, dependency and CVE analysis, secret detection, and model-driven code review and threat modelling.
-2. **Compliance** — grade the target against control catalogs and produce an auditable compliance matrix with action plans and deadlines. Catalogs are data an installation brings ([`catalogs/README.md`](catalogs/README.md) describes the format).
+2. **Compliance** — grade the target against control catalogs and produce an auditable compliance matrix with action plans and deadlines. Two catalogs ship as data in [`catalogs/`](catalogs/): a vendor security assessment written for Cerberus and the OWASP Top 10; add your own in the same format.
 3. **Active testing** — authorized, scoped exploitation and resilience testing in an isolated sandbox, then remediation. Planned; gated by the authorization controls.
 
 Agents draw on two skill libraries: **818 framework-mapped cybersecurity skills** in [`security-skills/`](security-skills/) (MITRE ATT&CK, NIST CSF, D3FEND, OWASP) and **31 general skills** in [`skills/`](skills/) for documents and reports, browser testing, research, sandboxed code and building MCP servers.
@@ -61,9 +61,10 @@ frontend/        # TypeScript
   database/      #   its database (Prisma, SQLite)
   shared/        #   schemas, tool contracts and the model registry shared by both
 backend/         # .NET backend
-catalogs/        # where compliance catalogs go (format in catalogs/README.md)
+catalogs/        # compliance catalogs as data (vendor security, OWASP Top 10) and their format
 security-skills/ # 818 cybersecurity skills with framework mappings (Apache-2.0, vendored)
 skills/          # 31 general skills (see skills/README.md)
+PLAN.md          # architecture, roadmap and status
 ```
 
 ## Getting started
@@ -217,7 +218,7 @@ With the backend and the CLI running, `/login`, and:
 - **When an agent stops to ask you.** Two things can pause a run started from the CLI. The agent may ask a question when the code cannot tell it something — which environment is meant, what matters most to you: choose an answer with `enter`, or press `t` and write your own. And before an agent's tool changes anything outside Cerberus (today: a tool of an outside server that is not read-only), the run shows you what it wants to do and with what, and waits: *Allow this once*, *Allow for the rest of this run*, or *Do not allow* — with `t` you can say why, and the agent is told. Nothing of that kind happens without your yes; no answer means no. A run from a pipeline never asks questions of its own.
 - **`/threatmodel`** — type a path; the model chosen with `/models` maps that code's components and the threats against them (STRIDE, with likelihood and impact) and writes a threat model, shown when the run ends. It is a model's hypothesis to review with people who know the system, not a finding of fact.
 - **`/index`** — type a path; a local embedding model (Ollama's `nomic-embed-text`, which must be pulled once) reads that code so it can be searched by what it does rather than by the words it uses. Nothing leaves your machine. The agents started with `/sast`, `/threatmodel` and the evidence run then get a search-by-meaning tool for that code; run `/index` again after changes — only changed files are processed.
-- **`/assess`** — check code against a compliance catalog installed on the server: pick the catalog (type a path first if it is not the whole scan root). The run opens; when it has finished, `o` opens the assessment.
+- **`/assess`** — check code against a compliance catalog: pick the catalog (type a path first if it is not the whole scan root). The run opens; when it has finished, `o` opens the assessment.
 - **`/assessments`** — open a past assessment. You see where it stands and every control with the answer that counts (yours, else the scanner's). For the highlighted control: `e` asks the model chosen in `/models` to look for evidence (opens that run), `a` accepts the model's suggestion as your answer — it asks for an action plan first when the suggestion is short of compliant — and `x` dismisses it. A model's "Cannot tell" cannot be accepted.
 - **`/engagement`** — choose the engagement your runs belong to, or type a name to create one. Everything you start afterwards (`/scan`, `/review`, `/sast`) runs under it, and the backend refuses a target that is not in its scope. The choice is remembered and shown in the status bar; "No engagement" goes back to unscoped runs (unless the server requires one).
 - **`/scope`** — the directories the current engagement may be run on. Type a path to add it — doing so is your statement that you own that code or are authorized to test it. With nothing typed, Enter removes the highlighted one.
