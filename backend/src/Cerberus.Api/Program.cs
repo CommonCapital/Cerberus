@@ -72,6 +72,8 @@ builder.Services.AddSingleton(redis);
 if (redis.Enabled)
 {
     builder.Services.AddSingleton<Cerberus.Api.Cluster.RedisLink>();
+    // The request-rate limits too: counted over every instance, not once per instance.
+    builder.Services.AddSingleton<Cerberus.Api.Cluster.SharedRateLimit>();
     builder.Services.AddSingleton<Cerberus.Api.Cluster.ISignals, Cerberus.Api.Cluster.RedisSignals>();
     builder.Services.AddSingleton<Cerberus.Api.Cluster.IPlaces, Cerberus.Api.Cluster.RedisPlaces>();
     builder.Services.AddSingleton<ILoginThrottle, Cerberus.Api.Cluster.RedisLoginThrottle>();
@@ -242,6 +244,9 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
+
+// Redis, where configured, starts connecting now — not on the first request that needs it.
+_ = app.Services.GetService<Cerberus.Api.Cluster.RedisLink>()?.ConnectionAsync();
 
 // `web-check <url>`: fetch one page as a researcher would, to see that web access works and what it refuses.
 if (args is ["web-check", ..])

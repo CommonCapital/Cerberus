@@ -361,6 +361,15 @@ public sealed class RedisServer : IDisposable
 
     public RedisLink Link() => new(new RedisOptions(Url));
 
+    /// <summary>A link that is connected already — as the service's is soon after it starts (it connects at start-up).</summary>
+    public async Task<RedisLink> ConnectedLinkAsync()
+    {
+        var link = Link();
+        var connection = await link.ConnectionAsync();
+        for (var i = 0; i < 100 && !connection.IsConnected; i++) await Task.Delay(20);
+        return link;
+    }
+
     public void Dispose()
     {
         if (_process is { HasExited: false })
@@ -468,8 +477,8 @@ public sealed class RedisClusterTests(RedisServer redis) : IClassFixture<RedisSe
     [RedisFact]
     public async Task Wrong_passwords_are_counted_together_whichever_instance_they_were_tried_on()
     {
-        await using var a = redis.Link();
-        await using var b = redis.Link();
+        await using var a = await redis.ConnectedLinkAsync();
+        await using var b = await redis.ConnectedLinkAsync();
         ILoginThrottle here = new RedisLoginThrottle(a, NullLogger<RedisLoginThrottle>.Instance);
         ILoginThrottle there = new RedisLoginThrottle(b, NullLogger<RedisLoginThrottle>.Instance);
         var account = $"{Guid.NewGuid():n}@Example.org";
