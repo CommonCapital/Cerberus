@@ -36,7 +36,7 @@ public interface IReadinessCheck
 public sealed record ReadinessReport(HealthState Status, IReadOnlyList<HealthResult> Checks, DateTime CheckedAt);
 
 /// <summary>
-/// Readiness (PLAN.md §21): whether the service can actually do its work,
+/// Readiness: whether the service can actually do its work,
 /// dependency by dependency — as opposed to liveness (<c>/health</c>), which
 /// only says the process answers. A required dependency that fails makes the
 /// service unhealthy (503: do not route work here); an optional one makes it

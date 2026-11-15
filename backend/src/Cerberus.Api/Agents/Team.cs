@@ -39,7 +39,7 @@ public sealed record SpecialistOutcome(
     IReadOnlyList<AgentFinding> Findings, int Steps, int ToolCalls, int Threats = 0);
 
 /// <summary>
-/// The team (PLAN.md §6): a lead agent that decides which specialists to send where, and specialists that each
+/// The team: a lead agent that decides which specialists to send where, and specialists that each
 /// review the code on their own. The roster, the limits and the instructions live here.
 /// </summary>
 public static class Team
@@ -278,7 +278,7 @@ public sealed record PlanDecision(bool Approved, string? Comment = null, bool No
 
 /// <summary>
 /// The lead's one tool for acting: it hands over a plan, the plan is checked and put to the operator
-/// (plan → approve → execute, PLAN.md §6.5), and only then do the specialists run — several at a time where
+/// (plan → approve → execute), and only then do the specialists run — several at a time where
 /// that helps — and their results come back with duplicates merged.
 /// <para>
 /// The limits are the code's, not the model's: which specialists exist, how many may be sent in a run, how
@@ -475,7 +475,7 @@ public sealed class DispatchTool(
 }
 
 /// <summary>
-/// The lead agent (PLAN.md §6, the orchestrator): a model looks at the code's layout, writes a plan of
+/// The lead agent: a model looks at the code's layout, writes a plan of
 /// specialists, the operator approves it, the specialists review, and the lead reports what the team found.
 /// The result is one run with the merged findings and a report; each specialist's own run is kept under it.
 /// </summary>

@@ -162,10 +162,11 @@ public class CatalogLoaderTests
     {
         var loader = RepoCatalogs();
 
-        var esap = loader.Get("enterprise-sap");
-        Assert.NotNull(esap);
-        Assert.Equal(39, esap!.ControlCount);
-        Assert.Equal(30, esap.Methodology?.CorrectiveActions?.StandardDays);
+        var vendor = loader.Get("vendor-security");
+        Assert.NotNull(vendor);
+        Assert.Equal(32, vendor!.ControlCount);
+        Assert.Equal(30, vendor.Methodology?.CorrectiveActions?.StandardDays);
+        Assert.Equal(90, vendor.Methodology?.CorrectiveActions?.MaxDays);
 
         var owasp = loader.Get("owasp-top10");
         Assert.NotNull(owasp);

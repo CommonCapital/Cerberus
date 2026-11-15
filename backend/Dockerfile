@@ -3,7 +3,7 @@
 #
 #   docker build -f backend/Dockerfile -t cerberus-api .
 #
-# First built and run on 2026-11-14 (PLAN.md §15). Base images are exact versions, not "10.0":
+# First built and run on 2026-11-14. Base images are exact versions, not "10.0":
 # the same Dockerfile gives the same image next month. Raise them together when updating .NET.
 
 # ---- build ----------------------------------------------------------------
@@ -43,7 +43,7 @@ COPY security-skills/LICENSE ./security-skills/LICENSE
 # and the key ring that encrypts stored API keys. /workspace is the code to scan.
 # Optional: a browser for the researcher (CERBERUS_BROWSER=on). It adds several hundred megabytes, so it is
 # left out unless asked for: docker compose build --build-arg WITH_BROWSER=true api
-# The browser variant has not been built yet (PLAN.md §15). If Chromium refuses to start as this non-root user
+# The browser variant has not been built yet. If Chromium refuses to start as this non-root user
 # for want of user namespaces, the choice is the host's seccomp profile or CERBERUS_BROWSER_NO_SANDBOX=true.
 ARG WITH_BROWSER=false
 RUN if [ "$WITH_BROWSER" = "true" ]; then \

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgresql]
+    services:
+      # Started for both legs; only the PostgreSQL leg points the tests at it.
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: cerberus
+          POSTGRES_PASSWORD: cerberus-ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cerberus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      # The Redis tests start their own redis-server; without it they are skipped.
+      - name: Install redis-server
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends redis-server
+      - name: Build
+        working-directory: backend
+        run: dotnet build Cerberus.slnx
+      - name: Test
+        working-directory: backend
+        env:
+          CERBERUS_TEST_POSTGRES_URL: ${{ matrix.database == 'postgresql' && 'postgres://cerberus:cerberus-ci@localhost:5432' || '' }}
+        run: dotnet test Cerberus.slnx --no-build
+
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Types
+        working-directory: packages/cli
+        run: bunx tsc --noEmit
+      - name: Test
+        working-directory: packages/cli
+        run: bun test src

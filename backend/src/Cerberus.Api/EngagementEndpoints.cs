@@ -11,8 +11,8 @@ namespace Cerberus.Api;
 public sealed record CreateEngagementRequest(string? Name, string? MaxTier, DateTime? StartsAt, DateTime? EndsAt);
 
 /// <summary>
-/// Whether every run must name an engagement (PLAN.md §3: "every run belongs
-/// to an Engagement"). Off by default for local use; turn on with
+/// Whether every run must name an engagement ("every run belongs to an
+/// Engagement"). Off by default for local use; turn on with
 /// CERBERUS_REQUIRE_ENGAGEMENT=true.
 /// </summary>
 public sealed record RunPolicy(bool RequireEngagement);
@@ -20,7 +20,7 @@ public sealed record RunPolicy(bool RequireEngagement);
 public sealed record AddTargetRequest(string? Type, string? Locator, bool? OwnershipAttested);
 
 /// <summary>
-/// The authorization &amp; safety spine (PLAN.md §3, milestone M4): engagements,
+/// The authorization &amp; safety spine: engagements,
 /// their in-scope targets, the operator's abort switch, and the audit log.
 /// </summary>
 public static class EngagementEndpoints

@@ -5,7 +5,7 @@ namespace Cerberus.Jobs;
 public sealed record QuestionOption(string Label, string? Description = null);
 
 /// <summary>
-/// A question a run puts to the operator (PLAN.md §6.5): text, optional
+/// A question a run puts to the operator: text, optional
 /// choices, and whether several choices or a free-text answer are accepted.
 /// </summary>
 public sealed record OperatorQuestionSpec(

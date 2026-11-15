@@ -37,7 +37,7 @@ public enum AgentOffers
 }
 
 /// <summary>
-/// One agent, described (PLAN.md §22 item 3): everything about it that is not its own tools and not one
+/// One agent, described: everything about it that is not its own tools and not one
 /// particular run. Adding an agent is one of these and an <see cref="IAgentWork"/>; the running is the
 /// harness's, the same for all.
 /// </summary>
@@ -101,7 +101,7 @@ public interface IAgentWork
 public sealed record AgentResult(AgentRun? Run, AgentOutcome Outcome);
 
 /// <summary>
-/// Runs any agent from its description (PLAN.md §22 item 3). What used to be written out once per agent is
+/// Runs any agent from its description. What used to be written out once per agent is
 /// here once: where the model is and whether what the agent reads leaves the machine; the confined view of
 /// the code; the shared tools the description takes, each under its own condition; the operator's messages;
 /// what was remembered about the target; the loop with its limits and its gate; the note when it was cut

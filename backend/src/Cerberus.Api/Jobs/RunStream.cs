@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Cerberus.Api.Jobs;
 
 /// <summary>
-/// The event stream of every run (PLAN.md §6.5). Each event gets the next
+/// The event stream of every run. Each event gets the next
 /// sequence number of its job, is stored, and is then pushed to the owner over
 /// SignalR as <c>jobEvent</c>. Storing first means a client that was offline —
 /// or connects later — replays the run from <c>GET /jobs/{id}/events</c> and

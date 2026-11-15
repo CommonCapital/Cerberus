@@ -15,7 +15,7 @@ public sealed class InstanceIdentity
 }
 
 /// <summary>
-/// Which running work still has somebody running it (PLAN.md §22 item 7).
+/// Which running work still has somebody running it.
 /// <para>
 /// Every instance of the service says "I am here" in the shared database every few seconds, and puts its
 /// name on each job and chat turn it starts. Work that is marked as running under a name that has gone

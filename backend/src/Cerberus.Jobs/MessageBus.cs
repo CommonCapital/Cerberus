@@ -40,7 +40,7 @@ public sealed class Delivery(WorkMessage message, Func<ValueTask>? done = null)
 }
 
 /// <summary>
-/// The seam between whoever accepts work and whoever executes it (PLAN.md §5, §22). Local mode uses
+/// The seam between whoever accepts work and whoever executes it. Local mode uses
 /// <see cref="InProcMessageBus"/>; with a broker configured the same producers and workers run on RabbitMQ.
 /// </summary>
 public interface IMessageBus

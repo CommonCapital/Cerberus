@@ -13,7 +13,7 @@
 # as profiles in this file they stopped a plain "docker compose up" on a machine with no .env.
 #
 # Settings come from a .env file next to this one (copy .env.example). All are optional here.
-# First built and started on 2026-11-14 (PLAN.md §15 has what that run changed).
+# First built and started on 2026-11-14.
 
 name: cerberus
 

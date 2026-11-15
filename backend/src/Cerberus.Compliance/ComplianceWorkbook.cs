@@ -14,7 +14,7 @@ public sealed record AssessmentInfo(
 
 /// <summary>
 /// Exports a compliance assessment as a vendor-assurance spreadsheet
-/// (PLAN.md §10): one row per control with Verdict, Detailed Response,
+///: one row per control with Verdict, Detailed Response,
 /// Action Plan and Time limit — the response schema enterprises expect back.
 /// Only what the engine actually established is pre-filled; controls it could
 /// not judge are left blank for the operator to complete.

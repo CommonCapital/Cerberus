@@ -35,7 +35,7 @@ public sealed record OwnershipChallenge(
 public sealed record VerificationOutcome(bool Verified, ProofMethod? Method, string Detail);
 
 /// <summary>
-/// Proof-of-control for live targets (PLAN.md §3). The operator is given a
+/// Proof-of-control for live targets. The operator is given a
 /// random token and must publish it somewhere only the target's owner can
 /// write: a DNS TXT record, or a file on the host. Until that passes, the
 /// target stays Pending and nothing above the passive tier may touch it.

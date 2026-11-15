@@ -11,7 +11,7 @@ public sealed record RateDecision(bool Allowed, TimeSpan RetryAfter);
 
 /// <summary>
 /// The request-rate limits (see <see cref="ServiceHardening"/>) counted in Redis, so that they hold over every
-/// instance of the service (PLAN.md §22 item 8): counted per instance, a client would get the limit once per
+/// instance of the service: counted per instance, a client would get the limit once per
 /// instance. The same sliding minute as in one process — six segments of ten seconds — taken by one script, so
 /// that two instances cannot both let in the last request, and on Redis's own clock, so that the instances'
 /// clocks need not agree. A request is counted only if both its address and its token have room; a refused one

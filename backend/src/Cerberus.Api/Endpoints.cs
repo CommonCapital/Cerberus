@@ -55,7 +55,7 @@ public static class Endpoints
 
         app.MapPost("/scan", RunScan).AddEndpointFilter<RequireAuthFilter>();
 
-        // --- Phase 2: Compliance (ESAP/ISO/OWASP catalog engine) ------------
+        // --- Phase 2: Compliance (catalog engine: vendor security, OWASP, …) ---
         var catalogs = app.MapGroup("/compliance/catalogs").AddEndpointFilter<RequireAuthFilter>();
         catalogs.MapGet("/", ListCatalogs);
         catalogs.MapGet("/{id}", GetCatalog);
@@ -90,7 +90,7 @@ public static class Endpoints
         CatalogLoader loader, AssessmentRunner runner, AuditLog audit, RunPolicy policy, CancellationToken ct)
     {
         var userId = UserId(http);
-        var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "enterprise-sap" : body.CatalogId!;
+        var catalogId = string.IsNullOrWhiteSpace(body.CatalogId) ? "vendor-security" : body.CatalogId!;
 
         var catalog = loader.Get(catalogId);
         if (catalog is null)

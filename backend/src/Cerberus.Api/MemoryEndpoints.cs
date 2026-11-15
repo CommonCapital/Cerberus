@@ -29,7 +29,7 @@ public static class MemorySources
 }
 
 /// <summary>
-/// Memory and instructions (PLAN.md §6.5): what carries over from one run to
+/// Memory and instructions: what carries over from one run to
 /// the next. Instructions come only from the operator — never from the target,
 /// which is untrusted. Notes may also be written by an agent; those are kept
 /// apart and handed to later runs as hints to verify, not as instructions.

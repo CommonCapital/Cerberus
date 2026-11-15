@@ -26,7 +26,7 @@ public sealed class PreparedChat
 /// <summary>
 /// One reply of the chat agent, from request to stored conversation — whoever carries it: the HTTP endpoint
 /// that streams the reply as its response, or a worker that took the request from the queue and delivers the
-/// reply over SignalR (PLAN.md §22). Both get the same checks, the same conversation and the same storage,
+/// reply over SignalR. Both get the same checks, the same conversation and the same storage,
 /// always for the user the caller names: a conversation is only ever found under its owner's id.
 /// </summary>
 public sealed class ChatService(

@@ -16,7 +16,7 @@ namespace Cerberus.Api.Search;
 public sealed record CodeHit(string File, int StartLine, int EndLine, string Name, double Score, string Preview, bool Stale);
 
 /// <summary>
-/// Builds the semantic index of a target (PLAN.md §20): cuts the code into
+/// Builds the semantic index of a target: cuts the code into
 /// chunks, embeds them with a local model, and stores location and vector.
 /// Re-indexing embeds only what changed: a file whose content is the same
 /// keeps its vectors.

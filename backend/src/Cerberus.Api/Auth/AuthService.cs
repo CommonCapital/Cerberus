@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cerberus.Api.Auth;
 
-/// <summary>Local, self-hosted authentication (replaces Clerk).</summary>
+/// <summary>Local, self-hosted authentication.</summary>
 public sealed class AuthService(CerberusDbContext db)
 {
     private static readonly TimeSpan SessionTtl = TimeSpan.FromDays(30);

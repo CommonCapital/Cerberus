@@ -93,7 +93,7 @@ public static class ThreatModelAgent
 }
 
 /// <summary>
-/// The Threat-Model agent (PLAN.md §6, M5): a model reads the target and
+/// The Threat-Model agent: a model reads the target and
 /// records its security-relevant components and the threats against them
 /// (STRIDE), which are written up as a report. Its output is a model for
 /// people to review and feeds no compliance verdict.

@@ -1,5 +1,6 @@
 {
   "name": "@cerberus/cli",
+  "license": "Apache-2.0",
   "module": "src/main.ts",
   "type": "module",
   "private": true,

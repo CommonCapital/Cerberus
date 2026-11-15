@@ -1,0 +1,423 @@
+{
+  "id": "vendor-security",
+  "name": "Vendor Security Assessment",
+  "version": "1.0",
+  "description": "Questions a customer asks a software or SaaS provider before and during a contract: governance, access, data protection, secure development, operations and resilience. Written for Cerberus as an open, generic catalog; it reproduces no company's questionnaire. Each control can be answered by the provider and, where the scanner has a signal, judged from evidence.",
+  "fullTextDoc": "catalogs/vendor-security.md",
+  "frameworkAlignment": [
+    "ISO/IEC 27001",
+    "NIST CSF 2.0",
+    "OWASP Top 10",
+    "SOC 2"
+  ],
+  "responseScale": [
+    "Compliant",
+    "Partially compliant",
+    "Non-compliant",
+    "Not applicable"
+  ],
+  "methodology": {
+    "overview": "Every control gets a verdict and the evidence behind it. A control that is not met gets an action plan with a deadline.",
+    "correctiveActions": {
+      "standardDays": 30,
+      "maxDays": 90
+    }
+  },
+  "sections": [
+    {
+      "id": "GOV",
+      "name": "Governance and people",
+      "controls": [
+        {
+          "id": "GOV-01",
+          "title": "Security ownership",
+          "requirement": "A named person or team is accountable for security, has the authority to act on it, and reports on it to leadership at least once a year.",
+          "evidenceHints": [
+            "organisation chart",
+            "role description",
+            "last security report to leadership"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-02",
+          "title": "Written security policy",
+          "requirement": "Security rules are written down, approved, known to staff, and reviewed at least yearly or after a significant change.",
+          "evidenceHints": [
+            "policy set",
+            "approval record",
+            "review log"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-03",
+          "title": "Risk assessment",
+          "requirement": "Risks to the service are identified, rated and given an owner and a treatment, and the register is revisited at least yearly.",
+          "evidenceHints": [
+            "risk register",
+            "treatment plans"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-04",
+          "title": "Staff screening and agreements",
+          "requirement": "People with access to customer data are checked as local law allows before they start, and are bound by confidentiality terms that outlive their contract.",
+          "evidenceHints": [
+            "screening procedure",
+            "confidentiality clause"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-05",
+          "title": "Security awareness",
+          "requirement": "Everyone with access is trained in security when they join and at least yearly, and engineers also receive secure-development training.",
+          "evidenceHints": [
+            "training records",
+            "course content"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "GOV-06",
+          "title": "Independent assurance",
+          "requirement": "The provider can show a current independent assessment (certification, audit report or penetration test) of the service in scope, and lets the customer verify findings that concern it.",
+          "evidenceHints": [
+            "certificate or audit report",
+            "latest penetration test summary"
+          ],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "IAM",
+      "name": "Identity and access",
+      "controls": [
+        {
+          "id": "IAM-01",
+          "title": "Least privilege",
+          "requirement": "Access is granted per role, limited to what the job needs, approved before it is given, and removed promptly when the need ends.",
+          "evidenceHints": [
+            "access request records",
+            "role matrix",
+            "leaver process"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-02",
+          "title": "Multi-factor authentication",
+          "requirement": "Administrative access, remote access and access to production require a second factor.",
+          "evidenceHints": [
+            "identity provider settings",
+            "MFA enrolment report"
+          ],
+          "autoEvaluable": true
+        },
+        {
+          "id": "IAM-03",
+          "title": "Access reviews",
+          "requirement": "Accounts and their rights are reviewed at least every six months, and orphaned or excessive rights are removed.",
+          "evidenceHints": [
+            "review evidence",
+            "removed accounts"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-04",
+          "title": "Privileged access",
+          "requirement": "Privileged accounts are personal, separate from everyday accounts, logged, and used only when needed.",
+          "evidenceHints": [
+            "privileged account list",
+            "session logs"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "IAM-05",
+          "title": "Customer sign-in",
+          "requirement": "Customers can use single sign-on or strong passwords with MFA; credentials are stored only as salted, slow hashes; sign-in attempts are rate-limited.",
+          "evidenceHints": [
+            "authentication design",
+            "password storage scheme"
+          ],
+          "autoEvaluable": true
+        }
+      ]
+    },
+    {
+      "id": "DAT",
+      "name": "Data protection",
+      "controls": [
+        {
+          "id": "DAT-01",
+          "title": "Encryption in transit",
+          "requirement": "All connections carrying customer data use current TLS (1.2 or later) with strong ciphers, inside the provider's network as well as over the internet.",
+          "evidenceHints": [
+            "TLS configuration",
+            "internal service encryption"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "crypto"
+          ]
+        },
+        {
+          "id": "DAT-02",
+          "title": "Encryption at rest",
+          "requirement": "Customer data, backups included, is encrypted at rest with current algorithms.",
+          "evidenceHints": [
+            "storage encryption settings",
+            "backup encryption"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "crypto"
+          ]
+        },
+        {
+          "id": "DAT-03",
+          "title": "Secrets and keys",
+          "requirement": "Keys, passwords and tokens are kept in a secrets store, never in source code or images, are rotated, and are reachable only by the services that need them.",
+          "evidenceHints": [
+            "secrets-store configuration",
+            "rotation records",
+            "secret scanning results"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "secret"
+          ]
+        },
+        {
+          "id": "DAT-04",
+          "title": "Data location and retention",
+          "requirement": "The provider states where customer data is stored and processed, keeps it no longer than agreed, and deletes it verifiably at the end of the contract.",
+          "evidenceHints": [
+            "data map",
+            "retention schedule",
+            "deletion certificate"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DAT-05",
+          "title": "Separation between customers",
+          "requirement": "One customer's data cannot be read or changed by another customer, and the separation is tested.",
+          "evidenceHints": [
+            "tenancy design",
+            "isolation test results"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DAT-06",
+          "title": "Personal data",
+          "requirement": "Personal data is processed only as instructed by the customer and as data-protection law requires; sub-processors are listed and agreed.",
+          "evidenceHints": [
+            "data processing agreement",
+            "sub-processor list"
+          ],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "DEV",
+      "name": "Secure development",
+      "controls": [
+        {
+          "id": "DEV-01",
+          "title": "Security in the development process",
+          "requirement": "Security requirements and threat modelling are part of design, and every change is reviewed by someone other than its author before release.",
+          "evidenceHints": [
+            "development procedure",
+            "threat models",
+            "review records"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "DEV-02",
+          "title": "Handling untrusted input",
+          "requirement": "Input from users and other systems is validated and encoded; queries are parameterised; untrusted data is never deserialised into live objects.",
+          "evidenceHints": [
+            "secure coding standard",
+            "static analysis results"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "injection",
+            "deserialization"
+          ]
+        },
+        {
+          "id": "DEV-03",
+          "title": "Security testing",
+          "requirement": "Static analysis runs on every change, and dynamic testing or a penetration test covers the service at least yearly and after major changes.",
+          "evidenceHints": [
+            "pipeline configuration",
+            "test reports"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "injection",
+            "crypto",
+            "secret"
+          ]
+        },
+        {
+          "id": "DEV-04",
+          "title": "Third-party components",
+          "requirement": "Open-source and commercial components are inventoried, checked for known vulnerabilities on every build, and updated within agreed times.",
+          "evidenceHints": [
+            "software bill of materials",
+            "dependency scan results"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "dependency"
+          ]
+        },
+        {
+          "id": "DEV-05",
+          "title": "Environments",
+          "requirement": "Development, test and production are separate; production data is not used in other environments unless anonymised.",
+          "evidenceHints": [
+            "environment diagram",
+            "test-data procedure"
+          ],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "OPS",
+      "name": "Operations",
+      "controls": [
+        {
+          "id": "OPS-01",
+          "title": "Patching",
+          "requirement": "Operating systems, platforms and applications are patched within defined times by severity, critical issues within days.",
+          "evidenceHints": [
+            "patch policy",
+            "patch compliance report"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "dependency"
+          ]
+        },
+        {
+          "id": "OPS-02",
+          "title": "Secure configuration",
+          "requirement": "Systems are built from hardened baselines, defaults and unused services are removed, and drift from the baseline is detected.",
+          "evidenceHints": [
+            "hardening baseline",
+            "configuration scan results"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "config"
+          ]
+        },
+        {
+          "id": "OPS-03",
+          "title": "Vulnerability management",
+          "requirement": "Infrastructure and applications are scanned for vulnerabilities at least monthly, and findings are fixed within times set by severity.",
+          "evidenceHints": [
+            "scan reports",
+            "remediation tracking"
+          ],
+          "autoEvaluable": true,
+          "scannerCategories": [
+            "config",
+            "dependency"
+          ]
+        },
+        {
+          "id": "OPS-04",
+          "title": "Logging and monitoring",
+          "requirement": "Security-relevant events are logged centrally, protected from change, kept for at least a year, and watched so that alerts reach a person.",
+          "evidenceHints": [
+            "logging architecture",
+            "retention settings",
+            "alert runbooks"
+          ],
+          "autoEvaluable": true
+        },
+        {
+          "id": "OPS-05",
+          "title": "Network protection",
+          "requirement": "Networks are segmented, exposure to the internet is limited to what the service needs, and administrative interfaces are not publicly reachable.",
+          "evidenceHints": [
+            "network diagram",
+            "firewall rules"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "OPS-06",
+          "title": "Malware protection",
+          "requirement": "Systems and uploaded files are protected against malicious code appropriate to their platform.",
+          "evidenceHints": [
+            "endpoint protection coverage",
+            "upload scanning"
+          ],
+          "autoEvaluable": false
+        }
+      ]
+    },
+    {
+      "id": "RES",
+      "name": "Incidents and resilience",
+      "controls": [
+        {
+          "id": "RES-01",
+          "title": "Incident response",
+          "requirement": "There is a tested incident-response plan, and the customer is told of an incident affecting its data or service without undue delay, within the time agreed in the contract.",
+          "evidenceHints": [
+            "incident plan",
+            "exercise records",
+            "notification clause"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-02",
+          "title": "Backups",
+          "requirement": "Data is backed up to a separate location, backups are protected from alteration, and restores are tested at least yearly.",
+          "evidenceHints": [
+            "backup policy",
+            "restore test results"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-03",
+          "title": "Continuity",
+          "requirement": "Recovery time and recovery point objectives are defined for the service, and the continuity plan that meets them is tested.",
+          "evidenceHints": [
+            "RTO / RPO statement",
+            "continuity test report"
+          ],
+          "autoEvaluable": false
+        },
+        {
+          "id": "RES-04",
+          "title": "Availability commitment",
+          "requirement": "Availability is stated as a commitment, measured, and reported to the customer.",
+          "evidenceHints": [
+            "service-level agreement",
+            "availability reports"
+          ],
+          "autoEvaluable": false
+        }
+      ]
+    }
+  ]
+}

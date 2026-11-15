@@ -11,7 +11,7 @@ namespace Cerberus.Api.Hubs;
 /// <c>/hub/jobs</c>; a connection without a valid session is dropped, joins nothing and can call nothing.
 /// <para>
 /// A signed-in connection joins its user's group and from then on receives that user's turns — and only
-/// those — as they are answered (PLAN.md §22): <see cref="ChatEvent"/> for each piece of a reply,
+/// those — as they are answered: <see cref="ChatEvent"/> for each piece of a reply,
 /// <see cref="ChatTurn"/> when a turn starts or ends. Requests do not come in here: a turn is submitted
 /// over HTTP (<c>POST /chat/turns</c>), queued, and answered by a worker. What a client missed while it
 /// was away it reads over HTTP by sequence number.

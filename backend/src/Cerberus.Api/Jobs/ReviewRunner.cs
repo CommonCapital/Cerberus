@@ -39,7 +39,7 @@ public sealed record PlanStep(string Id, string Title, string Detail);
 
 /// <summary>
 /// The plan of a review: what will happen, in order, stated before anything
-/// runs (PLAN.md §6.5, plan → approve → execute). Deterministic — the same
+/// runs. Deterministic — the same
 /// request always yields the same plan — so what the operator approves is
 /// exactly what is executed.
 /// </summary>

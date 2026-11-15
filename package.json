@@ -1,7 +1,14 @@
 {
   "name": "cerberus",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CommonCapital/Cerberus.git"
+  },
   "version": "1.0.0",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev:cli": "bun run --watch packages/cli/src/main.ts",
     "dev:server": "bun run --hot packages/server/src/index.ts",
@@ -10,5 +17,6 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2"
-  }
+  },
+  "private": true
 }

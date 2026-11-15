@@ -19,7 +19,7 @@ public sealed record RabbitMqOptions(string? Url, ushort Prefetch = 32)
 }
 
 /// <summary>
-/// The queue on RabbitMQ (PLAN.md §22): the same producers and workers as in one process, with a broker
+/// The queue on RabbitMQ: the same producers and workers as in one process, with a broker
 /// between accepting work and doing it.
 /// <list type="bullet">
 /// <item>Queues are durable and messages persistent; a publish returns when the broker has confirmed it.</item>
@@ -34,7 +34,7 @@ public sealed record RabbitMqOptions(string? Url, ushort Prefetch = 32)
 /// coming round for ever.</item>
 /// <item>A consumer the broker ends — its queue deleted, a failover — starts again and declares its queue again.</item>
 /// </list>
-/// Verified against RabbitMQ 4.4 on 2026-11-15 (PLAN.md §17), which is where the last two came from.
+/// Verified against RabbitMQ 4.4 on 2026-11-15, which is where the last two came from.
 /// </summary>
 public sealed class RabbitMqBus(RabbitMqOptions options, ILogger<RabbitMqBus> logger) : IMessageBus, IAsyncDisposable
 {

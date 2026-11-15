@@ -16,7 +16,7 @@ public class User
     public List<Job> Jobs { get; set; } = [];
 }
 
-/// <summary>A local authentication session (replaces Clerk). The CLI stores the token.</summary>
+/// <summary>A local authentication session. The CLI stores the token.</summary>
 public class AuthSession
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("n");
@@ -93,7 +93,7 @@ public class ComplianceAssessment : IUserOwned
 }
 
 /// <summary>
-/// An authorized piece of work (PLAN.md §3): who may test which targets, up to
+/// An authorized piece of work: who may test which targets, up to
 /// which capability tier, and when. Enum-like fields are stored as their names.
 /// </summary>
 public class Engagement : IUserOwned
@@ -169,7 +169,7 @@ public class AuditEvent : IUserOwned
 }
 
 /// <summary>
-/// A unit of background work (PLAN.md §12). State moves forward only:
+/// A unit of background work. State moves forward only:
 /// Queued → Running → Succeeded | Failed | Cancelled | TimedOut.
 /// </summary>
 public class Job : IUserOwned
@@ -206,7 +206,7 @@ public class Job : IUserOwned
 
 /// <summary>
 /// A request for the operator's consent before a job may run (human in the
-/// loop, PLAN.md §6.5). It names one specific action; approving it approves
+/// loop). It names one specific action; approving it approves
 /// that job and nothing else.
 /// </summary>
 public class ApprovalRequest : IUserOwned
@@ -238,12 +238,12 @@ public class ApprovalRequest : IUserOwned
 }
 
 /// <summary>
-/// One event on a run's stream (PLAN.md §6.5): a state change, a step, progress,
+/// One event on a run's stream: a state change, a step, progress,
 /// a finding, model text. Ordered per job by <see cref="Sequence"/>, so a
 /// client can replay a run and continue live from where it left off.
 /// </summary>
 /// <summary>
-/// One running copy of the service (PLAN.md §22 item 7). It says it is alive every few seconds; work that is
+/// One running copy of the service. It says it is alive every few seconds; work that is
 /// marked as running under an instance that has stopped saying so is nobody's any more, and is failed.
 /// </summary>
 public class WorkerInstance
@@ -254,7 +254,7 @@ public class WorkerInstance
 }
 
 /// <summary>
-/// One request to the chat agent, accepted and queued (PLAN.md §22): whose it is, which conversation, what was
+/// One request to the chat agent, accepted and queued: whose it is, which conversation, what was
 /// asked, and how far it got. The reply is its events; once the reply is whole it is also in the session.
 /// </summary>
 public class ChatTurn : IUserOwned
@@ -317,8 +317,7 @@ public class JobEvent : IUserOwned
 }
 
 /// <summary>
-/// A question a running job put to the operator (human in the loop, PLAN.md
-/// §6.5). The job waits in AwaitingInput until it is answered, expires, or the
+/// A question a running job put to the operator (human in the loop). The job waits in AwaitingInput until it is answered, expires, or the
 /// job is cancelled.
 /// </summary>
 public class OperatorQuestion : IUserOwned
@@ -345,7 +344,7 @@ public class OperatorQuestion : IUserOwned
 }
 
 /// <summary>
-/// A permission policy (PLAN.md §6.5): the user's default (EngagementId null)
+/// A permission policy: the user's default (EngagementId null)
 /// or one engagement's override.
 /// </summary>
 public class PermissionSetting : IUserOwned

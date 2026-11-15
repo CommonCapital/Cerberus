@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace Cerberus.Scanning;
 
 /// <summary>
-/// Dependency inventory from built artefacts (PLAN.md §23, B3): what actually
+/// Dependency inventory from built artefacts: what actually
 /// shipped, read from the artefact itself rather than from a manifest that may
 /// be missing, out of date, or never have declared a vendored library. The
 /// result feeds the same OSV check as the manifests.

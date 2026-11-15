@@ -29,7 +29,7 @@ public sealed record ScanResult(
 /// Phase-1 passive scanner: walks a target directory inside the configured
 /// scan root, applies the regex rule set per line, and returns normalized
 /// findings. Trusted-target MVP — real engagements run this inside the sandbox
-/// (see PLAN.md M3/M5). Paths are confined to the scan root.
+///. Paths are confined to the scan root.
 /// </summary>
 public sealed partial class ScanService(ScanOptions options)
 {

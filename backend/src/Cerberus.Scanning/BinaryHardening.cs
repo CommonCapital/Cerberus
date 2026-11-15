@@ -16,7 +16,7 @@ public sealed record BinaryIssue(
 public sealed record BinaryReport(string Format, IReadOnlyList<BinaryIssue> Issues);
 
 /// <summary>
-/// Hardening checks for built artefacts found in a target (PLAN.md §23, B3):
+/// Hardening checks for built artefacts found in a target:
 /// reads ELF and PE headers in-process and reports protections the build left
 /// out — what build files only promise. Static and passive (tier T0): nothing
 /// is executed and no external tool is started.

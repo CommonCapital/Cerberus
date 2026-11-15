@@ -19,7 +19,7 @@ model User {
   sessions     Session[]
 }
 
-/// A local authentication session (replaces Clerk). The CLI stores `token`.
+/// A local authentication session. The CLI stores `token`.
 model AuthSession {
   id        String   @id @default(cuid())
   token     String   @unique

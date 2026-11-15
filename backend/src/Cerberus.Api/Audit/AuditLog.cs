@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Cerberus.Api.Audit;
 
 /// <summary>
-/// Appends to the per-user, hash-chained audit log (PLAN.md §3). Uses its own
+/// Appends to the per-user, hash-chained audit log. Uses its own
 /// short-lived DbContext so an audit entry is committed on its own — it never
 /// rides along with, or is rolled back by, the request's other changes.
 /// </summary>

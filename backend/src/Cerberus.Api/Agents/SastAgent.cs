@@ -81,7 +81,7 @@ public static class SastAgent
 }
 
 /// <summary>
-/// The SAST agent (PLAN.md §6, M5): a model that reads the target with
+/// The SAST agent: a model that reads the target with
 /// confined read-only tools and reports vulnerabilities it finds. Its findings
 /// are stored apart from the scanner's and never feed a compliance verdict —
 /// the code it reads is untrusted and may try to steer it.

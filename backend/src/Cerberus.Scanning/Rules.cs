@@ -25,7 +25,7 @@ public sealed record Rule(
 /// the languages the platform meets most (Python, JS/TS, Java, C#, Go, shell,
 /// and Erlang/Elixir for the RabbitMQ fixture). Line-based regexes: they find
 /// candidates cheaply and explainably, not proofs — data-flow and context are
-/// the job of the LLM layer on top (PLAN.md §9).
+/// the job of the LLM layer on top.
 /// </summary>
 public static class Rules
 {

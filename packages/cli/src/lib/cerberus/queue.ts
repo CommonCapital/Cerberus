@@ -1,5 +1,5 @@
 // Where a waiting run stands. The server decides whose turn it is fairly
-// (PLAN.md §22 item 4): the next free place goes to whoever has the fewest
+//: the next free place goes to whoever has the fewest
 // runs going, so a long queue of one person's runs does not hold up another's.
 // It reports a waiting job's place as { ahead, others }; this says it in words.
 
