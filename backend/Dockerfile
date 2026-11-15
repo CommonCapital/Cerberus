@@ -3,7 +3,7 @@
 #
 #   docker build -f backend/Dockerfile -t cerberus-api .
 #
-# First built and run on 2026-11-14. Base images are exact versions, not "10.0":
+# Base images are exact versions, not "10.0":
 # the same Dockerfile gives the same image next month. Raise them together when updating .NET.
 
 # ---- build ----------------------------------------------------------------
@@ -38,6 +38,7 @@ COPY --from=build /app/publish ./
 COPY catalogs ./catalogs
 COPY security-skills/skills ./security-skills/skills
 COPY security-skills/LICENSE ./security-skills/LICENSE
+COPY skills ./skills
 
 # /data holds everything that must survive the container: the SQLite database
 # and the key ring that encrypts stored API keys. /workspace is the code to scan.
@@ -59,7 +60,7 @@ ENV PORT=3000 \
     CERBERUS_KEYRING=/data/dp-keys \
     CERBERUS_SCAN_ROOT=/workspace \
     CERBERUS_CATALOG_ROOT=/app/catalogs \
-    CERBERUS_SKILLS_ROOT=/app/security-skills/skills \
+    CERBERUS_SKILLS_ROOT=/app/security-skills/skills:/app/skills \
     DOTNET_RUNNING_IN_CONTAINER=true
 
 # Run as the unprivileged user the base image provides.

@@ -8,7 +8,7 @@
         "dotenv": "^17.4.2",
       },
     },
-    "packages/cli": {
+    "frontend/cli": {
       "name": "@cerberus/cli",
       "bin": {
         "cerberus": "./bin/cerberus",
@@ -37,7 +37,7 @@
         "typescript": "^5",
       },
     },
-    "packages/database": {
+    "frontend/database": {
       "name": "@cerberus/database",
       "dependencies": {
         "@libsql/client": "^0.15.0",
@@ -50,7 +50,7 @@
         "prisma": "^7.7.0",
       },
     },
-    "packages/server": {
+    "frontend/server": {
       "name": "@cerberus/server",
       "dependencies": {
         "@ai-sdk/anthropic": "^3.0.68",
@@ -64,7 +64,7 @@
         "zod": "^4.3.6",
       },
     },
-    "packages/shared": {
+    "frontend/shared": {
       "name": "@cerberus/shared",
       "dependencies": {
         "ai": "^6.0.184",
@@ -85,13 +85,13 @@
 
     "@ai-sdk/react": ["@ai-sdk/react@3.0.186", "", { "dependencies": { "@ai-sdk/provider-utils": "4.0.27", "ai": "6.0.184", "swr": "^2.2.5", "throttleit": "2.1.0" }, "peerDependencies": { "react": "^18 || ~19.0.1 || ~19.1.2 || ^19.2.1" } }, "sha512-fy8wuy8pBghYD1ECw/M5vAsGsZp2D3y/oSTp1iOlAnJqRXzvz4rWLBz1n+rjL+aHZNgJK3kR3NHlnifoKYERfA=="],
 
-    "@cerberus/cli": ["@cerberus/cli@workspace:packages/cli"],
+    "@cerberus/cli": ["@cerberus/cli@workspace:frontend/cli"],
 
-    "@cerberus/database": ["@cerberus/database@workspace:packages/database"],
+    "@cerberus/database": ["@cerberus/database@workspace:frontend/database"],
 
-    "@cerberus/server": ["@cerberus/server@workspace:packages/server"],
+    "@cerberus/server": ["@cerberus/server@workspace:frontend/server"],
 
-    "@cerberus/shared": ["@cerberus/shared@workspace:packages/shared"],
+    "@cerberus/shared": ["@cerberus/shared@workspace:frontend/shared"],
 
     "@dimforge/rapier2d-simd-compat": ["@dimforge/rapier2d-simd-compat@0.17.3", "", {}, "sha512-bijvwWz6NHsNj5e5i1vtd3dU2pDhthSaTUZSh14DUGGKJfw8eMnlWZsxwHBxB/a3AXVNDjL9abuHw1k9FGR+jg=="],
 

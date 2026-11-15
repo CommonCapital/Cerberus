@@ -15,7 +15,16 @@ public sealed record SkillSummary(
 
 public sealed record SkillDocument(SkillSummary Summary, string Content, bool Truncated);
 
-public sealed record SkillOptions(string SkillsRoot);
+/// <param name="SkillsRoot">
+/// Where the skills are: one folder, or several separated like PATH (':' on Linux and macOS, ';' on Windows).
+/// Each holds <c>&lt;name&gt;/SKILL.md</c>; when two hold a skill of the same name, the earlier folder's is used.
+/// </param>
+public sealed record SkillOptions(string SkillsRoot)
+{
+    public IReadOnlyList<string> Roots =>
+        SkillsRoot.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Path.GetFullPath).ToList();
+}
 
 /// <summary>
 /// Which skills an agent may load, by capability tier.
@@ -38,7 +47,7 @@ public static class SkillAccess
 }
 
 /// <summary>
-/// The vendored skills library (<c>security-skills/skills/&lt;name&gt;/SKILL.md</c>):
+/// The skills library — the vendored security skills and the general ones (<c>&lt;folder&gt;/&lt;name&gt;/SKILL.md</c>):
 /// an index of every skill's metadata, a keyword search over it, and loading
 /// of one skill's text by name. This is how agents get at the library — they
 /// search for what fits the task, then load only that.
@@ -47,12 +56,12 @@ public sealed class SkillLibrary
 {
     public const int MaxContentLength = 24_000;
 
-    private readonly string _root;
+    private readonly IReadOnlyList<string> _roots;
     private readonly Lazy<Dictionary<string, (SkillSummary Summary, string File)>> _index;
 
     public SkillLibrary(SkillOptions options)
     {
-        _root = Path.GetFullPath(options.SkillsRoot);
+        _roots = options.Roots;
         _index = new Lazy<Dictionary<string, (SkillSummary, string)>>(Load);
     }
 
@@ -141,9 +150,8 @@ public sealed class SkillLibrary
     private Dictionary<string, (SkillSummary, string)> Load()
     {
         var index = new Dictionary<string, (SkillSummary, string)>(StringComparer.OrdinalIgnoreCase);
-        if (!Directory.Exists(_root)) return index;
-
-        foreach (var directory in Directory.GetDirectories(_root).Order(StringComparer.Ordinal))
+        foreach (var root in _roots.Where(Directory.Exists))
+        foreach (var directory in Directory.GetDirectories(root).Order(StringComparer.Ordinal))
         {
             var file = Path.Combine(directory, "SKILL.md");
             // A link could point outside the library; only real files inside it are indexed.
@@ -154,6 +162,7 @@ public sealed class SkillLibrary
                 var fields = SkillFrontmatter.Parse(File.ReadAllText(file));
                 var name = fields.Scalar("name") ?? Path.GetFileName(directory);
                 var subdomain = fields.Scalar("subdomain") ?? "general";
+                if (index.ContainsKey(name)) continue;   // an earlier folder has it
                 index[name] = (new SkillSummary(
                     name,
                     fields.Scalar("description") ?? string.Empty,

@@ -56,7 +56,7 @@ public sealed class RedisLink(RedisOptions options) : IAsyncDisposable
     /// <summary>
     /// Without waiting: Redis if it is connected right now, else null (and a first connection is started if none
     /// was). For what sits in the way of every request: when Redis is away, the caller falls back at once instead
-    /// of waiting seconds for a timeout. (Found by measuring: each request took about 5 s with Redis down.)
+    /// of waiting seconds for a timeout. (Waiting for a timeout cost about 5 s per request with Redis down.)
     /// </summary>
     public IDatabase? DatabaseIfUp()
     {

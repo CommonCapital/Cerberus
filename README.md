@@ -6,9 +6,9 @@
 
 <p><strong>An autonomous, multi-agent security assurance platform.</strong></p>
 
-<p>Cerberus scans a target system for vulnerabilities in code <em>and</em> system design, grades it against enterprise-grade security frameworks, and — under strict authorization — actively attempts to break it ("aggressive hacking: break &amp; solve") and proposes fixes.</p>
+<p>Cerberus scans a target system for vulnerabilities in its code <em>and</em> its design, grades it against security frameworks, and — under strict authorization — tests whether the weaknesses can be exploited and proposes fixes.</p>
 
-<p>Fully local and self-hostable: no proprietary SaaS. Local database, local sandbox, own authorization, and your choice of cloud LLMs (with your own API keys) or local models via Ollama.</p>
+<p>Self-hosted and local-first: your own database, your own authorization, and the model of your choice — a cloud model with your own API key, or a local one through Ollama. Two interchangeable backends, .NET and TypeScript.</p>
 
 <br />
 
@@ -22,42 +22,56 @@
 
 Cerberus runs an **engagement** against a **target** (a repo, a running service, an infrastructure description) through three phases, all bound by an enforced authorization & safety spine (scope, verified target ownership, capability tiers, rate caps, kill switch, audit):
 
-1. **Scan & Detect** — SAST, dependency/CVE analysis, secret detection, and LLM-driven system-design/threat-model review (CodeQL-class).
-2. **Enterprise Compliance** — grade the target against rigid control catalogs and produce an auditable compliance matrix with action plans and deadlines. Two catalogs ship as data in [`catalogs/`](catalogs/): a vendor security assessment written for Cerberus, and the OWASP Top 10.
-3. **Aggressive Hacking ("break & solve")** — authorized, scoped exploitation and resilience testing, then automated remediation. Built last, gated by the authorization spine.
+1. **Scan and detect** — static analysis, dependency and CVE analysis, secret detection, and model-driven code review and threat modelling.
+2. **Compliance** — grade the target against control catalogs and produce an auditable compliance matrix with action plans and deadlines. Catalogs are data an installation brings ([`catalogs/README.md`](catalogs/README.md) describes the format).
+3. **Active testing** — authorized, scoped exploitation and resilience testing in an isolated sandbox, then remediation. Planned; gated by the authorization controls.
 
-Agents are powered by a vendored library of **818 framework-mapped cybersecurity skills** under [`security-skills/`](security-skills/) (MITRE ATT&CK / NIST CSF / D3FEND / OWASP, Apache-2.0).
+Agents draw on two skill libraries: **818 framework-mapped cybersecurity skills** in [`security-skills/`](security-skills/) (MITRE ATT&CK, NIST CSF, D3FEND, OWASP) and **31 general skills** in [`skills/`](skills/) for documents and reports, browser testing, research, sandboxed code and building MCP servers.
 
 > **Scope & authorization:** Cerberus is for systems you own or are explicitly authorized to test. Active and destructive capabilities are tied to verified target ownership and in-scope engagements, enforced in code — not a tool for attacking third parties.
+
+## Two backends
+
+Cerberus has two backends that serve the same API to the same clients. Run whichever suits the machine; each keeps its own database.
+
+| | .NET backend (`backend/`) | TypeScript backend (`frontend/server`, `frontend/database`) |
+|---|---|---|
+| Runtime | .NET 10: ASP.NET Core, EF Core, SignalR | Bun: Hono, Prisma |
+| Database | SQLite, or PostgreSQL when configured | SQLite |
+| Scale-out | Redis and RabbitMQ when configured | one process |
+| Features | everything in this README | sign-in, sessions and the chat agent today; scans, compliance, jobs, agents and the rest are being ported |
+
+The CLI talks to the address in `API_URL` (default `http://localhost:3000`). If nothing answers there and the address is on this machine, it starts the TypeScript backend itself and says so in the status bar; `CERBERUS_AUTOSTART=off` turns that off.
 
 ## Current state
 
 | Area | Status |
 |---|---|
-| TypeScript CLI | ✅ chat, plus `/scan`, `/findings`, `/review`, `/sast`, `/threatmodel`, `/index`, `/assess`, `/assessments` and `/runs` against the .NET backend |
-| TypeScript server (`packages/server`) | ✅ a lighter server for machines without .NET: sign-in, sessions and the chat agent. The security features (scans, compliance, jobs, agents) need the .NET backend |
-| .NET backend (ASP.NET Core + EF Core + SignalR) | ✅ **the backend**: auth, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit, skills — see [`backend/README.md`](backend/README.md) |
-| Sandbox, agent fleet, web frontend | 📋 planned |
+| Terminal client (`frontend/cli`) | Available: chat, plus `/scan`, `/findings`, `/review`, `/sast`, `/threatmodel`, `/index`, `/assess`, `/assessments` and `/runs` |
+| .NET backend | Available: sign-in, sessions, the chat agent with tool calling, scans, compliance, jobs, approvals, questions, engagements, audit log, skills — see [`backend/README.md`](backend/README.md) |
+| TypeScript backend | Sign-in, sessions and the chat agent; the remaining features are being ported |
+| Sandbox for active testing, web client | Planned |
 
 ## Repository layout
 
 ```
-packages/        # TypeScript: the terminal client and a lighter server
-  cli/           #   OpenTUI + React terminal client; runs project tools locally
-  server/        #   Hono API: local auth, sessions, AI streaming
-  database/      #   Prisma schema + client (local SQLite)
-  shared/        #   Shared Zod schemas, tool contracts, model registry
-backend/         # .NET backend (the full server)
-catalogs/        # Compliance control catalogs as data (vendor security, OWASP Top 10)
-security-skills/ # Vendored 818 cybersecurity skills + framework mappings (Apache-2.0)
+frontend/        # TypeScript
+  cli/           #   terminal client (OpenTUI + React); runs project tools locally
+  server/        #   TypeScript backend (Hono)
+  database/      #   its database (Prisma, SQLite)
+  shared/        #   schemas, tool contracts and the model registry shared by both
+backend/         # .NET backend
+catalogs/        # where compliance catalogs go (format in catalogs/README.md)
+security-skills/ # 818 cybersecurity skills with framework mappings (Apache-2.0, vendored)
+skills/          # 31 general skills (see skills/README.md)
 ```
 
 ## Getting started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) (for the TypeScript CLI + server)
-- [.NET 10 SDK](https://dotnet.microsoft.com) (for the backend)
+- [Bun](https://bun.sh) 1.3 or later (the CLI and the TypeScript backend)
+- [.NET 10 SDK](https://dotnet.microsoft.com) (the .NET backend; optional — without it the CLI uses the TypeScript backend)
 - A model to answer: [Ollama](https://ollama.com) for fully-local models, and/or your own API key for Claude (Anthropic), GPT (OpenAI) or DeepSeek
 
 ### 1. Configure
@@ -66,15 +80,26 @@ security-skills/ # Vendored 818 cybersecurity skills + framework mappings (Apach
 cp .env.example .env
 ```
 
-Everything defaults to local. `DATABASE_URL` points at a local SQLite file; add `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` only if you want cloud models (otherwise use Ollama).
+Everything defaults to local. Add `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` only if you want cloud models (otherwise use Ollama). `DATABASE_URL` is the TypeScript backend's SQLite file.
 
-### 2. The backend (.NET)
+### 2. A backend
+
+The .NET backend:
 
 ```bash
 cd backend && dotnet run --project src/Cerberus.Api
 ```
 
-It listens on `http://localhost:3000` and creates its SQLite database on first run. This is the one backend: the CLI needs nothing else.
+It listens on `http://localhost:3000` and creates its SQLite database on first run.
+
+Or the TypeScript backend — or neither, and let the CLI start it:
+
+```bash
+bun run --cwd frontend/database db:push
+bun run dev:server
+```
+
+Run one of them on a port, not both.
 
 **Services are optional.** The server runs on its own: SQLite for data, a queue inside the process, nothing shared. Point it at services of your own and it uses each one that answers when it starts: `CERBERUS_POSTGRES_URL=postgres://user:password@localhost:5432/cerberus` keeps the data in PostgreSQL (the database is created if it does not exist), `CERBERUS_REDIS_URL` and `CERBERUS_RABBITMQ_URL` as below. A configured service that does not answer within a few seconds (`CERBERUS_SERVICE_WAIT_SECONDS`, default 5) is replaced by its local stand-in, and the server starts anyway; the start-up lines and `GET /health/ready` (`services`) say what is in use and what stands in for what. It decides once, at start-up: restart it after starting a service. Data written to SQLite meanwhile stays in that file and is not moved to PostgreSQL later. For an installation that must not run on stand-ins (several copies, or a compose deployment), set `CERBERUS_REQUIRE_SERVICES=true`: a missing service then stops the start with a message saying which. `compose.infra.yml` brings up PostgreSQL, RabbitMQ and Redis as containers and sets that.
 
@@ -110,8 +135,6 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **A busy provider.** If the model provider is overloaded or rate-limiting, the reply waits and tries again (up to 5 times) and says so, instead of failing.
 - **Saying no.** In the permission prompt, `t` denies and lets you tell the agent what to do instead.
 
-> **Which server is the backend?** The .NET one. The CLI uses a single address (`API_URL`, default `http://localhost:3000`). Without .NET, the TypeScript server in `packages/server` serves the same sign-in, session and chat API (`bun run --cwd packages/database db:push`, then `bun run dev:server`): enough for the chat agent, not for scans, compliance, jobs or the security agents, which exist only in the .NET backend (see the parity table in [`backend/README.md`](backend/README.md)). Do not run both on port 3000.
-
 ### Or: everything in containers
 
 ```bash
@@ -130,11 +153,9 @@ Optional parts are files of their own, added with `-f`:
 docker compose -f docker-compose.yml -f compose.infra.yml up -d
 ```
 
-- `compose.infra.yml` — RabbitMQ (the API then sends its work over it) and Redis. Needs `RABBITMQ_PASSWORD` in `.env`: there is no default password.
+- `compose.infra.yml` — PostgreSQL, RabbitMQ and Redis for the .NET backend. Needs `POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD` in `.env`: there are no default passwords.
 - `compose.models.yml` — Ollama, for local models. Several GB.
 - `compose.web.yml` — SearXNG, a search service of your own for the agents' research. Needs `SEARXNG_SECRET`.
-
-First built and run on 2026-11-14: the API, the CLI and the infra stack. The models and web stacks have not been started yet.
 
 ### Choosing a model
 
@@ -196,7 +217,7 @@ With the backend and the CLI running, `/login`, and:
 - **When an agent stops to ask you.** Two things can pause a run started from the CLI. The agent may ask a question when the code cannot tell it something — which environment is meant, what matters most to you: choose an answer with `enter`, or press `t` and write your own. And before an agent's tool changes anything outside Cerberus (today: a tool of an outside server that is not read-only), the run shows you what it wants to do and with what, and waits: *Allow this once*, *Allow for the rest of this run*, or *Do not allow* — with `t` you can say why, and the agent is told. Nothing of that kind happens without your yes; no answer means no. A run from a pipeline never asks questions of its own.
 - **`/threatmodel`** — type a path; the model chosen with `/models` maps that code's components and the threats against them (STRIDE, with likelihood and impact) and writes a threat model, shown when the run ends. It is a model's hypothesis to review with people who know the system, not a finding of fact.
 - **`/index`** — type a path; a local embedding model (Ollama's `nomic-embed-text`, which must be pulled once) reads that code so it can be searched by what it does rather than by the words it uses. Nothing leaves your machine. The agents started with `/sast`, `/threatmodel` and the evidence run then get a search-by-meaning tool for that code; run `/index` again after changes — only changed files are processed.
-- **`/assess`** — check code against a compliance catalog: pick the catalog (type a path first if it is not the whole scan root). The run opens; when it has finished, `o` opens the assessment.
+- **`/assess`** — check code against a compliance catalog installed on the server: pick the catalog (type a path first if it is not the whole scan root). The run opens; when it has finished, `o` opens the assessment.
 - **`/assessments`** — open a past assessment. You see where it stands and every control with the answer that counts (yours, else the scanner's). For the highlighted control: `e` asks the model chosen in `/models` to look for evidence (opens that run), `a` accepts the model's suggestion as your answer — it asks for an action plan first when the suggestion is short of compliant — and `x` dismisses it. A model's "Cannot tell" cannot be accepted.
 - **`/engagement`** — choose the engagement your runs belong to, or type a name to create one. Everything you start afterwards (`/scan`, `/review`, `/sast`) runs under it, and the backend refuses a target that is not in its scope. The choice is remembered and shown in the status bar; "No engagement" goes back to unscoped runs (unless the server requires one).
 - **`/scope`** — the directories the current engagement may be run on. Type a path to add it — doing so is your statement that you own that code or are authorized to test it. With nothing typed, Enter removes the highlighted one.
@@ -208,12 +229,6 @@ With the backend and the CLI running, `/login`, and:
 - **`/runs`** — recent runs; those waiting on you are marked. Opening one replays it and follows it live.
 
 On a run's screen you see its state, task list, progress and findings as they arrive (and, for triage, the model's output and verdicts). When the run needs you, the prompt appears in place: `a` / `d` to approve or deny, `↑` `↓` and `enter` to answer a question. `c` cancels a running job, `esc` goes back (the run carries on).
-
-```bash
-bun run --cwd packages/cli test
-```
-
-Runs on `http://localhost:3000` (configurable via `PORT`), creates its SQLite schema on first run, and exposes the same local-auth / sessions / streaming-chat contract. See [`backend/README.md`](backend/README.md).
 
 ### 5. In a pipeline (no screen)
 
@@ -258,7 +273,7 @@ cerberus schedule add scan . --every 1d --name "Nightly scan"
 
 ## Local-first by design
 
-Nothing hosted is required. Authorization is self-hosted (email/password sessions), the database is local SQLite or a PostgreSQL of your own, models run via your own keys or local Ollama, and tool execution is planned to run in a self-hosted sandbox. A cloud deployment is possible behind the same interfaces, never a requirement to run.
+Nothing hosted is required. Sign-in is self-hosted (email and password), the database is local SQLite or a PostgreSQL of your own, models run with your own keys or locally through Ollama, and active testing will run in a self-hosted sandbox. A cloud deployment is possible behind the same interfaces, never a requirement.
 
 ## Responsible use
 
@@ -274,4 +289,4 @@ Found a vulnerability in Cerberus itself? Please report it privately as describe
 
 ## License
 
-Cerberus is licensed under the [Apache License 2.0](LICENSE). Third-party material keeps its own licence, listed in [NOTICE](NOTICE): the vendored `security-skills/` library is Apache-2.0 and its attribution is preserved.
+Cerberus is licensed under the [Apache License 2.0](LICENSE). Third-party material keeps its own licence, listed in [NOTICE](NOTICE): the vendored `security-skills/` library and Anthropic's skills in `skills/` are Apache-2.0, with their attribution preserved.

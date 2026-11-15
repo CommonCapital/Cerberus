@@ -63,8 +63,8 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
       - name: Types
-        working-directory: packages/cli
+        working-directory: frontend/cli
         run: bunx tsc --noEmit
       - name: Test
-        working-directory: packages/cli
+        working-directory: frontend/cli
         run: bun test src

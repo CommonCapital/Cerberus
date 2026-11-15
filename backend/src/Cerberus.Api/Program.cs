@@ -171,7 +171,9 @@ builder.Services.AddSingleton<ComplianceEngine>();
 
 // --- Skills library (vendored under security-skills/; agents search and load from it) ---
 var skillsRoot = Environment.GetEnvironmentVariable("CERBERUS_SKILLS_ROOT")
-    ?? Path.Combine(ResolveUpwards(builder.Environment.ContentRootPath, "security-skills"), "skills");
+    ?? string.Join(Path.PathSeparator,
+        Path.Combine(ResolveUpwards(builder.Environment.ContentRootPath, "security-skills"), "skills"),
+        ResolveUpwards(builder.Environment.ContentRootPath, "skills"));
 builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
