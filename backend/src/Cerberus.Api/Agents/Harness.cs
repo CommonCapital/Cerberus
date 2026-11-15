@@ -114,7 +114,8 @@ public sealed record AgentResult(AgentRun? Run, AgentOutcome Outcome);
 /// </summary>
 public sealed class AgentHarness(
     AgentLoop loop, ApiKeyService keys, CerberusDbContext db, AuditLog audit, ScanOptions scanOptions, SkillLibrary skills,
-    OperatorInbox inbox, Search.CodeSearch search, Web.ResearchTools research)
+    OperatorInbox inbox, Search.CodeSearch search, Web.ResearchTools research,
+    Controls.DisabledTools? disabled = null, Controls.AgentLimits? limits = null, TimeProvider? clock = null)
 {
     public async Task<AgentResult> RunAsync(
         AgentSpec spec, AgentRequest request, Func<AgentContext, IAgentWork> build, IRunReporter reporter, CancellationToken ct)
@@ -128,6 +129,8 @@ public sealed class AgentHarness(
         var workspace = new CodeWorkspace(scanOptions.ScanRoot, request.TargetPath, redact: !local);
         var credentials = await keys.ResolveCredentialsAsync(job.UserId, ct);
         var maxSteps = Math.Clamp(request.MaxSteps, 1, spec.StepLimit);
+        // What the description offers, less what the installation has switched off for everyone.
+        var offers = (disabled ?? Controls.DisabledTools.None).Allow(spec.Offers);
 
         var run = new AgentRun
         {
@@ -146,20 +149,20 @@ public sealed class AgentHarness(
 
         // The shared tools, each under its own condition. What an agent may have is its description's to say;
         // whether this run gets it is the request's — and a specialist never asks the operator anything.
-        var semantic = spec.Offers.HasFlag(AgentOffers.CodeSearch) ? await search.ToolForAsync(job.UserId, request.TargetPath, ct) : null;
-        var researcher = spec.Offers.HasFlag(AgentOffers.Research) && request.Research
+        var semantic = offers.HasFlag(AgentOffers.CodeSearch) ? await search.ToolForAsync(job.UserId, request.TargetPath, ct) : null;
+        var researcher = offers.HasFlag(AgentOffers.Research) && request.Research
             ? await research.ForAsync(job, request.Model, credentials, reporter, db, ct)
             : null;
-        var asking = spec.Offers.HasFlag(AgentOffers.Questions) && request.Questions && brief is null ? new AskOperatorTool(reporter) : null;
+        var asking = offers.HasFlag(AgentOffers.Questions) && request.Questions && brief is null ? new AskOperatorTool(reporter) : null;
         IReadOnlyList<IAgentTool> tools =
         [
-            .. spec.Offers.HasFlag(AgentOffers.Code) ? CodeTools.For(workspace) : [],
+            .. offers.HasFlag(AgentOffers.Code) ? CodeTools.For(workspace) : [],
             .. semantic is null ? Array.Empty<IAgentTool>() : [semantic],
             .. researcher is null ? Array.Empty<IAgentTool>() : [researcher],
             .. asking is null ? Array.Empty<IAgentTool>() : [asking],
             .. work.Tools,
-            .. spec.Offers.HasFlag(AgentOffers.Notes) ? [new SastAgentRunner.RememberTool(db, audit, job)] : Array.Empty<IAgentTool>(),
-            .. spec.Offers.HasFlag(AgentOffers.Skills)
+            .. offers.HasFlag(AgentOffers.Notes) ? [new SastAgentRunner.RememberTool(db, audit, job)] : Array.Empty<IAgentTool>(),
+            .. offers.HasFlag(AgentOffers.Skills)
                 ? [new SastAgentRunner.SkillTool(ChatTools.SearchSkills, skills), new SastAgentRunner.SkillTool(ChatTools.LoadSkill, skills)]
                 : Array.Empty<IAgentTool>(),
         ];
@@ -181,6 +184,8 @@ public sealed class AgentHarness(
                 (researcher is null ? "" : "\n\n" + Web.Research.ToolHint) +
                 (asking is null ? "" : "\n\n" + AskOperatorTool.Hint),
                 tools, maxSteps, reporter, ct, messages is null ? null : messages.Take,
+                // The loop guard, with the installation's time limit if it set one: past it, the agent is stopped and asked for its summary.
+                guard: new LoopGuard(LoopGuard.BudgetFor(maxSteps), limits?.TimeLimit, clock),
                 // A call that needs consent is put to the operator, whichever agent makes it.
                 gate: new OperatorGate(job, db, audit, reporter));
             if (outcome.StopNote(maxSteps, spec.IfCutShort) is { } stopped)

@@ -13,7 +13,7 @@ namespace Cerberus.Api.Chat;
 /// shown in lists, so whatever the model returns is cut down to one short
 /// plain line — and if nothing usable comes back, the title stays as it was.
 /// </summary>
-public sealed partial class SessionTitler(IModelProviderResolver resolver)
+public sealed partial class SessionTitler(IModelProviderResolver resolver, Controls.ModelRoles? roles = null)
 {
     public const int MaxLength = 60;
 
@@ -105,6 +105,8 @@ public sealed partial class SessionTitler(IModelProviderResolver resolver)
     /// <summary>Asks the model for a title for a conversation that starts with this message. Null when it returns nothing usable.</summary>
     public async Task<string?> WriteAsync(string firstMessage, string model, ModelCredentials credentials, CancellationToken ct)
     {
+        // A cheaper model where the installation names one — and only where that changes nothing about where the text goes.
+        model = roles?.ForTitle(model, credentials) ?? model;
         var message = firstMessage.Length <= MaxMessage ? firstMessage : firstMessage[..MaxMessage] + "…";
         var reply = new StringBuilder();
         await foreach (var delta in resolver.Resolve(model).StreamAsync(

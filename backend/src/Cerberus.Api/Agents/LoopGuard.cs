@@ -14,13 +14,18 @@ namespace Cerberus.Api.Agents;
 /// note instead of being run, since its result would be the same;</item>
 /// <item>a run has a budget of tool calls; when it is spent, no more are made;</item>
 /// <item>after <see cref="MaxFruitlessSteps"/> steps in a row in which no call
-/// did anything (all repeated or failed), the run is stopped.</item>
+/// did anything (all repeated or failed), the run is stopped;</item>
+/// <item>where a time limit is given, a run that is past it is stopped after the step it is in. A step is
+/// not cut off half-way — what the model is writing then would be lost — so a run can go over by one step.</item>
 /// </list>
 /// A stopped run still ends with the model's own account: the loop gives it
 /// one last turn without tools.
 /// </summary>
-public sealed class LoopGuard(int maxToolCalls)
+public sealed class LoopGuard(int maxToolCalls, TimeSpan? timeLimit = null, TimeProvider? clock = null)
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly DateTimeOffset? _deadline = timeLimit is { } limit ? (clock ?? TimeProvider.System).GetUtcNow() + limit : null;
+
     public const int MaxIdenticalCalls = 2;
     public const int MaxFruitlessSteps = 3;
 
@@ -63,7 +68,19 @@ public sealed class LoopGuard(int maxToolCalls)
         {
             StopReason ??= $"its last {MaxFruitlessSteps} steps got nowhere (tool calls that were repeated or failed)";
         }
+        if (_deadline is { } deadline && _clock.GetUtcNow() >= deadline)
+        {
+            StopReason ??= $"it reached its time limit of {Describe(timeLimit!.Value)}";
+        }
     }
+
+    private static string Describe(TimeSpan limit) =>
+        limit.TotalSeconds < 1 ? Milliseconds(Math.Max(1, Math.Round(limit.TotalMilliseconds)))
+        : limit.TotalMinutes >= 1 && limit.TotalSeconds % 60 == 0
+            ? $"{limit.TotalMinutes:0} minute{(limit.TotalMinutes == 1 ? "" : "s")}"
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{limit.TotalSeconds:0.#} seconds");
+
+    private static string Milliseconds(double n) => $"{n:0} millisecond{(n == 1 ? "" : "s")}";
 
     /// <summary>What the model is told when it is stopped for a reason other than the step limit.</summary>
     public static string ClosingTurn(string reason) =>

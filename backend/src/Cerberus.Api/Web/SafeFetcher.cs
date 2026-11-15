@@ -10,7 +10,15 @@ namespace Cerberus.Api.Web;
 /// <param name="SearchUrl">A SearXNG instance to search with (CERBERUS_SEARXNG_URL); without one there is fetching but no searching.</param>
 /// <param name="AllowLocalAddresses">Only for tests: lets pages be fetched from this machine.</param>
 /// <param name="BlockedTerms">Terms that never leave this installation (CERBERUS_EGRESS_BLOCKED_TERMS).</param>
-public sealed record WebOptions(bool Enabled = false, string? SearchUrl = null, bool AllowLocalAddresses = false, IReadOnlyList<string>? BlockedTerms = null);
+/// <param name="SwitchedOff">Set when the installation switched the internet off as a tool group (CERBERUS_DISABLED_TOOLS), whatever CERBERUS_WEB says.</param>
+public sealed record WebOptions(
+    bool Enabled = false, string? SearchUrl = null, bool AllowLocalAddresses = false, IReadOnlyList<string>? BlockedTerms = null, bool SwitchedOff = false)
+{
+    /// <summary>Why research on the internet cannot be asked for here, with what would change it.</summary>
+    public string OffBecause => SwitchedOff
+        ? "Research on the internet is switched off on this server: the \"web\" tool group is in CERBERUS_DISABLED_TOOLS."
+        : "Research on the internet is switched off on this server (CERBERUS_WEB=on turns it on).";
+}
 
 public sealed record FetchedPage(string Url, int Status, string Title, string Text, bool Truncated);
 

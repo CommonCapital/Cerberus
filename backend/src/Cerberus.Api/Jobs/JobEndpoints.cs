@@ -113,7 +113,7 @@ public static class JobEndpoints
         }
         if (research && !web.Enabled && mcp.Names.Count == 0)
         {
-            return BadRequest("Research on the internet is switched off on this server (CERBERUS_WEB=on turns it on).");
+            return BadRequest(web.OffBecause);
         }
         // Questions from the agent: only for the agents that can ask, and only when the caller says somebody is there to answer.
         var questions = body.Questions == true;

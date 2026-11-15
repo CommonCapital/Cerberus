@@ -54,6 +54,7 @@ public static class ServiceConfig
     private static readonly string[] PositiveSeconds =
     [
         "CERBERUS_CHAT_TURN_TIMEOUT_SECONDS", "CERBERUS_JOB_TIMEOUT_SECONDS", "CERBERUS_JOB_GRACE_SECONDS", "CERBERUS_QUESTION_TIMEOUT_SECONDS",
+        "CERBERUS_AGENT_TIME_LIMIT_SECONDS",
     ];
 
     private static readonly string[] TrueFalse =
@@ -100,6 +101,8 @@ public static class ServiceConfig
             errors.Add("CERBERUS_RABBITMQ_URL must be an amqp:// or amqps:// address.");
         if (Value("CERBERUS_REDIS_URL") is { } shared && !IsUrl(shared, "redis", "rediss"))
             errors.Add("CERBERUS_REDIS_URL must be a redis:// or rediss:// address.");
+        if (Cerberus.Api.Controls.DisabledTools.Problem(Value(Cerberus.Api.Controls.DisabledTools.Variable)) is { } disabled) errors.Add(disabled);
+        if (Cerberus.Api.Controls.ModelRoles.Problem(Value(Cerberus.Api.Controls.ModelRoles.Variable)) is { } fast) errors.Add(fast);
 
         if (Value("PORT") is { } port && !(int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p is >= 1 and <= 65535))
             errors.Add("PORT must be a number from 1 to 65535.");

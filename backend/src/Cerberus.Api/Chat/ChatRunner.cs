@@ -38,7 +38,7 @@ public sealed record ChatResult(List<JsonObject> Messages, bool Complete, string
 /// them and resubmits the same assistant message, which this then continues.</item>
 /// </list>
 /// </summary>
-public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary skills)
+public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary skills, Controls.DisabledTools? disabled = null)
 {
     /// <summary>Upper bound on model calls within one reply, so a model cannot loop on server tools forever.</summary>
     public const int MaxSteps = 8;
@@ -56,7 +56,8 @@ public sealed class ChatRunner(IModelProviderResolver resolver, SkillLibrary ski
 
         // The model gets the summary of the compacted part and, in full, only what came after it.
         var turns = UiMessages.ToTurns(ChatCompactor.After(messages, run.Summary is null ? null : run.SummarizedThrough));
-        var tools = ChatTools.For(run.Mode, run.Delegation && !run.Helper);
+        // What the installation has switched off is not offered: the model does not learn it exists.
+        var tools = (disabled ?? Controls.DisabledTools.None).Allow(ChatTools.For(run.Mode, run.Delegation && !run.Helper));
         // The agent's own task list: stored with the session, so it is there after a compaction and across requests.
         var taskList = new TaskList(run.Tasks);
         var system = string.Join("\n\n", new[]
