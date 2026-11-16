@@ -80,14 +80,39 @@ public sealed class BackingServicesTests
     [Fact]
     public async Task With_no_wait_each_service_is_still_tried_once_and_all_are_tried_together()
     {
-        var slow = new FakeService("PostgreSQL", true, async _ => { await Task.Delay(400); throw new TimeoutException(); });
-        var other = new FakeService("Redis", true, async _ => { await Task.Delay(400); throw new TimeoutException(); });
-        var watch = Stopwatch.StartNew();
-        var backing = await BackingServices.DecideAsync([slow, other], TimeSpan.Zero, default);
+        var postgresStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var redisStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deadline = TimeSpan.FromSeconds(30);
+        async Task Probe(TaskCompletionSource started)
+        {
+            started.TrySetResult();
+            await release.Task;
+            await Down(0);
+        }
+        var slow = new FakeService("PostgreSQL", true, _ => Probe(postgresStarted));
+        var other = new FakeService("Redis", true, _ => Probe(redisStarted));
+        var deciding = BackingServices.DecideAsync([slow, other], TimeSpan.Zero, default);
+
+        try
+        {
+            // Both probes must enter while neither is allowed to finish. The
+            // deadline only bounds a hang; elapsed time is not the assertion.
+            await Task.WhenAll(postgresStarted.Task, redisStarted.Task).WaitAsync(deadline);
+            Assert.False(deciding.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        var backing = await deciding.WaitAsync(deadline);
 
         Assert.Equal((1, 1), (slow.Attempts, other.Attempts));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(0.75), $"took {watch.Elapsed.TotalSeconds:0.00} s: one after the other?");
         Assert.Equal(2, backing.FellBack.Count);
+        // A serial implementation might time out its first probe and only
+        // then enter the second. That must not count as concurrent probing:
+        // both outcomes must come from the released probes, not their timeout.
+        Assert.All(backing.FellBack, choice => Assert.Equal("cannot be reached", choice.Problem));
     }
 
     [Fact]
