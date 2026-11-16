@@ -7,6 +7,9 @@ const repoRoot = path.resolve(import.meta.dirname, "../..");
 
 dotenv.config({ path: path.join(repoRoot, ".env") });
 
+// db:push sets RUST_LOG=info: Prisma 7.7 drops the first engine stderr line.
+// With an inherited warn level, that hides P1003 and prevents creating a new SQLite file.
+
 // Resolve a relative SQLite file: URL against the repo root so the Prisma CLI
 // (migrations / db push) targets the same database file as the runtime client.
 function resolveSqliteUrl(raw: string | undefined): string {

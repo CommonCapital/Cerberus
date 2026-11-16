@@ -10,8 +10,13 @@
     "frontend/*"
   ],
   "scripts": {
+    "start:cli": "CERBERUS_AUTOSTART=off bun run frontend/cli/src/main.ts",
     "dev:cli": "bun run --watch frontend/cli/src/main.ts",
     "dev:server": "bun run --hot frontend/server/src/index.ts",
+    "dev:api": "dotnet run --no-launch-profile --project backend/src/Cerberus.Api",
+    "dev:api:lite": "sh scripts/dev-api-lite.sh",
+    "check:cli": "bun run --cwd frontend/cli typecheck && bun run --cwd frontend/cli test",
+    "test:scripts": "bun test scripts",
     "build:cli": "bun run --filter @cerberus/cli build",
     "link:cli": "bun run build:cli && cd frontend/cli && bun link"
   },

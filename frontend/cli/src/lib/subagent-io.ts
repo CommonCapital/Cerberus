@@ -1,7 +1,6 @@
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { apiClient } from "./api-client";
 import { getAuth } from "./auth";
-import { baseUrl } from "./cerberus/api";
 import { chatFetch } from "./cerberus/turn-io";
 import { projectContext } from "./project-context";
 import type { HelperDeps } from "./subagent";
@@ -12,18 +11,11 @@ import type { HelperDeps } from "./subagent";
 
 export const helperIo: Pick<HelperDeps, "createSession" | "transport"> = {
   createSession: async (title, parentId) => {
-    const auth = getAuth();
-    const response = await fetch(`${baseUrl()}/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}) },
-      body: JSON.stringify({ title, parentId }),
-    });
-    if (!response.ok) throw new Error(`The helper could not be started (${response.status}).`);
-    return ((await response.json()) as { id: string }).id;
+    return (await apiClient.createSession({ title, parentId })).id;
   },
   transport: (sessionId, model) =>
     new DefaultChatTransport<UIMessage>({
-      api: apiClient.chat.$url().toString(),
+      api: apiClient.chatUrl(),
       // A helper's turns travel like the operator's own: queued, answered by a worker, delivered over SignalR.
       fetch: chatFetch(),
       headers() {

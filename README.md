@@ -61,6 +61,7 @@ frontend/        # TypeScript
   database/      #   its database (Prisma, SQLite)
   shared/        #   schemas, tool contracts and the model registry shared by both
 backend/         # .NET backend
+scripts/         # low-concurrency development launcher
 catalogs/        # compliance catalogs as data (vendor security, OWASP Top 10) and their format
 security-skills/ # 818 cybersecurity skills with framework mappings (Apache-2.0, vendored)
 skills/          # 31 general skills (see skills/README.md)
@@ -78,17 +79,18 @@ PLAN.md          # architecture, roadmap and status
 ### 1. Configure
 
 ```bash
+bun install --frozen-lockfile
 cp .env.example .env
 ```
 
-Everything defaults to local. Add `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` only if you want cloud models (otherwise use Ollama). `DATABASE_URL` is the TypeScript backend's SQLite file.
+Everything defaults to local. Bun loads the root `.env` for the commands below; export settings in your shell when invoking `dotnet` directly. The .NET backend uses `CERBERUS_DB` for its SQLite path. Add `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` only if you want cloud models (otherwise use Ollama). `DATABASE_URL` is the TypeScript backend's SQLite file.
 
 ### 2. A backend
 
 The .NET backend:
 
 ```bash
-cd backend && dotnet run --project src/Cerberus.Api
+bun run dev:api
 ```
 
 It listens on `http://localhost:3000` and creates its SQLite database on first run.
@@ -107,10 +109,6 @@ Run one of them on a port, not both.
 ### 3. The CLI
 
 ```bash
-bun install
-```
-
-```bash
 bun run dev:cli
 ```
 
@@ -118,7 +116,7 @@ The CLI signs in to the backend automatically (a local account is created on fir
 
 **What the chat agent knows and how its tools behave:**
 
-- **Your project.** With every message the CLI tells the agent the working directory, platform, date and git branch, and sends the nearest `AGENTS.md` (or `CERBERUS.md`, `CLAUDE.md`) — from the directory the CLI runs in, else from a parent up to the repository root. Put how to build, test and behave in your project there. Do not start the CLI inside a repository you do not trust: its instructions file would be read too.
+- **Your project.** Every message includes the working directory, platform, date, git branch and applicable instructions. The CLI first reads `~/.cerberus/AGENTS.md` (or the directory selected by `CERBERUS_HOME`), then one file in each directory from the repository root through the directory where you launched it. In each directory it prefers `AGENTS.md`, then `CERBERUS.md`, then `CLAUDE.md`; empty or unreadable files fall through. Global defaults come first, then outer-to-inner project notes, with their directory scope stated. The combined instructions are limited to 20,000 characters and 16 sources, reserving space for closer sources and marking truncation. File reads are bounded; instruction-file symlinks and paths escaping the relevant root are refused. Sources are refreshed for every message. Directories deeper than the launch directory are not discovered automatically while reading code yet. Project notes never override your requests, PLAN mode or tool approvals; only launch the CLI in projects whose instructions you trust.
 - **Reading.** Files come back with line numbers, 2000 lines at a time; the agent reads on with an offset. Reading a file that probably holds secrets (`.env`, key files) asks you every time, and searches skip `.env` files.
 - **Editing.** An edit must match the file, but near-misses a model commonly makes — other line endings, "tidied" quotes and dashes, trailing spaces — still match, and the file keeps its own line endings. The conversation shows what changed as a diff.
 - **Commands.** A command is stopped after 2 minutes unless the agent asks for longer. Long output is shown as its beginning and end; all of it is saved to a temporary file the agent can read.
@@ -128,13 +126,48 @@ The CLI signs in to the backend automatically (a local account is created on fir
 - **Tasks.** For work of several steps the agent keeps a task list, shown above the input as it changes: what is done, what is under way, what waits for what. It is the agent's own plan — it updates it as it goes, and it survives a summarised conversation.
 - **Your own slash commands.** A Markdown file `.cerberus/commands/fix-tests.md` in your project (or in `~/.cerberus/commands/` for all projects) becomes `/fix-tests`. Its text is the prompt; `$ARGUMENTS` is replaced by what you type after the name, `$1`, `$2` by single words (the last one takes the rest). An optional first block `---` / `description: …` / `---` sets what the menu shows. Existing `.opencode/commands` and `.claude/commands` files work too. A command only sends a message as you; it runs nothing by itself.
 - **Long conversations.** When a chat nears the model's limit, the earlier part is summarised for the model so the conversation can go on; you are told, and nothing disappears from your screen. `/compact` does it on demand. Local models are assumed to have a small window (8k tokens) unless the backend is started with `CERBERUS_CONTEXT_TOKENS`.
-- **Helpers.** For a question that needs a lot of looking around, the agent can hand it to a helper: a second conversation with the same model that reads and searches on its own and reports back, so the main conversation stays short. You see "Task: …" with what the helper is doing, then how its report begins. A helper cannot change files or run commands, and it asks you before reading a file that probably holds secrets, just as the agent does. Esc stops it.
+- **Helpers.** For a question that needs a lot of looking around, the agent can hand it to a helper: a second conversation with the same model that reads and searches on its own and reports back, so the main conversation stays short. You see "Task: …" with what the helper is doing, then how its report begins. A helper cannot change files or run commands, and it asks you before reading a file that probably holds secrets, just as the agent does. Esc stops it. One user prompt can start at most **four helpers**, one at a time. Failed starts use up an attempt; replaying the same tool call does not start another helper. Tool continuations share that allowance; a new prompt gets a new one. Interrupting or leaving the conversation cancels its active and queued helpers, and a late response cannot restart them.
 - **Readable replies.** A reply's markdown is shown as headings, lists, tables and highlighted code. When the agent looks around — several reads, searches and listings in a row — those calls are folded into one line that counts them; `ctrl+o` shows each one and folds them again. What it changed or ran is always shown in full.
 - **Named conversations.** After its first reply a new conversation is given a short name by the model, so `/sessions` lists what each one was about rather than the first words you typed. `/rename` gives it a name of your own.
 - **Fork.** `/fork` copies the conversation you are in — all of it, or up to the reply to an earlier prompt — and puts you in the copy, so you can try another approach without losing the first. The original stays as it is; `/sessions` lists both.
 - **Export.** `/export` saves the conversation as a Markdown file (`cerberus-chat-<id>.md`) in the directory the CLI was started in: what was asked, what the agent said, and what it did. Values that look like credentials are masked.
 - **A busy provider.** If the model provider is overloaded or rate-limiting, the reply waits and tries again (up to 5 times) and says so, instead of failing.
 - **Saying no.** In the permission prompt, `t` denies and lets you tell the agent what to do instead.
+
+The CLI uses explicit HTTP contracts without importing server types or a database client. Both backends remain available and keep separate databases. The TypeScript backend currently supports sign-in, sessions and direct-stream chat; named API tokens and the other .NET features described below are still being ported.
+
+### On a laptop with limited memory
+
+Install without running workspace scripts; this skips Prisma generation for the TypeScript backend. Start the .NET API and CLI in two terminals:
+
+```bash
+bun install --frozen-lockfile --ignore-scripts --network-concurrency 2
+bun run dev:api:lite
+```
+
+```bash
+bun run start:cli
+```
+
+The API launcher checks for the .NET 10 SDK, builds with one MSBuild node and sequential restore, disables persistent build/compiler servers, then runs the API in the foreground at lower priority. It allows one job, one chat turn and one team specialist at a time, and tells .NET to use a processor count of two. `start:cli` disables automatic TypeScript startup and has no watcher; `dev:cli` remains available when automatic restarts are wanted. Ctrl+C stops each foreground process.
+
+This starts no Docker stack or model. SQLite and the in-process queue are the defaults; leave `CERBERUS_POSTGRES_URL`, `CERBERUS_REDIS_URL` and `CERBERUS_RABBITMQ_URL` unset for that setup. Avoid starting a local model on an 8 GB machine; passive rule-based scans with `--no-sca` need no model, and agent work can use your own cloud API key with the existing consent gate. These are concurrency limits, not an operating-system memory or CPU quota.
+
+For changes confined to the CLI, run checks sequentially:
+
+```bash
+bun run check:cli
+bun run test:scripts
+```
+
+The launcher tests use a stand-in `dotnet` executable and start no real server. The complete CLI suite includes a TypeScript startup test and needs its Prisma client generated (`bun run --cwd frontend/database db:generate`); it uses a temporary SQLite database and shuts the server down afterward. Building the API or testing it still requires the .NET 10 SDK.
+
+With that SDK installed, backend checks can also run sequentially:
+
+```bash
+DOTNET_PROCESSOR_COUNT=2 dotnet build backend/Cerberus.slnx --disable-build-servers -m:1 -p:UseSharedCompilation=false -p:BuildInParallel=false -p:RestoreDisableParallel=true
+DOTNET_PROCESSOR_COUNT=2 dotnet test backend/Cerberus.slnx --no-build --no-restore -- xUnit.MaxParallelThreads=1 xUnit.ParallelizeTestCollections=false
+```
 
 ### Or: everything in containers
 
@@ -243,8 +276,14 @@ cerberus run scan . --sarif cerberus.sarif --fail-on high
 - **The gate:** `--fail-on critical|high|medium|low|info|none` (default `high`). What counts is what the review report counts: open findings in production code. A line the code marks with `cerberus:ignore`, a finding an operator decided on (accepted risk, false positive), and findings in tests or documentation are reported but do not fail the build; `--include-tests` counts the last group too. A model's findings (`sast`, a review with agents) count like the scanner's and are marked `[model]`.
 - **Files:** `--sarif <file>` writes the findings for a code-scanning dashboard, pass or fail; `--report <file>` writes the review or threat model as Markdown. `--json` prints the result as one JSON object instead of text.
 - **Nobody to ask:** a job that needs an approval stops with exit code 3 and is cancelled, and the message names what it needed. Approve in advance by name — `--approve run-plan` for a review or for the plan a team review's lead writes, `--approve send-code-to-cloud-model` for an agent on a cloud model — or allow it for good in `/permissions`. There is deliberately no "approve everything". The target's own ignore marks are honoured without asking (`--exclusions ignore` counts everything).
-- **Sign-in:** the token in `CERBERUS_TOKEN` (a pipeline secret), else the one saved by `/login`. The server's address is `API_URL` or `--server`. A token is the one a sign-in returns and lasts 30 days; named, revocable tokens for pipelines are not built yet.
+- **Sign-in:** the token in `CERBERUS_TOKEN` (a pipeline secret), else the one saved by `/login`. The server's address is `API_URL` or `--server`. Use a named API token for CI (below); ordinary sign-in sessions still last 30 days.
 - **Exit codes:** `0` nothing at or above the threshold · `1` findings at or above it · `2` the job did not finish (failed, cancelled, timed out after `--timeout` minutes, server not reachable, not signed in) · `3` it needs a person · `64` the command line is wrong. Options that would do nothing for the chosen job are refused, not ignored.
+
+**Named tokens for CI (.NET backend).** With a normal sign-in session, send `POST /auth/tokens` with `{ "name": "release checks", "expiresInDays": 30 }`. The response contains the new `token` once, together with its `id`, name, identifying prefix and dates. Store that token as the pipeline's `CERBERUS_TOKEN` secret. Names are 1–100 characters without control characters; expiry is 1–365 days, default 90. The database keeps only its SHA-256 digest and a short identifying prefix.
+
+`GET /auth/tokens` lists your credentials' metadata, including revoked/expired entries, without their secrets or hashes. `DELETE /auth/tokens/{id}` revokes one immediately for future requests without signing you out or revoking other tokens. Creation/listing/revocation require an ordinary password sign-in session; a pipeline credential cannot manage credentials. `POST /auth/logout` with an API token revokes just that token.
+
+API tokens have their owner's REST access and existing engagement/approval checks; per-token scopes, OIDC and organisational roles are still pending. They use HTTP submission and stored-event replay, not persistent SignalR subscriptions. The CLI's headless runner already falls back to replay when the push connection is unavailable. Revoking a credential stops future requests; it does not cancel jobs already accepted under it. Use HTTPS when the API is reached over a network.
 
 In GitHub Actions, for example:
 

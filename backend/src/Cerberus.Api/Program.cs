@@ -95,6 +95,7 @@ builder.Services.AddScoped<DataOwner>();
 
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ApiTokenService>();
 // --- Several instances of the service -------------------
 // Each instance has a name and says it is alive; work marked as running under a name that went quiet is failed.
 builder.Services.AddSingleton<Cerberus.Api.Cluster.InstanceIdentity>();
@@ -362,6 +363,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapCerberusEndpoints();
+app.MapApiTokenEndpoints();
 app.MapEngagementEndpoints();
 app.MapJobEndpoints();
 Cerberus.Api.Chat.ChatTurnEndpoints.MapChatTurnEndpoints(app);

@@ -21,7 +21,6 @@
         "@opentui/react": "^0.1.97",
         "ai": "^6.0.184",
         "date-fns": "^4.1.0",
-        "hono": "^4.12.12",
         "opentui-spinner": "^0.0.6",
         "pretty-ms": "^9.3.0",
         "react": "^19.2.4",
@@ -29,7 +28,6 @@
         "zod": "^4.3.6",
       },
       "devDependencies": {
-        "@cerberus/server": "workspace:*",
         "@types/bun": "latest",
         "@types/react": "^19.2.14",
       },

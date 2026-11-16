@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
 import { chatFetch } from "../lib/cerberus/turn-io";
 import {
@@ -23,7 +23,8 @@ import {
   type Policy,
 } from "../lib/cerberus/tool-permissions";
 import type { ToolDecision, ToolRequest } from "../providers/tool-permission";
-import { HELPER_TOOLS, runHelper } from "../lib/subagent";
+import { HELPER_TOOLS, runHelper, settleInterruptedHelpers, type HelperOutput } from "../lib/subagent";
+import { HelperReply } from "../lib/helper-budget";
 import { helperIo } from "../lib/subagent-io";
 import { setHelperProgress } from "../lib/subagent-progress";
 
@@ -81,6 +82,11 @@ function lastHasContent(messages: Message[]): boolean {
   return last?.role === "assistant" && last.parts.some((part) => part.type === "text" || part.type === "reasoning" || part.type.startsWith("tool-"));
 }
 
+function cancelHelpers(reply: HelperReply<HelperOutput>): void {
+  reply.cancel();
+  for (const id of reply.callIds) setHelperProgress(id, null);
+}
+
 export function useChat(
   sessionId: string,
   initialMessages: Message[],
@@ -90,15 +96,20 @@ export function useChat(
   const policyRef = useRef<Promise<Policy> | null>(null);
   // Messages added on this side only (commands the operator ran); they go to the server with the next prompt.
   const unsentRef = useRef<Set<string>>(new Set());
+  const messagesRef = useRef(initialMessages);
   const [retry, setRetry] = useState<RetryNotice | null>(null);
-  // Stops the helpers at work when the operator interrupts the reply.
-  const helpersRef = useRef(new AbortController());
+  // One allowance per user prompt, shared by all automatic tool continuations.
+  // A stopped reply stays stopped; only submit opens another allowance.
+  const helperSession = useMemo(() => ({ reply: new HelperReply<HelperOutput>() }), [sessionId]);
+  const helpersRef = useRef(helperSession);
+  helpersRef.current = helperSession;
+  useEffect(() => () => cancelHelpers(helperSession.reply), [helperSession]);
   // How many messages the server summarised before the latest reply; shown with that reply.
   const [compacted, setCompacted] = useState<number | null>(null);
 
   const transport = useMemo(() => {
     return new DefaultChatTransport<Message>({
-      api: apiClient.chat.$url().toString(),
+      api: apiClient.chatUrl(),
       // The request is queued on the server and the reply comes over SignalR (see lib/cerberus/turn-fetch.ts).
       fetch: chatFetch(),
       headers() {
@@ -149,6 +160,9 @@ export function useChat(
     },
     onError() {
       setRetry(null);
+      cancelHelpers(helperSession.reply);
+      void settleInterruptedHelpers(messagesRef.current.at(-1), (toolCallId, errorText) =>
+        chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
     },
     onToolCall({ toolCall }) {
       const mode = chat.messages.at(-1)?.metadata?.mode ?? "BUILD";
@@ -157,9 +171,19 @@ export function useChat(
         chat.addToolOutput({ tool, toolCallId: toolCall.toolCallId, state: "output-error", errorText });
 
       /** Human in the loop: nothing that needs the operator's say-so runs without it. Returns why not, or null to go ahead. */
-      const refused = async (toolName: string, input: unknown): Promise<string | null> => {
+      const refused = async (toolName: string, input: unknown, signal?: AbortSignal): Promise<string | null> => {
+        const stillRunning = () => {
+          if (signal?.aborted) throw new Error("The helper was interrupted before it finished; it has no report.");
+        };
+        stillRunning();
         policyRef.current ??= loadPolicy();
-        const gate = await gateToolCall(await policyRef.current, toolName, input, askOperator);
+        const policy = await policyRef.current;
+        stillRunning();
+        const gate = await gateToolCall(policy, toolName, input, (request) => {
+          stillRunning();
+          return askOperator(request);
+        });
+        stillRunning();
         if (!gate.run) return deniedMessage(gate.feedback);
         if (gate.remembered || gate.rememberedCommands) {
           policyRef.current = Promise.resolve(gate.policy);
@@ -173,33 +197,51 @@ export function useChat(
 
       // A helper: its own conversation, read-only. Each thing it reads passes the same gate as the agent's own reads.
       if (toolCall.toolName === "task") {
+        // A callback from a session that has closed cannot borrow the next one's budget.
+        if (helpersRef.current !== helperSession) return;
+        const reply = helperSession.reply;
+        // The transport may still drain buffered chunks after stop(). Settle
+        // those tools locally too; the stopped budget forbids continuation.
+        if (reply.signal.aborted) {
+          void fail("The helper was interrupted before it finished; it has no report.");
+          return;
+        }
+        const current = () => helpersRef.current === helperSession && helperSession.reply === reply && !reply.signal.aborted;
         const input = (toolCall.input ?? {}) as { description?: unknown; prompt?: unknown };
+        const model = chat.messages.at(-1)?.metadata?.model ?? "";
+        const request = reply.request(toolCall.toolCallId, (signal) => {
+          if (!current()) throw new Error("The helper was interrupted before it finished; it has no report.");
+          return runHelper(
+          {
+            parentSessionId: sessionId,
+            description: typeof input.description === "string" ? input.description : "",
+            prompt: typeof input.prompt === "string" ? input.prompt : "",
+            model,
+            signal,
+          },
+          {
+            ...helperIo,
+            onProgress: (text) => { if (current()) setHelperProgress(toolCall.toolCallId, text); },
+            runTool: async (toolName, toolInput) => {
+              if (!(HELPER_TOOLS as readonly string[]).includes(toolName)) throw new Error(`A helper cannot use ${toolName}: it only reads.`);
+              const why = await refused(toolName, toolInput, signal);
+              if (why) throw new Error(why);
+              if (!current()) throw new Error("The helper was interrupted before it finished; it has no report.");
+              return executeLocalTool(toolName, toolInput, "PLAN");
+            },
+          },
+          );
+        });
+        // The first callback owns delivery of this result, including after a replay.
+        if (!request.first) return;
         void (async () => {
           try {
-            const output = await runHelper(
-              {
-                parentSessionId: sessionId,
-                description: typeof input.description === "string" ? input.description : "",
-                prompt: typeof input.prompt === "string" ? input.prompt : "",
-                model: chat.messages.at(-1)?.metadata?.model ?? "",
-                signal: helpersRef.current.signal,
-              },
-              {
-                ...helperIo,
-                onProgress: (text) => setHelperProgress(toolCall.toolCallId, text),
-                runTool: async (toolName, toolInput) => {
-                  if (!(HELPER_TOOLS as readonly string[]).includes(toolName)) throw new Error(`A helper cannot use ${toolName}: it only reads.`);
-                  const why = await refused(toolName, toolInput);
-                  if (why) throw new Error(why);
-                  return executeLocalTool(toolName, toolInput, "PLAN");
-                },
-              },
-            );
-            chat.addToolOutput({ tool: "task", toolCallId: toolCall.toolCallId, output });
+            const output = await request.result;
+            if (current()) chat.addToolOutput({ tool: "task", toolCallId: toolCall.toolCallId, output });
           } catch (error) {
-            fail(error instanceof Error ? error.message : String(error));
+            if (current()) fail(error instanceof Error ? error.message : String(error));
           } finally {
-            setHelperProgress(toolCall.toolCallId, null);
+            if (current()) setHelperProgress(toolCall.toolCallId, null);
           }
         })();
         return;
@@ -229,15 +271,27 @@ export function useChat(
         }
       })();
     },
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    sendAutomaticallyWhen: (options) =>
+      !helperSession.reply.signal.aborted && lastAssistantMessageIsCompleteWithToolCalls(options),
   });
+  messagesRef.current = chat.messages;
+  // The SDK can deliver a tool part and an error in the same burst, before
+  // React renders that part into messagesRef. Settle it once it is visible.
+  // Completed/error parts are skipped, so this cannot keep rewriting them.
+  useEffect(() => {
+    if (!helperSession.reply.signal.aborted) return;
+    void settleInterruptedHelpers(chat.messages.at(-1), (toolCallId, errorText) =>
+      chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
+  }, [chat.messages, chat.status, chat.addToolOutput, helperSession]);
 
   /** Stops the reply and any helper working for it. */
   const stopAll = useCallback(() => {
-    helpersRef.current.abort();
-    helpersRef.current = new AbortController();
-    return chat.stop();
-  }, [chat.stop]);
+    cancelHelpers(helperSession.reply);
+    const stopping = chat.stop();
+    void settleInterruptedHelpers(messagesRef.current.at(-1), (toolCallId, errorText) =>
+      chat.addToolOutput({ tool: "task", toolCallId, state: "output-error", errorText }));
+    return stopping;
+  }, [chat.stop, chat.addToolOutput, helperSession]);
 
   return {
     messages: chat.messages,
@@ -249,6 +303,8 @@ export function useChat(
     compacted,
     submit: (params: { userText: string; mode: ModeType; model: SupportedChatModelId }) => {
       setCompacted(null);
+      cancelHelpers(helperSession.reply);
+      helperSession.reply = new HelperReply<HelperOutput>();
       return chat.sendMessage({
         text: params.userText,
         metadata: {

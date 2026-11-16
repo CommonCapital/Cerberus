@@ -1,14 +1,13 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { cerberusHome } from "./home";
+import { collectInstructions, nearestInstructions, readRegularPrefix, type InstructionFile, type LegacyInstructions } from "./instruction-files";
 
 // What the chat agent is told about where it works: the environment its tools
-// run in, and the project's own instructions file. Read fresh for every
+// run in, and the global/project instruction hierarchy. Read fresh for every
 // message, so an edit to the file or a branch switch takes effect at once.
 
-/** Looked for in this order, in the working directory first and then in each parent up to the repository root. */
-export const INSTRUCTION_FILES = ["AGENTS.md", "CERBERUS.md", "CLAUDE.md"];
-
-export const MAX_INSTRUCTIONS = 20_000;
+export { INSTRUCTION_FILES, MAX_INSTRUCTIONS, MAX_INSTRUCTION_FILES } from "./instruction-files";
 
 export type ProjectContext = {
   environment: {
@@ -18,12 +17,17 @@ export type ProjectContext = {
     isGitRepository: boolean;
     gitBranch?: string;
   };
-  instructions?: { file: string; content: string; truncated: boolean };
+  /** Compatibility with backends that only know the nearest project file. */
+  instructions?: LegacyInstructions;
+  /** Ordered global → outer project → inner project. New backends use this instead of `instructions`. */
+  instructionFiles?: InstructionFile[];
+  /** More candidate sources existed than fit the 16-source limit. */
+  instructionFilesTruncated?: boolean;
 };
 
 /** The repository root at or above `start` (the directory holding `.git`), or null outside a repository. */
 export function findGitRoot(start: string): string | null {
-  for (let dir = start; ; dir = dirname(dir)) {
+  for (let dir = resolve(start); ; dir = dirname(dir)) {
     if (existsSync(join(dir, ".git"))) return dir;
     if (dirname(dir) === dir) return null;
   }
@@ -35,11 +39,11 @@ export function currentBranch(gitRoot: string): string | undefined {
     let gitDir = join(gitRoot, ".git");
     // A worktree or submodule has a `.git` file pointing at the real directory.
     if (statSync(gitDir).isFile()) {
-      const pointer = readFileSync(gitDir, "utf-8").match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+      const pointer = readRegularPrefix(gitDir, 4_096)?.content.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
       if (!pointer) return undefined;
       gitDir = pointer.startsWith("/") ? pointer : join(gitRoot, pointer);
     }
-    return readFileSync(join(gitDir, "HEAD"), "utf-8").match(/^ref:\s*refs\/heads\/(.+)$/m)?.[1]?.trim();
+    return readRegularPrefix(join(gitDir, "HEAD"), 1_024)?.content.match(/^ref:\s*refs\/heads\/(.+)$/m)?.[1]?.trim();
   } catch {
     return undefined;
   }
@@ -47,31 +51,19 @@ export function currentBranch(gitRoot: string): string | undefined {
 
 /** The nearest instructions file: in `cwd`, else in a parent up to the repository root (or only `cwd` outside a repository). */
 export function findInstructions(cwd: string, gitRoot: string | null): ProjectContext["instructions"] {
-  const stop = gitRoot ?? cwd;
-  for (let dir = cwd; ; dir = dirname(dir)) {
-    for (const name of INSTRUCTION_FILES) {
-      const path = join(dir, name);
-      try {
-        if (!statSync(path).isFile()) continue;
-        const content = readFileSync(path, "utf-8").trim();
-        if (content.length === 0) continue;
-        return {
-          file: relative(cwd, path) || name,
-          content: content.slice(0, MAX_INSTRUCTIONS),
-          truncated: content.length > MAX_INSTRUCTIONS,
-        };
-      } catch {
-        // Not there, or not readable: try the next one.
-      }
-    }
-    if (dir === stop || dirname(dir) === dir) return undefined;
-  }
+  return nearestInstructions(cwd, gitRoot);
 }
 
-export function projectContext(cwd: string = process.cwd(), now: Date = new Date()): ProjectContext {
+export function projectContext(
+  cwd: string = process.cwd(),
+  now: Date = new Date(),
+  options: { globalDirectory?: string | null } = {},
+): ProjectContext {
   const gitRoot = findGitRoot(cwd);
   const branch = gitRoot ? currentBranch(gitRoot) : undefined;
   const instructions = findInstructions(cwd, gitRoot);
+  const globalDirectory = options.globalDirectory === undefined ? cerberusHome() : options.globalDirectory;
+  const hierarchy = collectInstructions(cwd, gitRoot, globalDirectory);
   return {
     environment: {
       workingDirectory: cwd,
@@ -81,5 +73,9 @@ export function projectContext(cwd: string = process.cwd(), now: Date = new Date
       ...(branch ? { gitBranch: branch } : {}),
     },
     ...(instructions ? { instructions } : {}),
+    // An explicit empty list also tells a new backend not to fall back to a
+    // stale legacy field if the operator removed the applicable files.
+    instructionFiles: hierarchy.files,
+    ...(hierarchy.truncated ? { instructionFilesTruncated: true } : {}),
   };
 }

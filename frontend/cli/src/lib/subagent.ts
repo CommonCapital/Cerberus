@@ -69,6 +69,27 @@ export function pendingCalls(message: UIMessage | undefined): PendingCall[] {
   return calls;
 }
 
+/**
+ * Keep a stopped reply usable: unfinished helpers become local tool errors.
+ * The caller must cancel its helper budget first and refuse automatic model
+ * continuations while it is cancelled. Completed reports stay unchanged.
+ */
+export async function settleInterruptedHelpers(
+  message: UIMessage | undefined,
+  addError: (toolCallId: string, errorText: string) => unknown,
+): Promise<void> {
+  if (!message || message.role !== "assistant") return;
+  for (const part of message.parts) {
+    if (!isTool(part)) continue;
+    const tool = part as { type: string; toolName?: string; toolCallId: string; state: string; providerExecuted?: boolean };
+    const name = tool.type === "dynamic-tool" ? tool.toolName : tool.type.slice("tool-".length);
+    // Stop may arrive before the tool's JSON is complete, so onToolCall has
+    // not run yet. The id and name are already enough to settle that part.
+    if (name !== "task" || tool.providerExecuted || (tool.state !== "input-streaming" && tool.state !== "input-available")) continue;
+    await addError(tool.toolCallId, "The helper was interrupted before it finished; it has no report.");
+  }
+}
+
 /** What the helper ended on: the text of its last step, or of the whole reply if that step said nothing. */
 export function reportOf(message: UIMessage | undefined): string {
   if (!message || message.role !== "assistant") return "";
@@ -91,13 +112,18 @@ export async function runHelper(task: HelperTask, deps: HelperDeps): Promise<Hel
   if (task.signal?.aborted) throw interrupted();
 
   const sessionId = await deps.createSession(description, task.parentSessionId);
+  // Creating the session may have been in flight when the operator stopped.
+  // Do not open a model connection after that cancellation.
+  if (task.signal?.aborted) throw interrupted();
   const chat = new Chat<UIMessage>({ id: sessionId, transport: deps.transport(sessionId, task.model) });
   const stop = () => void chat.stop();
   task.signal?.addEventListener("abort", stop, { once: true });
 
   let toolCalls = 0;
   try {
+    if (task.signal?.aborted) throw interrupted();
     deps.onProgress?.("starting");
+    if (task.signal?.aborted) throw interrupted();
     await chat.sendMessage({ text: prompt });
 
     for (let round = 0; ; round++) {
@@ -120,9 +146,12 @@ export async function runHelper(task: HelperTask, deps: HelperDeps): Promise<Hel
         toolCalls++;
         deps.onProgress?.(`${toolCalls} tool call${toolCalls === 1 ? "" : "s"} · ${call.toolName} ${summarizeToolCall(call.toolName, call.input)}`.trimEnd());
         try {
+          if (task.signal?.aborted) throw interrupted();
           const output = await deps.runTool(call.toolName, call.input);
+          if (task.signal?.aborted) throw interrupted();
           await chat.addToolOutput({ tool: call.toolName as never, toolCallId: call.toolCallId, output: output as never });
         } catch (problem) {
+          if (task.signal?.aborted) throw interrupted();
           await chat.addToolOutput({
             tool: call.toolName as never,
             toolCallId: call.toolCallId,
@@ -132,6 +161,7 @@ export async function runHelper(task: HelperTask, deps: HelperDeps): Promise<Hel
         }
       }
       // The same reply, continued with the results.
+      if (task.signal?.aborted) throw interrupted();
       await chat.sendMessage();
     }
 

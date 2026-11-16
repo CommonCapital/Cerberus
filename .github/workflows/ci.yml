@@ -65,6 +65,12 @@ jobs:
       - name: Types
         working-directory: frontend/cli
         run: bunx tsc --noEmit
+      - name: TypeScript backend types
+        run: bunx tsc --noEmit -p frontend/server/tsconfig.json
       - name: Test
         working-directory: frontend/cli
         run: bun test src
+      - name: Launcher tests
+        run: bun run test:scripts
+      - name: TypeScript chat context
+        run: bun test frontend/server/src/lib/chat-context.test.ts

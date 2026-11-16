@@ -57,6 +57,8 @@ public class ScannerRuleTests
         { "secret.private-key", "key.pem", "-----BEGIN " + "PRIVATE KEY-----" },
         { "secret.github-token", "sample.py", "t = '" + "ghp_" + Repeat("a1B2", 9) + "'" },
         { "secret.github-token", "sample.py", "t = '" + "github_pat_" + Repeat("a1B2_", 9) + "'" },
+        { "secret.cerberus-api-token", "settings.py", "credential = '" + "cerb_" + Repeat("a1B2", 10) + "_-A'" },
+        { "secret.cerberus-api-token", "request.http", "Authorization: Bearer " + "cerb_" + Repeat("A", 43) },
         { "secret.slack-token", "sample.js", "const t = '" + "xoxb-" + "1234567890-abcdefghij'" },
         { "secret.google-api-key", "sample.js", "const k = '" + "AIza" + Repeat("Ab1_", 8) + "xyz'" },
         { "secret.stripe-live-key", "sample.rb", "key = '" + "sk_live_" + Repeat("a1B2", 6) + "'" },
@@ -145,6 +147,9 @@ public class ScannerRuleTests
         { "config.py", "password = os.environ['DB_PASSWORD']" },
         { "config.py", "password = \"\"" },
         { "config.py", "token = get_token()" },
+        { "notes.py", "# Credential display prefix: " + "cerb_" + Repeat("A", 7) },
+        { "notes.py", "# Incomplete credential: " + "cerb_" + Repeat("A", 42) },
+        { "notes.py", "# Longer identifier: " + "cerb_" + Repeat("A", 44) },
         // Safe variants
         { "sample.py", "requests.get(url, verify=True)" },
         { "sample.py", "cfg = yaml.load(stream, Loader=yaml.SafeLoader)" },

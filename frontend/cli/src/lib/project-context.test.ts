@@ -2,18 +2,22 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { currentBranch, findGitRoot, findInstructions, MAX_INSTRUCTIONS, projectContext } from "./project-context";
+import { currentBranch, findGitRoot, findInstructions, MAX_INSTRUCTIONS, projectContext as contextWithOptions } from "./project-context";
 
 const root = mkdtempSync(join(tmpdir(), "cerberus-context-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+let nextLayout = 0;
+// Never read the operator's real global instructions from a test.
+const projectContext = (cwd: string, now?: Date) => contextWithOptions(cwd, now, { globalDirectory: null });
 
 /** A directory tree: a repository on branch `feature/login` with a nested package, and a plain directory beside it. */
 function layout() {
-  const repo = join(root, `repo-${Math.random().toString(36).slice(2, 8)}`);
+  const id = ++nextLayout;
+  const repo = join(root, `repo-${id}`);
   mkdirSync(join(repo, ".git"), { recursive: true });
   writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/feature/login\n");
   mkdirSync(join(repo, "packages", "api", "src"), { recursive: true });
-  const plain = join(root, `plain-${Math.random().toString(36).slice(2, 8)}`);
+  const plain = join(root, `plain-${id}`);
   mkdirSync(plain, { recursive: true });
   return { repo, nested: join(repo, "packages", "api", "src"), plain };
 }
@@ -42,6 +46,12 @@ describe("the environment", () => {
 
     writeFileSync(join(repo, ".git", "HEAD"), "4b0caf4d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b\n");
     expect(currentBranch(repo)).toBeUndefined();
+  });
+
+  test("a worktree's branch is read from its relative gitdir pointer", () => {
+    const { repo, plain } = layout();
+    writeFileSync(join(plain, ".git"), `gitdir: ../${repo.split("/").at(-1)}/.git\n`);
+    expect(currentBranch(plain)).toBe("feature/login");
   });
 });
 
@@ -89,5 +99,42 @@ describe("project instructions", () => {
 
     expect(instructions.content.length).toBe(MAX_INSTRUCTIONS);
     expect(instructions.truncated).toBe(true);
+  });
+
+  test("the new hierarchy is authoritative and legacy nearest instructions remain available", () => {
+    const { repo, nested, plain: global } = layout();
+    writeFileSync(join(global, "AGENTS.md"), "Global preferences.");
+    writeFileSync(join(repo, "AGENTS.md"), "Repository rules.");
+    writeFileSync(join(nested, "CERBERUS.md"), "Local rules.");
+    const context = contextWithOptions(nested, undefined, { globalDirectory: global });
+    expect(context.instructionFiles?.map((source) => [source.scope, source.content])).toEqual([
+      ["global", "Global preferences."], ["project", "Repository rules."], ["project", "Local rules."],
+    ]);
+    expect(context.instructions).toEqual({ file: "CERBERUS.md", content: "Local rules.", truncated: false });
+    expect(context.instructionFilesTruncated).toBeUndefined();
+  });
+
+  test("CERBERUS_HOME selects global instructions without touching the real home", () => {
+    const { repo, plain: global } = layout();
+    writeFileSync(join(global, "CLAUDE.md"), "Home override.");
+    const before = process.env.CERBERUS_HOME;
+    process.env.CERBERUS_HOME = global;
+    try {
+      expect(contextWithOptions(repo).instructionFiles?.map((source) => source.content)).toEqual(["Home override."]);
+      expect(contextWithOptions(repo, undefined, { globalDirectory: null }).instructionFiles).toEqual([]);
+    } finally {
+      if (before === undefined) delete process.env.CERBERUS_HOME;
+      else process.env.CERBERUS_HOME = before;
+    }
+  });
+
+  test("instruction edits and removals take effect on the next context", () => {
+    const { repo, plain: global } = layout();
+    writeFileSync(join(global, "AGENTS.md"), "Before.");
+    expect(contextWithOptions(repo, undefined, { globalDirectory: global }).instructionFiles?.[0]?.content).toBe("Before.");
+    writeFileSync(join(global, "AGENTS.md"), "After.");
+    expect(contextWithOptions(repo, undefined, { globalDirectory: global }).instructionFiles?.[0]?.content).toBe("After.");
+    rmSync(join(global, "AGENTS.md"));
+    expect(contextWithOptions(repo, undefined, { globalDirectory: global }).instructionFiles).toEqual([]);
   });
 });

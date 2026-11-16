@@ -11,9 +11,9 @@
 FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
-# Install the workspace's dependencies from the lockfile. Install scripts are
-# skipped: the only one generates the TypeScript server's database client,
-# which the CLI does not use.
+# The lockfile covers all four workspaces, so their manifests must be present.
+# The CLI uses explicit HTTP contracts and needs no generated database client;
+# install scripts stay disabled.
 COPY package.json bun.lock tsconfig.base.json ./
 COPY frontend/cli/package.json      frontend/cli/
 COPY frontend/server/package.json   frontend/server/
@@ -23,11 +23,12 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY frontend/cli    frontend/cli
 COPY frontend/shared frontend/shared
-# Only its types are imported by the CLI (the typed client for auth, sessions and chat).
-COPY frontend/server frontend/server
+COPY LICENSE NOTICE ./
 
-# The API it talks to, and where its session token is kept between runs.
+# This client connects to an existing API; it never starts another backend.
+# Its session token is kept in the mounted home directory between runs.
 ENV API_URL=http://api:3000 \
+    CERBERUS_AUTOSTART=off \
     HOME=/home/bun \
     TERM=xterm-256color
 

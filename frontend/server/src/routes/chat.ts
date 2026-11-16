@@ -50,6 +50,8 @@ const submitSchema = z.object({
     .min(1),
   mode: modeSchema,
   model: z.string().refine(isSupportedChatModel, "Unsupported model"),
+  // Parsed leniently and bounded by the prompt renderer, like the .NET contract.
+  context: z.unknown().optional(),
 });
 
 const submitValidator = zValidator("json", submitSchema, (result, c) => {
@@ -75,7 +77,7 @@ const app = new Hono<AuthenticatedEnv>()
     submitValidator,
     async (c) => {
       const userId = c.get("userId");
-      const { id, messages, mode, model } = c.req.valid("json");
+      const { id, messages, mode, model, context } = c.req.valid("json");
 
       const session = await db.session.findUnique({
         where: { id, userId },
@@ -90,7 +92,7 @@ const app = new Hono<AuthenticatedEnv>()
       const resolvedModel = resolveChatModel(model);
       const previousMessages = parseStoredMessages(session.messages);
       const mergedMessages = [...previousMessages];
-      
+
       for (const message of messages) {
         const incomingMessage = {
           ...message,
@@ -115,9 +117,10 @@ const app = new Hono<AuthenticatedEnv>()
 
       const result = streamText({
         model: resolvedModel.model,
-        system: buildSystemPrompt({ mode }),
+        system: buildSystemPrompt({ mode, context }),
         messages: modelMessages,
         tools,
+        abortSignal: c.req.raw.signal,
         providerOptions: resolvedModel.providerOptions,
         onFinish(event) {
           completedUsage = event.totalUsage;

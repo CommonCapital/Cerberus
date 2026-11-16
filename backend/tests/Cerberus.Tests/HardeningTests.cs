@@ -11,6 +11,40 @@ namespace Cerberus.Tests;
 public class SecretMaskerTests
 {
     private const string Key = "AKIAIOSFODNN7EXAMPLE";
+    private static string PersonalToken => "cerb_" + new string('A', 40) + "-_Q";
+
+    [Theory]
+    [InlineData("", "")]
+    [InlineData("Authorization: Bearer ", "")]
+    [InlineData("credential = \"", "\";")]
+    [InlineData("(", ")")]
+    public void Cerberus_personal_tokens_are_masked_in_arbitrary_text(string before, string after)
+    {
+        var input = before + PersonalToken + after;
+        Assert.Equal(before + "[REDACTED len=48]" + after, SecretMasker.Mask(input));
+        Assert.DoesNotContain(PersonalToken, SecretMasker.MaskText("First line\n" + input + "\nLast line"));
+    }
+
+    [Theory]
+    [InlineData("A", "")]
+    [InlineData("_", "")]
+    [InlineData("-", "")]
+    [InlineData("", "A")]
+    [InlineData("", "_")]
+    [InlineData("", "-")]
+    public void A_token_pattern_inside_a_longer_ascii_identifier_is_not_a_complete_credential(string before, string after)
+    {
+        var input = before + PersonalToken + after;
+        Assert.Equal(input, SecretMasker.Mask(input));
+    }
+
+    [Fact]
+    public void A_personal_tokens_display_prefix_is_not_redacted()
+    {
+        var display = "Credential prefix: " + PersonalToken[..12];
+        Assert.Equal(display, SecretMasker.Mask(display));
+        Assert.Equal(PersonalToken[..^1], SecretMasker.Mask(PersonalToken[..^1]));
+    }
 
     [Fact]
     public void A_credential_is_replaced_by_its_length_and_the_code_around_it_stays()

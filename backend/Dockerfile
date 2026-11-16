@@ -12,7 +12,7 @@ WORKDIR /src
 
 # Restore first, from the project files only, so this layer is cached until a
 # dependency changes.
-COPY backend/Cerberus.slnx backend/
+COPY backend/Cerberus.slnx backend/Directory.Build.props backend/
 COPY backend/src/Cerberus.Api/Cerberus.Api.csproj                     backend/src/Cerberus.Api/
 COPY backend/src/Cerberus.Authorization/Cerberus.Authorization.csproj backend/src/Cerberus.Authorization/
 COPY backend/src/Cerberus.Compliance/Cerberus.Compliance.csproj       backend/src/Cerberus.Compliance/
@@ -34,6 +34,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0.15 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
+COPY LICENSE NOTICE ./
 # Data the API reads at startup: control catalogs and the agents' skills library.
 COPY catalogs ./catalogs
 COPY security-skills/skills ./security-skills/skills

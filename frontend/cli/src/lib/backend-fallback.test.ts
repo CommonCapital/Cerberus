@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,6 +10,13 @@ const never: Starter = async () => {
 };
 
 describe("which server the CLI talks to", () => {
+  afterEach(async () => {
+    // ensureBackend publishes status for the UI. Leave a neutral status for
+    // other test files, even when this case tested (or failed in) startup.
+    // Both dependencies are fake: cleanup never probes or starts a server.
+    await ensureBackend({ url: "http://localhost:3000", probe: async () => true, start: never });
+  });
+
   test("a server that answers is used as it is", async () => {
     const status = await ensureBackend({ url: "http://localhost:3000", probe: async () => true, start: never });
     expect(status).toEqual({ kind: "answering", url: "http://localhost:3000" });
@@ -58,13 +65,20 @@ describe("which server the CLI talks to", () => {
 
 describe("the TypeScript server, really started", () => {
   const scratch = mkdtempSync(join(tmpdir(), "cerberus-fallback-"));
-  const before = { home: process.env.CERBERUS_HOME, db: process.env.DATABASE_URL };
+  const before = {
+    home: process.env.CERBERUS_HOME,
+    db: process.env.DATABASE_URL,
+    rustLog: process.env.RUST_LOG,
+  };
   let stop = () => {};
   afterAll(() => {
     stop();
-    process.env.CERBERUS_HOME = before.home;
+    if (before.home === undefined) delete process.env.CERBERUS_HOME;
+    else process.env.CERBERUS_HOME = before.home;
     if (before.db === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = before.db;
+    if (before.rustLog === undefined) delete process.env.RUST_LOG;
+    else process.env.RUST_LOG = before.rustLog;
     rmSync(scratch, { recursive: true, force: true });
   });
 
@@ -77,9 +91,10 @@ describe("the TypeScript server, really started", () => {
     });
   }
 
-  test("it starts on the address, on its own database, and lets someone sign up", async () => {
+  test("it creates its database with RUST_LOG=warn, starts on the address, and lets someone sign up", async () => {
     process.env.CERBERUS_HOME = join(scratch, "home");
     process.env.DATABASE_URL = `file:${join(scratch, "fallback.db")}`;
+    process.env.RUST_LOG = "warn";
     const url = `http://127.0.0.1:${await freePort()}`;
     expect(await answers(url, 300)).toBe(false);
 

@@ -2,6 +2,7 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel, type HubConnection 
 import { getAuth } from "../auth";
 import { baseUrl } from "./api";
 import { turnFetch, turnHeaders, type TurnDeps, type TurnEvent, type TurnHandlers, type TurnInfo, type TurnPage } from "./turn-fetch";
+import { compatibleChatFetch } from "./chat-transport";
 
 // The real server behind a conversation over the queue (see turn-fetch.ts):
 // turns go in over HTTP, replies come back over one SignalR connection to the
@@ -79,7 +80,10 @@ export const turnIo: TurnDeps = {
 
 /**
  * What the chat transport uses as `fetch`: the conversation over the queue, unless the operator asked for the
- * direct stream (CERBERUS_CHAT_TRANSPORT=http) — which the server still offers, for a server too old to queue.
+ * direct stream (CERBERUS_CHAT_TRANSPORT=http). A missing queue endpoint falls
+ * back to the direct stream, allowing the TypeScript chat backend as well.
  */
 export const chatFetch = (): typeof fetch | undefined =>
-  process.env.CERBERUS_CHAT_TRANSPORT?.toLowerCase() === "http" ? undefined : turnFetch(turnIo);
+  process.env.CERBERUS_CHAT_TRANSPORT?.toLowerCase() === "http"
+    ? undefined
+    : compatibleChatFetch(turnFetch(turnIo), (input, init) => fetch(input, init)) as typeof fetch;

@@ -1,11 +1,13 @@
 import type { ModeType } from "@cerberus/shared";
+import { renderChatContext } from "./lib/chat-context";
 
 type SystemPromptParams = {
   mode: ModeType;
+  context?: unknown;
 };
 
-export function buildSystemPrompt({ 
-  mode
+export function buildSystemPrompt({
+  mode, context
 }: SystemPromptParams): string {
   const parts: string[] = [];
 
@@ -65,5 +67,7 @@ export function buildSystemPrompt({
     4. **Use editFile for small changes** to existing files. Only use writeFile when creating new files or rewriting most of a file.`);
   }
 
+  const workspace = renderChatContext(context);
+  if (workspace) parts.push(workspace);
   return parts.join("\n");
 };
