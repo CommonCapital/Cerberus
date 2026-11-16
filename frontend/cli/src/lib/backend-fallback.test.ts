@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,6 +10,13 @@ const never: Starter = async () => {
 };
 
 describe("which server the CLI talks to", () => {
+  afterEach(async () => {
+    // ensureBackend publishes status for the UI. Leave a neutral status for
+    // other test files, even when this case tested (or failed in) startup.
+    // Both dependencies are fake: cleanup never probes or starts a server.
+    await ensureBackend({ url: "http://localhost:3000", probe: async () => true, start: never });
+  });
+
   test("a server that answers is used as it is", async () => {
     const status = await ensureBackend({ url: "http://localhost:3000", probe: async () => true, start: never });
     expect(status).toEqual({ kind: "answering", url: "http://localhost:3000" });
