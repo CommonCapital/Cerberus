@@ -1,6 +1,6 @@
 # Cerberus backend (.NET)
 
-**The backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite, or a PostgreSQL of your own when one is configured and answers) + SignalR, with no hosted services. It has every capability of the original TypeScript server — auth, sessions, and the streaming chat agent with tool calling — plus everything security-specific. The legacy TypeScript server and Prisma packages have been removed; the CLI uses explicit HTTP contracts against this backend. See "Parity with the TypeScript server" below for the historical parity audit.
+**The .NET backend of Cerberus.** Fully local: ASP.NET Core + EF Core (SQLite, or a PostgreSQL of your own when one is configured and answers) + SignalR, with no hosted services. It supplies auth, sessions, streaming chat with tool calling, and the security features. The CLI also has a lightweight TypeScript fallback in `frontend/server` for sign-in, sessions and chat when the local .NET service is unavailable. The two backends have separate databases; scans, compliance, queued jobs and pipeline API tokens currently require this .NET backend.
 
 Named API tokens for pipelines are managed through `/auth/tokens` using an ordinary sign-in session. Creation returns the secret once; subsequent reads return metadata only. Tokens have the owner’s REST access and normal engagement/approval checks, expire after 90 days by default (1–365 configurable), and can be revoked independently of sign-in. Their full values are not stored; validation uses an indexed SHA-256 digest. Management cannot be performed using an API token. Both SignalR hubs require a sign-in session; pipeline clients use HTTP event replay, which validates the credential on every request. See the root README’s CI section for the endpoint bodies and limits. Per-token scopes, OIDC and organisational roles remain pending.
 
@@ -26,7 +26,7 @@ cd backend
 dotnet run --project src/Cerberus.Api
 ```
 
-For a low-concurrency launch without persistent build servers or watchers, run `bun run dev:server:lite` from the repository root. It requires the .NET 10 SDK and preserves `PORT`, `CERBERUS_DB` and `CERBERUS_KEYRING`; see the root README for the limits and verification commands.
+For a low-concurrency launch without persistent build servers or watchers, run `bun run dev:api:lite` from the repository root. It requires the .NET 10 SDK and preserves `PORT`, `CERBERUS_DB` and `CERBERUS_KEYRING`; see the root README for the limits and verification commands.
 
 Environment:
 
@@ -41,7 +41,8 @@ Environment:
 - `CERBERUS_RATE_PER_ADDRESS` / `CERBERUS_RATE_PER_USER` — requests per minute allowed from one network address (default `1200`) and with one sign-in token (default `600`); `0` switches a limit off. See "Protection of the service".
 - `CERBERUS_MAX_REQUEST_BYTES` — largest request body accepted (default 16 MB).
 - `CERBERUS_CORS_ORIGINS` — comma-separated origins a browser client may call from, e.g. `https://app.example.com`. Not set: no cross-origin access.
-- `CERBERUS_SKILLS_ROOT` / `CERBERUS_CATALOG_ROOT` — where the skills library and control catalogs are (default: the repository's `security-skills/skills` and `catalogs`).
+- `CERBERUS_SKILLS_ROOT` — a PATH-style list of skill directories (`:` on Linux/macOS, `;` on Windows); defaults to the repository's `security-skills/skills` followed by `skills`. The first directory wins duplicate skill names.
+- `CERBERUS_CATALOG_ROOT` — where control catalogs are (default: the repository's `catalogs`); assessments prefer `vendor-security`, then the first installed catalog by id when none is explicitly named.
 
 Or in a container, from the repository root (see `docker-compose.yml`; written but not yet run):
 
@@ -114,7 +115,7 @@ docker compose up -d
 | GET | `/scans/{id}/sarif` · `/agent-runs/{id}/sarif` · `/reviews/{id}/sarif` | Bearer | Findings as a SARIF 2.1.0 file (`application/sarif+json`) |
 | GET | `/agent-runs` · `/agent-runs/{id}` · `/agent-runs/{id}/report` | Bearer | What agent jobs produced: summary, counts and (for one run) what the model recorded; the written report as Markdown, for agents that write one (the threat model) |
 | GET | `/reviews` · `/reviews/{id}` · `/reviews/{id}/report` | Bearer | Outcomes of `review` jobs: the scan and assessments each produced; the report as Markdown |
-| WS | `/hub/jobs` | Bearer | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
+| WS | `/hub/jobs` | Sign-in session | SignalR hub: pushes `jobUpdated` for the caller's own jobs |
 | GET | `/jobs` · `/jobs/{id}` | Bearer | List jobs (`?engagementId=&state=&limit=`) / one job with its state and result id |
 | POST | `/jobs/{id}/cancel` | Bearer | Cancel a queued job, or ask a running one to stop |
 | POST | `/jobs/{id}/messages` | Bearer | Say something to the job's running agent `{ text }` → 202; 409 if no agent of that job is running |
@@ -135,7 +136,7 @@ docker compose up -d
 | POST | `/compliance/{id}/import` | Bearer | Import operator answers from a completed export (body = the raw .xlsx file) |
 | PUT | `/compliance/{id}/responses/{controlId}` | Bearer | Set the operator's answer `{ verdict, justification, actionPlan?, timeLimitDays? }` for a control |
 | DELETE | `/compliance/{id}/responses/{controlId}` | Bearer | Remove the operator's answer (falls back to the scanner's verdict) |
-| WS | `/hub/chat` | Bearer | SignalR hub: pushes the caller's own turns — `chatEvent { turnId, sessionId, sequence, chunk }` for each piece of a reply, `chatTurn` when a turn starts or ends. (Also `Stream({ model, system?, messages })`: a model's plain text with the caller's keys, no tools, nothing stored) |
+| WS | `/hub/chat` | Sign-in session | SignalR hub: pushes the caller's own turns — `chatEvent { turnId, sessionId, sequence, chunk }` for each piece of a reply, `chatTurn` when a turn starts or ends. (Also `Stream({ model, system?, messages })`: a model's plain text with the caller's keys, no tools, nothing stored) |
 
 ### Health, readiness and the server's other modes
 
@@ -157,7 +158,7 @@ A schedule is a stored job request and an interval. Firing it submits the reques
 
 Limits on an agent run enforced in code (`LoopGuard`), for the SAST, threat-model and evidence agents: the same call — same tool, same arguments, in whatever order or spacing they were written — runs at most twice and is then answered with a note instead of being run; a run has a budget of tool calls (five per step of its step limit, at least 20), and calls beyond it are not made; three steps in a row in which every call was repeated or failed stop the run. A run stopped by the guard, like one that reaches its step limit, gets one last turn without tools to say what it did and did not get to; the run is stored as incomplete and its stream carries the reason.
 
-### `/engagements` and `/audit` — authorization & safety spine (first slice)
+### `/engagements` and `/audit` — authorization & safety spine
 
 An **engagement** states what may be tested: a list of in-scope targets, a maximum capability tier (T0 passive, T1 active-safe; T2/T3 cannot be granted yet) and an optional time window. `POST /scan` and `POST /compliance/assess` accept an `engagementId`; the run is then checked by `ScopePolicy` (`Cerberus.Authorization`) **before any work starts** and refused with 403 when:
 
@@ -177,11 +178,11 @@ A domain target proven at its apex covers its subdomains. An IP address or `host
 
 **Audit log:** every engagement change and every run (the authorization decision, including denials, and the result) is appended to a per-user log. Each event's SHA-256 hash covers its content and the previous event's hash, and database triggers reject any UPDATE or DELETE on the table. `GET /audit/verify` recomputes the chain and reports the first altered, missing or reordered event. Limits: this is tamper *evidence* — someone with write access to the database file could drop the triggers and rewrite the whole chain consistently, or remove the most recent events, without `verify` noticing. Keep `headHash` somewhere external if you need to detect that. `GET /audit/export` downloads the full log with each event's `previousHash` and `hash`, as JSON Lines or CSV (CSV fields that a spreadsheet would treat as a formula are prefixed with an apostrophe).
 
-### `/jobs` — background job pipeline (first slice)
+### `/jobs` — background job pipeline
 
 `POST /jobs` stores a job (`Queued`) and publishes it on the message bus; a background worker picks it up. Two job types exist: `scan` (`resultId` is the scan id, `GET /scans/{id}`) and `assess` (a compliance assessment of `catalogId` over a stored `scanId` or a fresh `path`; `resultId` is the assessment id, `GET /compliance/{id}`). States move forward only: `Queued → Running → Succeeded | Failed | Cancelled | TimedOut`.
 
-**Live updates — the run's event stream:** connect a SignalR client to `/hub/jobs` with the bearer token (the `access_token` query parameter, which SignalR clients send for WebSockets, or an `Authorization` header). The hub is receive-only and drops connections without a valid session. Everything a job does arrives as a `jobEvent` message `{ jobId, sequence, type, data, createdAt }`:
+**Live updates — the run's event stream:** connect a SignalR client to `/hub/jobs` with an interactive sign-in token (the `access_token` query parameter, which SignalR clients send for WebSockets, or an `Authorization` header). The hub is receive-only and drops connections without a valid sign-in session; API tokens use HTTP event replay instead. Everything a job does arrives as a `jobEvent` message `{ jobId, sequence, type, data, createdAt }`:
 
 | `type` | `data` | When |
 |---|---|---|
@@ -201,9 +202,9 @@ Events are numbered per job from 1 without gaps, **stored before they are pushed
 - **Platform controls** (`Cerberus.Jobs/JobExecution.cs`), independent of what the work does: operator cancel, a time limit (`CERBERUS_JOB_TIMEOUT_SECONDS`, default 600), and a hard stop — if the work has not returned `CERBERUS_JOB_GRACE_SECONDS` (default 10) after being told to stop, the job is closed anyway and marked abandoned. Abandoned work is not killed (that needs the sandbox); it is only no longer waited for.
 - **Concurrency:** `CERBERUS_JOB_CONCURRENCY` workers (default 2, max 16); at most 50 queued jobs per user.
 - **Whose turn it is** (`JobQueue`): a free worker takes the job of the user with the fewest running (waiting for an answer counts as running); on a tie, the user whose last run started longest ago; within a user, the oldest. `CERBERUS_JOB_PER_USER` (default 0, no limit; max 16) caps one user's running jobs even when workers are free. A waiting job's `GET /jobs/{id}` carries `queue: { ahead, others }` — that user's runs before it, and how many other people have work waiting or running. Decided from the database, so the same over several instances.
-- **What it runs on** (`Hosting/BackingServices.cs`, `Hosting/Probes.cs`, PLAN.md §22 item 9): decided once, before anything else starts. Each configured service is tried — all at once, again every half second until it answers or `CERBERUS_SERVICE_WAIT_SECONDS` have passed, each try at most 3 s: PostgreSQL is connected to (its database made if missing) and then given its schema, Redis must answer a PING (after a plain TCP connect, so that a closed port is said at once), RabbitMQ must accept the user. What answers is used; what does not is replaced — SQLite for PostgreSQL, `LocalSignals`/`LocalPlaces`/`LoginThrottle`/the in-process rate limiter for Redis, `InProcMessageBus` for RabbitMQ — and the start goes on. One line per service is written at start-up, and readiness has a `services` check (degraded while something configured is stood in for; no host, port or user in it). Why a service was not used is said in our words from the kind of failure ("cannot be reached", "refused the user name or password", "did not answer within 3 s"), never the driver's message, which can hold the address with its password. `CERBERUS_REQUIRE_SERVICES=true` turns a fallback into exit code 3. A service lost *after* the start is not switched away from: readiness reports it, as before. **PostgreSQL** (`Cerberus.Data/PostgresStorage.cs`): times are `timestamp with time zone`, and a time without a kind is written as the UTC time it is (PostgreSQL refuses to write one otherwise); a NUL in text becomes U+FFFD (PostgreSQL refuses NUL in text); the schema upgrader reads `pg_tables`/`information_schema` where SQLite has `sqlite_master`/`PRAGMA`, and takes an advisory lock so copies starting together take turns; the audit log is made append-only by a trigger function, for `TRUNCATE` too. Both databases retry the schema step when two copies create a new database at the same moment.
-- **The queue** (`IMessageBus`): a message is `WorkMessage(id, userId)` — which work and whose, nothing else — on `cerberus.jobs` or `cerberus.chat-turns`; a worker checks the user against the stored work, and acknowledges the message only when the work has reached a final state. In one process by default (`InProcMessageBus`); with `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` on RabbitMQ (`RabbitMqBus`): quorum queues, persistent messages, publisher confirms, manual acknowledgement; a message that is rejected or handed out 5 times without being finished goes to `cerberus.dead-letters`; a consumer the broker ends starts again and declares its queue again; a broker that is away loses nothing — publishes are kept and retried, consumers reconnect. Readiness reports it as `queue`, including a queue left as a classic queue by an older version: delete it once it is empty and it is declared again (PLAN.md §22 item 6). Verified against RabbitMQ 4.1 and 4.4 (PLAN.md §17); `RabbitMqTests.cs` start a real broker where one is installed.
-- **Several instances** (`Cluster/`, PLAN.md §22 item 7): with `CERBERUS_REDIS_URL=redis://[user:password@]host[:port]` (or `rediss://`) set on each, instances over one database share a SignalR backplane (a push reaches a client on any instance), signals (`ISignals`: cancel a job, stop a turn, a message for a running agent, the answer to a question — relayed to the instance that has the work), places (`IPlaces`: one turn per conversation and `CERBERUS_CHAT_PER_USER` per user, over all instances; a dead holder's place frees after 30 s) the sign-in throttle (`ILoginThrottle`) and the request-rate counts (`SharedRateLimit`). Without it these are in-process (`LocalSignals`, `LocalPlaces`, `LoginThrottle`). Independently of Redis, every instance has a name, a heartbeat row (`WorkerInstance`, every 10 s) and marks what it runs (`Job.OwnerId`, `ChatTurn.OwnerId`); `OrphanSweeper` fails running work whose instance has been quiet for 45 s or has left, at start and every 30 s. Readiness: `redis` (required where configured; says how many instances are alive). Per instance still: the queue unless RabbitMQ is used.
+- **What it runs on** (`Hosting/BackingServices.cs`, `Hosting/Probes.cs`): decided once, before anything else starts. Each configured service is tried — all at once, again every half second until it answers or `CERBERUS_SERVICE_WAIT_SECONDS` have passed, each try at most 3 s: PostgreSQL is connected to (its database made if missing) and then given its schema, Redis must answer a PING (after a plain TCP connect, so that a closed port is said at once), RabbitMQ must accept the user. What answers is used; what does not is replaced — SQLite for PostgreSQL, `LocalSignals`/`LocalPlaces`/`LoginThrottle`/the in-process rate limiter for Redis, `InProcMessageBus` for RabbitMQ — and the start goes on. One line per service is written at start-up, and readiness has a `services` check (degraded while something configured is stood in for; no host, port or user in it). Why a service was not used is said in our words from the kind of failure ("cannot be reached", "refused the user name or password", "did not answer within 3 s"), never the driver's message, which can hold the address with its password. `CERBERUS_REQUIRE_SERVICES=true` turns a fallback into exit code 3. A service lost *after* the start is not switched away from: readiness reports it, as before. **PostgreSQL** (`Cerberus.Data/PostgresStorage.cs`): times are `timestamp with time zone`, and a time without a kind is written as the UTC time it is (PostgreSQL refuses to write one otherwise); a NUL in text becomes U+FFFD (PostgreSQL refuses NUL in text); the schema upgrader reads `pg_tables`/`information_schema` where SQLite has `sqlite_master`/`PRAGMA`, and takes an advisory lock so copies starting together take turns; the audit log is made append-only by a trigger function, for `TRUNCATE` too. Both databases retry the schema step when two copies create a new database at the same moment.
+- **The queue** (`IMessageBus`): a message is `WorkMessage(id, userId)` — which work and whose, nothing else — on `cerberus.jobs` or `cerberus.chat-turns`; a worker checks the user against the stored work, and acknowledges the message only when the work has reached a final state. In one process by default (`InProcMessageBus`); with `CERBERUS_RABBITMQ_URL=amqp://user:password@host:5672/` on RabbitMQ (`RabbitMqBus`): quorum queues, persistent messages, publisher confirms, manual acknowledgement; a message that is rejected or handed out 5 times without being finished goes to `cerberus.dead-letters`; a consumer the broker ends starts again and declares its queue again; a broker that is away loses nothing — publishes are kept and retried, consumers reconnect. Readiness reports it as `queue`, including a queue left as a classic queue by an older version: delete it once it is empty and it is declared again. Verified against RabbitMQ 4.1 and 4.4; `RabbitMqTests.cs` start a real broker where one is installed.
+- **Several instances** (`Cluster/`): with `CERBERUS_REDIS_URL=redis://[user:password@]host[:port]` (or `rediss://`) set on each, instances over one database share a SignalR backplane (a push reaches a client on any instance), signals (`ISignals`: cancel a job, stop a turn, a message for a running agent, the answer to a question — relayed to the instance that has the work), places (`IPlaces`: one turn per conversation and `CERBERUS_CHAT_PER_USER` per user, over all instances; a dead holder's place frees after 30 s) the sign-in throttle (`ILoginThrottle`) and the request-rate counts (`SharedRateLimit`). Without it these are in-process (`LocalSignals`, `LocalPlaces`, `LoginThrottle`). Independently of Redis, every instance has a name, a heartbeat row (`WorkerInstance`, every 10 s) and marks what it runs (`Job.OwnerId`, `ChatTurn.OwnerId`); `OrphanSweeper` fails running work whose instance has been quiet for 45 s or has left, at start and every 30 s. Readiness: `redis` (required where configured; says how many instances are alive). Per instance still: the queue unless RabbitMQ is used.
 - **Restarts:** on startup, jobs that were `Running` under an instance that is gone are marked `Failed` (those of a living instance are left alone) and jobs still `Queued` are published again — whatever the queue: a second message for a job is harmless, because a job that is no longer queued is not started.
 
 ### `/approvals` — human in the loop
@@ -213,7 +214,7 @@ Some jobs must not run on a submit alone. Such a job is stored in state `Awaitin
 - **Live:** the hub pushes `approvalRequested` when a job starts waiting and `approvalResolved` when it is approved, denied or withdrawn, alongside the usual `jobUpdated`.
 - **Durable:** the wait is in the database, so it survives a restart and can be answered later from any client. There is no expiry yet.
 - **Withdrawn automatically:** cancelling the job, or aborting its engagement, closes the request as `Cancelled`.
-- **What needs approval:** decided by the permission policy (see `/settings/permissions`). With the standard policy that is a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party; local-model triage, scans and assessments do not. In `ask` mode every job does. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls (PLAN.md §6.5).
+- **What needs approval:** decided by the permission policy (see `/settings/permissions`). With the standard policy that is a `triage` job with a cloud model (kind `send-code-to-cloud-model`), because source code would be sent to a third party; local-model triage, scans and assessments do not. In `ask` mode every job does. This is the mechanism Phase 3 will use for intrusive actions, and agents for individual tool calls.
 
 ### `/settings/permissions` — how much runs without asking
 
@@ -264,11 +265,11 @@ A running job that needs a decision it should not make alone puts a **question**
 
 Catalogs are data: every `*.json` under `catalogs/` (`CERBERUS_CATALOG_ROOT`, default: the repo's `catalogs/`) is loaded at startup. `POST /compliance/assess` takes the findings of an existing scan (`scanId`) or runs a fresh scan of `path`, then judges every control that declares `scannerCategories` in the catalog JSON (the mapping is data, not code). A mapped control with triggering findings is **NonCompliant** (findings attached as evidence), a mapped control with none is **Compliant**, and everything else is **NotAssessed** (manual review). `score` is Compliant / (Compliant + NonCompliant) over the automatically assessed controls only — it is not an overall compliance grade. "Compliant" means only that the passive scanner found nothing in the mapped categories.
 
-Controls mapped to the `dependency` category (ESAP GSG-07, OWASP A06) use the SCA findings. A fresh `path` assessment runs the dependency check unless `sca: false`; a `scanId` assessment uses whatever that scan recorded (`scaCompleted`). If the check was skipped, failed (OSV.dev unreachable) or truncated, such a control with no findings is **NotAssessed** rather than Compliant, and the response carries `dependencyCheckCompleted: false`. Scans stored before this field existed count as not completed.
+Controls mapped to the `dependency` category (vendor security DEV-04, OPS-01 and OPS-03; OWASP A06) use the SCA findings. A fresh `path` assessment runs the dependency check unless `sca: false`; a `scanId` assessment uses whatever that scan recorded (`scaCompleted`). If the check was skipped, failed (OSV.dev unreachable) or truncated, such a control with no findings is **NotAssessed** rather than Compliant, and the response carries `dependencyCheckCompleted: false`. Scans stored before this field existed count as not completed.
 
-**Spreadsheet export:** `GET /compliance/{id}/export` returns an `.xlsx` with three sheets. *Summary* has the totals and how to read them. *Controls* has one row per control in the response schema enterprises expect back: Verdict, Detailed Response, Action Plan, Time limit. *Evidence* lists every finding per control. Only what the engine established is pre-filled: Non-compliant rows get the findings, a generic "remediate and re-scan" action plan and the catalog's standard deadline (ESAP: 30 days); Compliant rows get the scan rationale; controls it could not judge have an empty Verdict (a pick-list from the catalog's response scale) for the operator to complete. Built with ClosedXML (`Cerberus.Compliance/ComplianceWorkbook.cs`).
+**Spreadsheet export:** `GET /compliance/{id}/export` returns an `.xlsx` with three sheets. *Summary* has the totals and how to read them. *Controls* has one row per control in the usual vendor-assessment response form: Verdict, Detailed Response, Action Plan, Time limit. *Evidence* lists every finding per control. Only what the engine established is pre-filled: Non-compliant rows get the findings, a generic "remediate and re-scan" action plan and the catalog's standard deadline (`vendor-security`: 30 days); Compliant rows get the scan rationale; controls it could not judge have an empty Verdict (a pick-list from the catalog's response scale) for the operator to complete. Built with ClosedXML (`Cerberus.Compliance/ComplianceWorkbook.cs`).
 
-**Operator answers:** the scanner can judge only a minority of controls, so each control can also carry an operator answer in the catalog's response schema. The verdict must be one of the catalog's response scale, a justification is required, an action plan is required for *Partially compliant* / *Non-compliant*, and the time limit must be within the catalog's maximum (ESAP: 1–180 days). An operator answer takes precedence over the scanner's verdict for that control (e.g. to record a false positive); the scanner's own verdict is kept and stays visible. `GET /compliance/{id}` returns both `summary` (scanner only) and `effective` (operator answers applied: compliant / partiallyCompliant / nonCompliant / notApplicable / unanswered).
+**Operator answers:** the scanner can judge only a minority of controls, so each control can also carry an operator answer in the catalog's response schema. The verdict must be one of the catalog's response scale, a justification is required, an action plan is required for *Partially compliant* / *Non-compliant*, and the time limit must be within the catalog's maximum (`vendor-security`: 1–90 days). An operator answer takes precedence over the scanner's verdict for that control (e.g. to record a false positive); the scanner's own verdict is kept and stays visible. `GET /compliance/{id}` returns both `summary` (scanner only) and `effective` (operator answers applied: compliant / partiallyCompliant / nonCompliant / notApplicable / unanswered).
 
 **Spreadsheet import:** edit the *Controls* sheet of an export and `POST` the file back as the raw request body (max 5 MB), e.g. `curl -X POST .../compliance/{id}/import -H "Authorization: Bearer …" --data-binary @file.xlsx`. Rows with an empty Verdict and rows unchanged since the export are ignored, valid rows are saved, and invalid rows are returned as `errors` with their row number. Columns are found by header name, so they may be reordered but not renamed.
 
@@ -276,7 +277,7 @@ Controls mapped to the `dependency` category (ESAP GSG-07, OWASP A06) use the SC
 
 ### `/scan` — Phase 1 (Scan & Detect), deterministic layer
 
-Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: current directory), applies the rule set line by line, and — unless `sca: false` — resolves dependencies against OSV.dev. Paths are confined to the scan root (traversal → 400) and symbolic links are never followed. This is a **trusted-target** layer: real engagements run it inside the sandbox with LLM reasoning on top (PLAN.md M3/M5).
+Walks a target path under the **scan root** (`CERBERUS_SCAN_ROOT`, default: current directory), applies the rule set line by line, and — unless `sca: false` — resolves dependencies against OSV.dev. Paths are confined to the scan root (traversal → 400) and symbolic links are never followed. This is a **trusted-target** layer: real engagements run it inside the sandbox with LLM reasoning on top.
 
 **Rules** (`Cerberus.Scanning/Rules.cs`, 22 of them): secrets (AWS, GitHub, Slack, Google, Stripe, JWTs, private keys, credentials in connection URLs, hardcoded assignments), weak hashes and ciphers, disabled TLS verification, debug mode, wildcard CORS, world-writable permissions, dynamic code evaluation, shell commands, SQL built by concatenation, and unsafe deserialization — with Erlang/Elixir forms (`os:cmd`, `binary_to_term`, `{verify, verify_none}`, `Code.eval_string`) alongside Python, JS/TS, Java, C#, Go and shell. They are per-line regexes: **candidates to review, not confirmed vulnerabilities**. There is no data-flow analysis, so a rule cannot tell whether untrusted input actually reaches a sink.
 
@@ -310,7 +311,7 @@ Nothing is unpacked or executed; files over 128 MB are not read. A library that 
 
 Because markers and ignore files live in the target, a target can hide findings from the totals — which is why they are counted and returned rather than dropped. For code you do not control, scan with `"exclusions": "ignore"`: every file is scanned and nothing is suppressed. A scan *job* asks you about this when the target actually excludes something (see `/questions`).
 
-**Measured** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
+**Performance** (static pass only): the upstream RabbitMQ repository — 3,512 files in about 3 seconds, 251 candidates of which 82 are in production code (mostly shell commands, credentials in example URLs, `binary_to_term`, MD5 use); this repository's own code — 153 files, 2 candidates, both sample strings in test files (the repo's `.cerberusignore` excludes the vendored `security-skills/` material, the rule definitions and the rule tests).
 
 
 ### LLM triage of findings (`triage` job)
@@ -320,7 +321,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **Advisory only.** The code under review is untrusted input to the model and may try to talk it into "false positive", so an opinion never removes a finding and never changes a compliance verdict. The system prompt tells the model to treat the source as data, but that is a mitigation, not a guarantee.
 - **You choose the model; there is no default.** A local Ollama model keeps the code on the machine. With a cloud model the job first waits for your approval (see `/approvals`), showing how many findings and files would be sent; only then is the code context sent to that provider, after credential-shaped values are replaced by `[REDACTED len=N]`. The audit log records which model reviewed how many findings and where the code went.
 - **What is reviewed:** unsuppressed static findings in production code, most severe first, up to `maxFindings` (max 100). Dependency, binary-hardening and release-exposure findings are skipped. An unusable or failed model reply becomes `NeedsReview` with `modelAnswered: false`.
-- **Status:** tested with a scripted model only. It has **not** been run against a real model yet — see PLAN.md §17 "Pending verification" for the steps and the expected results.
+- **Status:** tested with a scripted model only. It has **not** been run against a real model yet for the steps and the expected results.
 
 ### Reviews: plan → approve → execute (`review` job)
 
@@ -345,7 +346,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **Steering:** while the agent runs, `POST /jobs/{id}/messages {"text":"…"}` tells it something — "look at the upload handler", "stop, that is enough". The message is put in front of the model before its next step, marked as the operator's and as taking priority over its plan; if the agent was just finishing, it gets one more step to act on it. It appears on the stream as `operator_message` and in the audit log (`job.message`). Messages are held in memory for the run in progress only; a job with no running agent answers 409.
 - **A stopped run keeps its results:** cancelled, failed, timed out or at its step limit, the run is stored with `complete: false` and what it had found. Each run is in the audit log (`agent.run`) with where the code went.
 - **The `echo` dev model** acts out a fixed mini-review (list, read up to five top-level files, flag a few well-known calls) so the pipeline can be tried without a model. It is not a review.
-- **Status:** tested with scripted stand-ins only. It has **not** been run against a real model yet — see PLAN.md §17 "Pending verification".
+- **Status:** tested with scripted stand-ins only. It has **not** been run against a real model yet.
 
 ### Semantic code search (`index` job, `/code-search`)
 
@@ -355,7 +356,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **The model** is whatever the local Ollama serves under `CERBERUS_EMBEDDING_MODEL` (default `nomic-embed-text`; `ollama pull nomic-embed-text`, 274 MB), reached at `CERBERUS_EMBEDDING_URL` (default: `OLLAMA_BASE_URL`, else `http://localhost:11434/v1`). Building an index sends every chunk to that server, so anything but this machine (or the compose service `ollama`) is refused unless `CERBERUS_EMBEDDING_ALLOW_REMOTE=true`. Credential-shaped values are masked before embedding.
 - **Searching:** `POST /code-search {"path":"…","query":"…","limit"?: 8}` embeds the question with the same model and returns the closest chunks, best first: file, lines, name, score, a preview as the file is now, and `stale` when the file changed since it was indexed. A path below an indexed directory uses that index and returns only what lies under it. Vectors are compared in memory (a target has thousands of chunks, not millions), so there is no vector database to run.
 - **Agents** working on a target that has an index get a `searchCode` tool and are told so; without an index nothing changes for them. A hit is a lead to read, not a finding — the tool's answer says so.
-- **Measured** on this repository's `backend/src` with `nomic-embed-text`: 81 files, 990 chunks, 53 s to index, about 30 ms per search, 1 s to re-index when nothing changed. Of five test questions, four had the right code in the top three; closeness in meaning is approximate, which is why hits come with the code to check.
+- **Performance** on this repository's `backend/src` with `nomic-embed-text`: 81 files, 990 chunks, 53 s to index, about 30 ms per search, 1 s to re-index when nothing changed. Of five test questions, four had the right code in the top three; closeness in meaning is approximate, which is why hits come with the code to check.
 
 ### The threat-model agent (`threat-model` job)
 
@@ -366,7 +367,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **Stream:** `threat_component` and `threat` events as they are recorded, besides the tool calls.
 - **Same agent machinery as the SAST agent:** confined read-only tools, steering, memory, approval and masking for cloud models, a stopped run keeps a partial model marked as such, `agent.run` in the audit log.
 - **The `echo` dev model** records one component and one placeholder threat, to exercise the pipeline.
-- **Status:** tested with scripted stand-ins only; not yet run against a real model (PLAN.md §17).
+- **Status:** tested with scripted stand-ins only; not yet run against a real model.
 
 ### The team (`investigate` job) — a lead agent and its specialists
 
@@ -379,7 +380,7 @@ Because markers and ignore files live in the target, a target can hide findings 
 - **The result** is the lead's agent run (`agent: "lead"`): the merged findings, the lead's summary and a Markdown report (`/agent-runs/{id}`, `/report`, `/sarif`). `GET /agent-runs/{id}` of a lead lists its `specialists`; each specialist's own run carries `parentRunId` and its unmerged findings. Kept when the run is stopped part-way, marked incomplete.
 - **Consent.** With a cloud model the job waits for `send-code-to-cloud-model` first, and the request says that a lead and up to N specialists will read the code.
 - **The `echo` dev model** lists the top directory, proposes the injection and the access-control specialist, proposes the injection specialist alone when asked for changes, and reports the merged count.
-- **Status:** tested with stand-in specialists and with the dev model end to end; parallel work is tested with stand-ins only (the dev model counts as local); never led by a real model (PLAN.md §17).
+- **Status:** tested with stand-in specialists and with the dev model end to end; parallel work is tested with stand-ins only (the dev model counts as local); never led by a real model.
 
 ### The agent harness (`Agents/Harness.cs`) — how an agent is defined
 
@@ -407,14 +408,14 @@ Every job agent is a description and a little work; one runner executes them all
 
 ### The evidence agent (`evidence` job) — suggested answers for manual controls
 
-Most controls cannot be judged by the scanner (31 of 39 in ESAP, 5 of 10 in OWASP Top 10). `POST /jobs {"type":"evidence","assessmentId":"…","model":"…","maxControls"?: 8,"maxSteps"?: 30,"controlIds"?: […]}` has a model look in the assessed code for evidence and suggest an answer for them.
+Most controls cannot be judged by the scanner (23 of 32 in the vendor security assessment, 5 of 10 in OWASP Top 10). `POST /jobs {"type":"evidence","assessmentId":"…","model":"…","maxControls"?: 8,"maxSteps"?: 30,"controlIds"?: […]}` has a model look in the assessed code for evidence and suggest an answer for them.
 
 - **Which controls:** those named in `controlIds`, or by default the first `maxControls` (max 20) that the engine left not assessed and the operator has not answered.
 - **What it may say:** one of the catalog's response-scale values, or "Cannot tell". A definite answer (anything but "Not applicable" and "Cannot tell") is accepted only with evidence — files and lines that exist in the target; the line's text is stored with it. The prompt tells the model that controls about an organization's processes cannot be shown by code and should get "Cannot tell".
 - **Advisory:** suggestions are stored beside the assessment (`suggestion` on each control in `GET /compliance/{id}`) and change no verdict, score or operator answer. `POST /compliance/{id}/suggestions/{controlId}/accept` makes one the operator's answer — validated like any answer, so a non-compliant one still needs an `actionPlan` in the body; "Cannot tell" cannot be accepted. `DELETE /compliance/{id}/suggestions/{controlId}` dismisses one. Acceptance is audited (`evidence.accept`), each run as `evidence.run`.
 - **Same agent machinery as the SAST agent:** confined read-only tools, tool calls and `suggestion` events on the run stream, steering with `/jobs/{id}/messages`, memory, approval and masking for cloud models. The job's result id is the assessment.
 - **The `echo` dev model** answers "Cannot tell" for the first control, to exercise the pipeline.
-- **Status:** tested with scripted stand-ins only; not yet run against a real model (PLAN.md §17). Suggestions are not in the spreadsheet export yet.
+- **Status:** tested with scripted stand-ins only; not yet run against a real model. Suggestions are not in the spreadsheet export yet.
 
 ### Decisions on findings
 
@@ -489,7 +490,7 @@ Providers: Claude through the official Anthropic SDK (adaptive thinking on 4.6 a
 
 `GET /models` returns `{ default, providers: [{ id, name, kind: "api" | "local", ready, keySource?, reachable?, models, anyModel }] }`. An API provider is `ready` when the caller has stored a key (`keySource: "yours"`) or the server was started with one (`"server"`). The local provider lists what Ollama has installed — asked through its `/v1/models`, which loads nothing — each under an id that can be sent back; embedding models are left out; with Ollama down it says `reachable: false` and offers the listed names as suggestions.
 
-**Never verified against a real provider:** no API key was used and no local chat model was run while building this. Routing, request shape and stream parsing are tested against canned streams; see PLAN.md §17.
+**Never verified against a real provider:** no API key was used and no local chat model was run while building this. Routing, request shape and stream parsing are tested against canned streams.
 
 ### Per-user API keys
 
@@ -497,7 +498,7 @@ Each user stores their own Anthropic, OpenAI and DeepSeek keys via `/settings/ke
 
 ### A conversation over the queue (`/chat/turns`, `/hub/chat`)
 
-How the CLI talks to the chat agent. The request is the same as for `/chat`; what differs is how it travels (PLAN.md §22):
+How the CLI talks to the chat agent. The request is the same as for `/chat`; what differs is how it travels:
 
 1. **Accepted.** `POST /chat/turns` checks the request, stores it as a turn under the user id of the bearer token — a `userId` in the body is ignored — and publishes `(turnId, userId)` on the queue. The answer is `202` at once.
 2. **Answered.** `ChatTurnWorker` takes the message, refuses it if the user does not own the turn, and writes the reply with the same `ChatService` the direct endpoint uses. One turn of a conversation at a time, in the order they were sent; at most `CERBERUS_CHAT_PER_USER` (2) of one user's turns at once out of `CERBERUS_CHAT_CONCURRENCY` (4); at most 20 waiting per user (then `429`); `CERBERUS_CHAT_TURN_TIMEOUT_SECONDS` (900) per turn.
@@ -527,40 +528,17 @@ A reply that stops at a tool the client runs ends its turn with `replyStored: fa
 
 ### Skills library
 
-The vendored library under `security-skills/skills` (818 skills) is indexed at startup from each skill's front matter. Agents reach it in two ways: the chat agent calls `searchSkills` / `loadSkill`, and the triage reviewer is pointed at the skills matching each finding (the result records which). Access follows the capability tier: skills in the library's offensive subdomains need tier T2, which cannot be granted yet, so an agent at the passive tier neither finds nor loads them. `GET /skills` lists the whole catalog with the tier each skill needs; `GET /skills/{name}` returns the text only for skills a grantable tier may load.
+The vendored security library under `security-skills/skills` (818 skills) and the general skills under `skills/` (31) are indexed at startup from each skill's front matter. Agents reach it in two ways: the chat agent calls `searchSkills` / `loadSkill`, and the triage reviewer is pointed at the skills matching each finding (the result records which). Access follows the capability tier: skills in the library's offensive subdomains need tier T2, which cannot be granted yet, so an agent at the passive tier neither finds nor loads them. `GET /skills` lists the whole catalog with the tier each skill needs; `GET /skills/{name}` returns the text only for skills a grantable tier may load.
 
-### Parity with the TypeScript server
+### The TypeScript backend
 
-Checked feature by feature against `packages/server`:
+`frontend/server` (Hono) with `frontend/database` (Prisma, SQLite) serves the same API to the same clients, so the CLI works with either. Today it covers sign-in, sessions and the chat agent with the same request and response shapes, status codes, tool contracts and model ids as this backend; the other features are being ported. The two keep separate databases: an account made on one does not exist on the other. The CLI starts the TypeScript backend itself when nothing answers at a local `API_URL`.
 
-| TypeScript server | .NET backend |
-|---|---|
-| `POST /auth/register`, `/login`, `/logout` — same bodies, status codes and messages; 30-day session tokens | ✅ same (tested) |
-| `GET/POST /sessions`, `GET /sessions/:id` — same shapes; 400 on a missing title; 404 for another user's session | ✅ same (tested) |
-| `POST /chat` request validation (id, ≥1 message, mode enum, supported model) | ✅ same; `mode` is also accepted in lower case |
-| Stored messages merged with incoming ones by id | ✅ |
-| Tools by mode (4 read-only in PLAN, 7 in BUILD), executed by the CLI | ✅ same names, descriptions and input schemas |
-| Reply continues the resubmitted assistant message; not stored while tool calls are pending | ✅ |
-| System prompt with modes, tool list and rules | ✅ ported, plus the security framing and skills tools |
-| `messageMetadata`: mode, model, durationMs, usage | ✅ usage has `inputTokens`, `outputTokens`, `totalTokens` (the AI SDK's extra usage fields are not filled) |
-| Model list (Anthropic, OpenAI, Ollama) | ✅ same ids, plus `echo` and `codestral` |
-| Anthropic thinking on Opus/Sonnet (fixed 10,000-token budget) | 🟡 adaptive thinking with summaries instead — the fixed budget is deprecated on those models. **Not yet run against the real API.** |
-| OpenAI reasoning summaries on `gpt-5.4` (via the Responses API) | ⬜ not ported: the backend uses Chat Completions, which does not return them. Replies and tool calls work; the reasoning text is not shown. |
-| Model keys from the environment | ✅ plus per-user encrypted keys |
-| JSON error bodies (`{ "error": … }`) for bad input and unexpected failures | ✅ |
-| Strict validation of every message part against the tool schemas | 🟡 lighter: messages need an id, a role and parts; tool inputs are checked to be JSON objects for a known tool |
+## Known limitations
 
-Beyond parity: server-run tools, per-user keys, and everything under scans, compliance, jobs, approvals, questions, engagements, audit and skills.
-
-Accounts are not shared between the two servers (each has its own database); the CLI simply registers on whichever it talks to.
-
-## Status & follow-ups
-
-- The CLI's login, sessions, chat with tool calls, `/scan` and `/runs` all work against this backend. Chat was verified by driving the running backend with the CLI's own AI SDK chat client and local tools, using the `echo` stand-in.
-- **Not verified against real models** (no model may be run on the development machine): tool calling and thinking with Anthropic, tool calling with OpenAI and Ollama, and LLM triage. The provider code is tested against canned streams in the providers' documented formats. See PLAN.md §17 "Pending verification".
-- **Seen once, not explained:** `SkillApiTests.Skills_reserved_for_intrusive_tiers_are_listed_but_not_handed_out` failed one time while opening the SQLite connection during user registration; 18 further full runs passed. If it recurs, capture the inner `SqliteException` — the suspects are lock contention with a background job of an earlier test, or the shared test database file.
-- **Seen once, timing (2026-11-15):** `JobTimeLimitTests.Time_spent_waiting_for_a_person_does_not_count` failed once in a full run on PostgreSQL. It uses no database: a job with a 150 ms limit pauses its clock as its first step, and fails if, on a loaded machine, that first step comes more than 150 ms after the start. It passed alone and in the next runs; give it a longer limit if it comes back.
-- **Follow-ups:** OpenAI reasoning summaries (Responses API); moving the model list to current Claude models.
+- **Live models:** the provider code is tested against recorded streams in each provider's documented format. Tool calling and adaptive thinking with Anthropic, tool calling with OpenAI and Ollama, and model triage have not yet been exercised against the live APIs.
+- **OpenAI reasoning summaries** are not shown: the backend uses Chat Completions, which does not return them (replies and tool calls work).
+- **Message validation** is lighter than the TypeScript backend's: a message needs an id, a role and parts, and a tool input must be a JSON object for a known tool.
 
 ## Tests
 

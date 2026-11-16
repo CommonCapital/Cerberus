@@ -32,7 +32,7 @@ if (configErrors.Count > 0)
     return 2;
 }
 
-// --- What this installation runs on (PLAN.md §22) ------------------------------
+// --- What this installation runs on ------------------------------
 // Each service that is configured and answers within a few seconds is used; one that does not is replaced by
 // its local stand-in and the service starts anyway: SQLite for PostgreSQL, this process for Redis and RabbitMQ.
 var postgres = new Cerberus.Api.Hosting.PostgresOptions(Environment.GetEnvironmentVariable(Cerberus.Api.Hosting.PostgresOptions.Variable));
@@ -69,7 +69,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(backing);
 builder.Services.AddSingleton<Cerberus.Api.Health.IReadinessCheck, Cerberus.Api.Hosting.BackingServicesCheck>();
 
-// --- Controls the installation sets for everyone (PLAN.md §21) ------------
+// --- Controls the installation sets for everyone ------------
 // Groups of tools switched off whatever a request or a model asks for; checked above, so this cannot fail.
 var disabledTools = Cerberus.Api.Controls.DisabledTools.Parse(Environment.GetEnvironmentVariable(Cerberus.Api.Controls.DisabledTools.Variable));
 builder.Services.AddSingleton(disabledTools);
@@ -96,7 +96,7 @@ builder.Services.AddScoped<DataOwner>();
 // --- Auth ------------------------------------------------------------------
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ApiTokenService>();
-// --- Several instances of the service (PLAN.md §22 item 7) -------------------
+// --- Several instances of the service -------------------
 // Each instance has a name and says it is alive; work marked as running under a name that went quiet is failed.
 builder.Services.AddSingleton<Cerberus.Api.Cluster.InstanceIdentity>();
 builder.Services.AddSingleton<Cerberus.Api.Cluster.OrphanSweeper>();
@@ -163,7 +163,7 @@ builder.Services.AddSingleton<ScanService>();
 builder.Services.AddSingleton<OsvClient>();
 builder.Services.AddSingleton<ScaService>();
 
-// --- Phase 2 compliance (ESAP/ISO/OWASP catalogs shipped as data) ----------
+// --- Phase 2 compliance (control catalogs shipped as data) ----------
 var catalogRoot = Environment.GetEnvironmentVariable("CERBERUS_CATALOG_ROOT")
     ?? ResolveUpwards(builder.Environment.ContentRootPath, "catalogs");
 builder.Services.AddSingleton(new CatalogOptions(catalogRoot));
@@ -172,7 +172,9 @@ builder.Services.AddSingleton<ComplianceEngine>();
 
 // --- Skills library (vendored under security-skills/; agents search and load from it) ---
 var skillsRoot = Environment.GetEnvironmentVariable("CERBERUS_SKILLS_ROOT")
-    ?? Path.Combine(ResolveUpwards(builder.Environment.ContentRootPath, "security-skills"), "skills");
+    ?? string.Join(Path.PathSeparator,
+        Path.Combine(ResolveUpwards(builder.Environment.ContentRootPath, "security-skills"), "skills"),
+        ResolveUpwards(builder.Environment.ContentRootPath, "skills"));
 builder.Services.AddSingleton(new Cerberus.Skills.SkillOptions(skillsRoot));
 builder.Services.AddSingleton<Cerberus.Skills.SkillLibrary>();
 builder.Services.AddSingleton<SkillAdvisor>();
@@ -223,7 +225,7 @@ builder.Services.AddScoped<TriageRunner>();
 builder.Services.AddScoped<ReviewRunner>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.AgentLoop>();
 builder.Services.AddSingleton<Cerberus.Api.Agents.OperatorInbox>();
-// One runner for every agent (PLAN.md §22 item 3); the agents below are descriptions it runs.
+// One runner for every agent; the agents below are descriptions it runs.
 builder.Services.AddScoped<Cerberus.Api.Agents.AgentHarness>();
 builder.Services.AddScoped<Cerberus.Api.Agents.SastAgentRunner>();
 builder.Services.AddScoped<Cerberus.Api.Agents.EvidenceAgentRunner>();

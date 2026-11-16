@@ -9,7 +9,7 @@ using Cerberus.Scanning;
 namespace Cerberus.Api.Agents;
 
 /// <summary>
-/// What a tool call does besides reading (PLAN.md §22 item 2). Declared by the tool — in code, by whoever
+/// What a tool call does besides reading. Declared by the tool — in code, by whoever
 /// wrote it — and never by the model or by an outside server about itself.
 /// </summary>
 [Flags]
@@ -47,7 +47,7 @@ public interface IToolGate
 }
 
 /// <summary>
-/// The interrupt (PLAN.md §22 item 2): a consequential tool call does not run on a model's say-so. The run
+/// The interrupt: a consequential tool call does not run on a model's say-so. The run
 /// stops and puts the call to the operator through its ordinary question — what the agent wants to do, with
 /// what — and goes on with the answer: run it once, run this tool for the rest of the run, or not at all,
 /// with the operator's reason passed to the model. Nobody there to answer means no.
@@ -138,7 +138,7 @@ public sealed class OperatorGate(Job job, CerberusDbContext db, AuditLog audit, 
 }
 
 /// <summary>
-/// Lets an agent stop and ask instead of guessing (PLAN.md §22 item 2). The question goes to the operator
+/// Lets an agent stop and ask instead of guessing. The question goes to the operator
 /// through the run's ordinary question; the run waits, its time limit paused. Offered only where the run was
 /// started by somebody who said a person is there: an agent in a pipeline or on a schedule does not get it.
 /// A few questions a run at most, so that an agent cannot hand its work back one question at a time.

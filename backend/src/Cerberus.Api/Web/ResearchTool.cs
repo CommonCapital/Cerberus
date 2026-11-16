@@ -10,7 +10,7 @@ namespace Cerberus.Api.Web;
 
 /// <summary>
 /// Research on the public internet for an agent that holds code under review
-/// (PLAN.md §21, the clean room). Such an agent never gets internet tools. It
+///. Such an agent never gets internet tools. It
 /// gets one tool, <c>research(question)</c>: the question is checked by the
 /// <see cref="EgressGuard"/>, then a separate researcher — a fresh agent loop
 /// that is given the question and nothing else, and has only internet tools —

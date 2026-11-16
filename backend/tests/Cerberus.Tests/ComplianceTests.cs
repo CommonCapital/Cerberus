@@ -149,7 +149,10 @@ public class CatalogLoaderTests
     private static readonly HashSet<string> ScannerCategories =
         new(Rules.Categories.Append("dependency"), StringComparer.OrdinalIgnoreCase);
 
-    private static CatalogLoader RepoCatalogs()
+    private static CatalogLoader RepoCatalogs() => new(new CatalogOptions(ApiHost.FindCatalogs()));
+
+    /// <summary>The catalogs that ship in the repository's catalogs/ folder.</summary>
+    private static CatalogLoader ShippedCatalogs()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "catalogs"))) dir = dir.Parent;
@@ -158,14 +161,52 @@ public class CatalogLoaderTests
     }
 
     [Fact]
-    public void Shipped_catalogs_load()
+    public void Shipped_catalogs_load_and_are_well_formed()
+    {
+        var shipped = ShippedCatalogs();
+        Assert.Equal(32, shipped.Get("vendor-security")?.ControlCount);
+        Assert.Equal(90, shipped.Get("vendor-security")?.Methodology?.CorrectiveActions?.MaxDays);
+        Assert.Equal(10, shipped.Get("owasp-top10")?.ControlCount);
+        // Same rules as for the test catalogs below.
+        foreach (var catalog in shipped.All)
+        {
+            var ids = catalog.Controls.Select(c => c.Id).ToList();
+            Assert.Equal(ids.Count, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.All(catalog.Controls.SelectMany(c => c.ScannerCategories ?? []), category => Assert.Contains(category, ScannerCategories));
+            Assert.All(catalog.Controls, c => Assert.False(string.IsNullOrWhiteSpace(c.Requirement)));
+        }
+    }
+
+    [Fact]
+    public void Without_a_named_catalog_the_preferred_one_is_used_then_the_first_and_with_none_there_is_none()
+    {
+        Assert.Equal("vendor-security", RepoCatalogs().Default?.Id);
+
+        var root = Path.Combine(Path.GetTempPath(), $"cerberus-catalogs-{Guid.NewGuid():n}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            Assert.Null(new CatalogLoader(new CatalogOptions(root)).Default);
+            File.Copy(Path.Combine(ApiHost.FindCatalogs(), "owasp-top10.json"), Path.Combine(root, "owasp-top10.json"));
+            Assert.Equal("owasp-top10", new CatalogLoader(new CatalogOptions(root)).Default?.Id);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        Assert.Contains("CERBERUS_CATALOG_ROOT", CatalogLoader.NoneInstalled);
+    }
+
+    [Fact]
+    public void Catalogs_load()
     {
         var loader = RepoCatalogs();
 
-        var esap = loader.Get("enterprise-sap");
-        Assert.NotNull(esap);
-        Assert.Equal(39, esap!.ControlCount);
-        Assert.Equal(30, esap.Methodology?.CorrectiveActions?.StandardDays);
+        var vendor = loader.Get("vendor-security");
+        Assert.NotNull(vendor);
+        Assert.Equal(32, vendor!.ControlCount);
+        Assert.Equal(30, vendor.Methodology?.CorrectiveActions?.StandardDays);
+        Assert.Equal(90, vendor.Methodology?.CorrectiveActions?.MaxDays);
 
         var owasp = loader.Get("owasp-top10");
         Assert.NotNull(owasp);
@@ -173,7 +214,7 @@ public class CatalogLoaderTests
     }
 
     [Fact]
-    public void Shipped_catalogs_have_unique_ids_and_only_known_scanner_categories()
+    public void Catalogs_have_unique_ids_and_only_known_scanner_categories()
     {
         foreach (var catalog in RepoCatalogs().All)
         {

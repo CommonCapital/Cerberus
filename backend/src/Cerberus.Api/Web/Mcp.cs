@@ -19,7 +19,7 @@ public sealed record McpServerConfig(string Name, Uri Url, IReadOnlyDictionary<s
 }
 
 /// <summary>
-/// The MCP servers of this installation (PLAN.md §21). They are named in a file the administrator writes
+/// The MCP servers of this installation. They are named in a file the administrator writes
 /// (<c>CERBERUS_MCP_CONFIG</c>), not chosen by a model or sent in a request: which outside services an agent
 /// can reach is a decision about the installation. An entry that cannot be used is left out and said why.
 /// </summary>

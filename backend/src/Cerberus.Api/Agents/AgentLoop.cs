@@ -49,7 +49,7 @@ public sealed record AgentOutcome(
 }
 
 /// <summary>
-/// The server-side agent loop (PLAN.md §6): call the model, run the tools it
+/// The server-side agent loop: call the model, run the tools it
 /// asks for, give it the results, repeat until it answers without tools or
 /// reaches its step limit. Everything it does is put on the run's stream —
 /// its text as it is written, and every tool call with its input and result

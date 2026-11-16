@@ -10,7 +10,7 @@ if [ "$#" -ne 0 ]; then
 fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
-    printf '%s\n' 'Cerberus needs the .NET 10 SDK. Install it, then run dev:server:lite again; nothing was started.' >&2
+    printf '%s\n' 'Cerberus needs the .NET 10 SDK. Install it, then run dev:api:lite again; nothing was started.' >&2
     exit 127
 fi
 

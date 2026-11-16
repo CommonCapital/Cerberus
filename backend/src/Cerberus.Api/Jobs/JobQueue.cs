@@ -9,7 +9,7 @@ namespace Cerberus.Api.Jobs;
 public sealed record QueuePosition(int Ahead, int Others);
 
 /// <summary>
-/// Whose turn it is (PLAN.md §22 item 4). The queue of messages only says that there is work; which job a
+/// Whose turn it is. The queue of messages only says that there is work; which job a
 /// free worker takes is decided here, from the database, each time:
 /// <list type="bullet">
 /// <item>the next job belongs to the user who has the fewest running right now — so one person's batch of

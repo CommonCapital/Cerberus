@@ -1,18 +1,27 @@
 {
   "name": "cerberus",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CommonCapital/Cerberus.git"
+  },
   "version": "1.0.0",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "frontend/*"
+  ],
   "scripts": {
-    "start:cli": "bun run packages/cli/src/main.ts",
-    "dev:cli": "bun run --watch packages/cli/src/main.ts",
-    "dev:server": "dotnet run --no-launch-profile --project backend/src/Cerberus.Api",
-    "dev:server:lite": "sh scripts/dev-api-lite.sh",
-    "check:cli": "bun run --cwd packages/cli typecheck && bun run --cwd packages/cli test",
+    "start:cli": "CERBERUS_AUTOSTART=off bun run frontend/cli/src/main.ts",
+    "dev:cli": "bun run --watch frontend/cli/src/main.ts",
+    "dev:server": "bun run --hot frontend/server/src/index.ts",
+    "dev:api": "dotnet run --no-launch-profile --project backend/src/Cerberus.Api",
+    "dev:api:lite": "sh scripts/dev-api-lite.sh",
+    "check:cli": "bun run --cwd frontend/cli typecheck && bun run --cwd frontend/cli test",
     "test:scripts": "bun test scripts",
     "build:cli": "bun run --filter @cerberus/cli build",
-    "link:cli": "bun run build:cli && cd packages/cli && bun link"
+    "link:cli": "bun run build:cli && cd frontend/cli && bun link"
   },
   "dependencies": {
     "dotenv": "^17.4.2"
-  }
+  },
+  "private": true
 }

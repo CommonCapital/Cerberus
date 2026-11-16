@@ -223,12 +223,8 @@ public sealed class ApiHost : IDisposable
         })
         .Build();
 
-    private static string FindCatalogs()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "catalogs"))) dir = dir.Parent;
-        return Path.Combine(dir!.FullName, "catalogs");
-    }
+    /// <summary>The test catalogs: the structure of the real ones (ids, sections, scanner mappings) with placeholder text.</summary>
+    public static string FindCatalogs() => Path.Combine(AppContext.BaseDirectory, "Fixtures", "catalogs");
 
     public void Dispose()
     {

@@ -8,7 +8,7 @@ namespace Cerberus.Api.Chat;
 public sealed record ChatTask(string Id, string Content, string Status, IReadOnlyList<string> DependsOn);
 
 /// <summary>
-/// The chat agent's task list (PLAN.md §6.5 "visible task list", §19, §20): a
+/// The chat agent's task list: a
 /// plan the model keeps for work of several steps, visible to the operator as
 /// it changes. The model rewrites the whole list with every update; the server
 /// checks it, stores it with the session and reminds the model of it on every

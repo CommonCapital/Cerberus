@@ -3,7 +3,7 @@ using StackExchange.Redis;
 namespace Cerberus.Api.Cluster;
 
 /// <summary>
-/// Places that are handed out per key: one per conversation, a few per user (PLAN.md §22 items 4 and 7).
+/// Places that are handed out per key: one per conversation, a few per user.
 /// Whoever comes when they are all taken waits. With one instance they are counted in the process; with
 /// several, in Redis, so that the limit holds over all of them.
 /// </summary>

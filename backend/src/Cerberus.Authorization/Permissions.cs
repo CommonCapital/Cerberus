@@ -2,7 +2,7 @@ namespace Cerberus.Authorization;
 
 /// <summary>
 /// Classes of action an agent or run can take that the operator may want to
-/// be asked about (PLAN.md §6.5, permission modes).
+/// be asked about.
 /// </summary>
 public static class ActionKinds
 {

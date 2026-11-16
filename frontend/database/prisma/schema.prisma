@@ -1,0 +1,45 @@
+// Cerberus local database schema.
+// Fully local: SQLite via a Prisma driver adapter — no hosted Postgres.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  authSessions AuthSession[]
+  sessions     Session[]
+}
+
+/// A local authentication session. The CLI stores `token`.
+model AuthSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// A chat/work session. `messages` is a JSON-encoded string (SQLite has no JSON type).
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages  String   @default("[]")
+
+  @@index([userId])
+}

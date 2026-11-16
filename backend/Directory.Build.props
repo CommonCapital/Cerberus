@@ -1,0 +1,11 @@
+<Project>
+  <!-- Shared by every project under backend/. -->
+  <PropertyGroup>
+    <Authors>The Cerberus Authors</Authors>
+    <Copyright>Copyright 2026 The Cerberus Authors</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/CommonCapital/Cerberus</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/CommonCapital/Cerberus</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

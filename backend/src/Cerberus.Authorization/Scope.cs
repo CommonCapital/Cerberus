@@ -1,6 +1,6 @@
 namespace Cerberus.Authorization;
 
-/// <summary>Capability tiers (PLAN.md §3). Higher tiers need stronger gates.</summary>
+/// <summary>Capability tiers. Higher tiers need stronger gates.</summary>
 public enum CapabilityTier
 {
     /// <summary>Passive: SAST, SCA, secrets, compliance read.</summary>

@@ -18,9 +18,9 @@ public class ReviewPlanTests
     [Fact]
     public void The_plan_lists_scan_assessments_and_report_in_order()
     {
-        var plan = ReviewPlan.Build("app", new ReviewJobParameters(["owasp-top10", "enterprise-sap"]), Catalogs());
+        var plan = ReviewPlan.Build("app", new ReviewJobParameters(["owasp-top10", "vendor-security"]), Catalogs());
 
-        Assert.Equal(["scan", "assess:owasp-top10", "assess:enterprise-sap", "report"], plan.Select(s => s.Id).ToArray());
+        Assert.Equal(["scan", "assess:owasp-top10", "assess:vendor-security", "report"], plan.Select(s => s.Id).ToArray());
         Assert.Contains("OSV.dev", plan[0].Detail);
     }
 
@@ -41,12 +41,12 @@ public class ReviewPlanTests
     {
         var byDefault = ReviewPlan.Build("app", new ReviewJobParameters(["owasp-top10"], AgentModel: "llama3.1"), Catalogs());
         var all = ReviewPlan.Build("app",
-            new ReviewJobParameters(["owasp-top10", "enterprise-sap"], AgentModel: "llama3.1", Agents: ["sast", "threat-model", "evidence"]), Catalogs());
+            new ReviewJobParameters(["owasp-top10", "vendor-security"], AgentModel: "llama3.1", Agents: ["sast", "threat-model", "evidence"]), Catalogs());
         var none = new ReviewJobParameters(["owasp-top10"], Agents: ["sast"]);   // no model: nothing to run them
 
         Assert.Equal(["scan", "sast", "assess:owasp-top10", "report"], byDefault.Select(s => s.Id).ToArray());
         Assert.Equal(
-            ["scan", "sast", "threat-model", "assess:owasp-top10", "evidence:owasp-top10", "assess:enterprise-sap", "evidence:enterprise-sap", "report"],
+            ["scan", "sast", "threat-model", "assess:owasp-top10", "evidence:owasp-top10", "assess:vendor-security", "evidence:vendor-security", "report"],
             all.Select(s => s.Id).ToArray());
         Assert.All(all.Where(s => s.Id is "sast" or "threat-model" || s.Id.StartsWith("evidence:")), s => Assert.Contains("no code leaves this machine", s.Detail));
         Assert.Empty(none.AgentsToRun);
@@ -145,16 +145,16 @@ public class ReviewApiTests(ApiHost host)
         var events = await EventsAsync(client, jobId);
         var planned = events.Single(e => e.GetProperty("type").GetString() == "plan").GetProperty("data").GetProperty("steps")
             .EnumerateArray().Select(s => s.GetProperty("id").GetString()!).ToArray();
-        Assert.Equal(["scan", "assess:enterprise-sap", "assess:owasp-top10", "report"], planned);
+        Assert.Equal(["scan", "assess:owasp-top10", "assess:vendor-security", "report"], planned);
         var steps = events.Where(e => e.GetProperty("type").GetString() == "step")
             .Select(e => $"{e.GetProperty("data").GetProperty("id").GetString()}={e.GetProperty("data").GetProperty("status").GetString()}")
             .ToArray();
         Assert.Equal(
         [
-            "scan=pending", "assess:enterprise-sap=pending", "assess:owasp-top10=pending", "report=pending",
+            "scan=pending", "assess:owasp-top10=pending", "assess:vendor-security=pending", "report=pending",
             "scan=running", "scan=completed",
-            "assess:enterprise-sap=running", "assess:enterprise-sap=completed",
             "assess:owasp-top10=running", "assess:owasp-top10=completed",
+            "assess:vendor-security=running", "assess:vendor-security=completed",
             "report=running", "report=completed",
         ], steps);
 

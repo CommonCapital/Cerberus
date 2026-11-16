@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http.Features;
 namespace Cerberus.Api.Security;
 
 /// <summary>
-/// The service's own limits (PLAN.md §22 item 8, A3), read once at start-up.
+/// The service's own limits, read once at start-up.
 /// </summary>
 /// <param name="RequestsPerMinutePerAddress">Requests one network address may make in a minute; 0 switches the limit off.</param>
 /// <param name="RequestsPerMinutePerUser">Requests one sign-in token may make in a minute; 0 switches the limit off.</param>

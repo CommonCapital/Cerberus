@@ -8,7 +8,7 @@ public interface IUserOwned
 
 /// <summary>
 /// Whose data a database context may see — the second lock on per-user data
-/// (PLAN.md §22 item 8). Every query in the code already filters by user; this
+///. Every query in the code already filters by user; this
 /// is for the one that forgets to.
 ///
 /// One per dependency-injection scope, and unrestricted until told otherwise:

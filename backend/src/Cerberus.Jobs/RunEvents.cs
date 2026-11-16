@@ -3,7 +3,7 @@ using System.Text;
 namespace Cerberus.Jobs;
 
 /// <summary>
-/// The kinds of event on a run's stream (PLAN.md §6.5). A client renders a run
+/// The kinds of event on a run's stream. A client renders a run
 /// purely from these, in sequence order; it never has to poll for meaning.
 /// </summary>
 public static class RunEventTypes

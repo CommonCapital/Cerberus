@@ -25,7 +25,7 @@ public sealed class ChatLimits
 public sealed record Compaction(string Summary, string Through, int Messages);
 
 /// <summary>
-/// Compaction (PLAN.md §19): when a conversation is about to outgrow the model's
+/// Compaction: when a conversation is about to outgrow the model's
 /// context window, its earlier part is replaced — for the model, not for the
 /// operator, who keeps seeing everything — by a summary written by the model.
 /// The last exchange is always kept word for word.

@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Catalogs with the structure of the real ones and placeholder text: the tests do not depend on catalog content. -->
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Cerberus.Compliance\Cerberus.Compliance.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Scanning\Cerberus.Scanning.csproj" />
     <ProjectReference Include="..\..\src\Cerberus.Authorization\Cerberus.Authorization.csproj" />
