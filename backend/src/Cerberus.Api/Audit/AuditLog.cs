@@ -9,8 +9,9 @@ namespace Cerberus.Api.Audit;
 /// short-lived DbContext so an audit entry is committed on its own — it never
 /// rides along with, or is rolled back by, the request's other changes.
 /// </summary>
-public sealed class AuditLog(IServiceScopeFactory scopes)
+public sealed class AuditLog(IServiceScopeFactory scopes, TimeProvider? clock = null)
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     // One writer at a time keeps each user's sequence gap-free in this process;
     // the unique (UserId, Sequence) index is the backstop across processes.
     private static readonly SemaphoreSlim Gate = new(1, 1);
@@ -37,31 +38,31 @@ public sealed class AuditLog(IServiceScopeFactory scopes)
                 .FirstOrDefaultAsync(ct);
 
             var previousHash = last?.Hash ?? AuditChain.Genesis;
-            var record = new AuditRecord(
-                Sequence: (last?.Sequence ?? 0) + 1,
-                UserId: userId,
-                EngagementId: engagementId,
-                Action: action,
-                Target: target,
-                Tier: tier?.ToString(),
-                Outcome: outcome,
-                Detail: detail,
-                CreatedAt: DateTime.UtcNow);
-
-            db.AuditEvents.Add(new AuditEvent
+            var now = _clock.GetUtcNow().UtcDateTime;
+            // PostgreSQL timestamps retain microseconds, not .NET's 100ns
+            // ticks. Hash exactly what both databases can round-trip. Only
+            // new entries are normalized: existing hashes still cover every
+            // stored tick, including older SQLite entries at full precision.
+            var createdAt = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMicrosecond));
+            var entry = new AuditEvent
             {
-                UserId = record.UserId,
-                Sequence = record.Sequence,
-                EngagementId = record.EngagementId,
-                Action = record.Action,
-                Target = record.Target,
-                Tier = record.Tier,
-                Outcome = record.Outcome,
-                Detail = record.Detail,
-                CreatedAt = record.CreatedAt,
+                UserId = userId,
+                Sequence = (last?.Sequence ?? 0) + 1,
+                EngagementId = engagementId,
+                Action = action,
+                Target = target,
+                Tier = tier?.ToString(),
+                Outcome = outcome,
+                Detail = detail,
+                CreatedAt = createdAt,
                 PreviousHash = previousHash,
-                Hash = AuditChain.ComputeHash(record, previousHash),
-            });
+            };
+            db.AuditEvents.Add(entry);
+            // SaveChanges replaces NUL characters for PostgreSQL. Apply that
+            // same storage rule before hashing, while this isolated context
+            // contains only the new entry, so persistence cannot alter its hash.
+            if (db.IsPostgres) PostgresStorage.CleanText(db.ChangeTracker);
+            entry.Hash = AuditChain.ComputeHash(ToChained(entry).Record, entry.PreviousHash);
             await db.SaveChangesAsync(ct);
         }
         finally

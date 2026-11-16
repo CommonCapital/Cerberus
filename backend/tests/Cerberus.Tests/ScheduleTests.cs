@@ -93,8 +93,12 @@ public class ScheduleApiTests(ApiHost host)
         throw new TimeoutException($"Job {jobId} did not finish.");
     }
 
-    /// <summary>A moment at which this schedule is due, as the scheduler would see it.</summary>
-    private static DateTime Due(JsonElement schedule, int minutesLate = 1) => schedule.GetProperty("nextRunAt").GetDateTime().ToUniversalTime().AddMinutes(minutesLate);
+    /// <summary>
+    /// The scheduler advances the persisted grid. PostgreSQL stores microseconds, while the create response
+    /// may still carry the tracked DateTime's 100 ns ticks: compare persisted times without a tolerance.
+    /// </summary>
+    private static async Task<DateTime> NextRunAsync(HttpClient client, string id) =>
+        (await GetAsync(client, id)).GetProperty("nextRunAt").GetDateTime().ToUniversalTime();
 
     [Fact]
     public async Task A_schedule_is_a_job_request_and_an_interval_and_belongs_to_its_owner()
@@ -157,7 +161,7 @@ public class ScheduleApiTests(ApiHost host)
         var (other, _) = await host.NewUserAsync();
         var schedule = await CreateAsync(client, ScanOf("svc"), "1h");
         var id = schedule.GetProperty("id").GetString()!;
-        var first = schedule.GetProperty("nextRunAt").GetDateTime().ToUniversalTime();
+        var first = await NextRunAsync(client, id);
 
         // Not due yet: nothing happens.
         await Runner.RunDueAsync(first.AddMinutes(-10), default);
@@ -195,13 +199,14 @@ public class ScheduleApiTests(ApiHost host)
     {
         var (client, _) = await host.NewUserAsync();
         var schedule = await CreateAsync(client, ScanOf("svc"), "1h");
-        var first = schedule.GetProperty("nextRunAt").GetDateTime().ToUniversalTime();
+        var id = schedule.GetProperty("id").GetString()!;
+        var first = await NextRunAsync(client, id);
 
         // The service was down for five and a half intervals.
         await Runner.RunDueAsync(first.AddMinutes(330), default);
 
         Assert.Single(await JobsAsync(client));
-        var after = await GetAsync(client, schedule.GetProperty("id").GetString()!);
+        var after = await GetAsync(client, id);
         Assert.Equal(first.AddHours(6), after.GetProperty("nextRunAt").GetDateTime().ToUniversalTime());
     }
 
@@ -271,7 +276,7 @@ public class ScheduleApiTests(ApiHost host)
         var (client, _) = await host.NewUserAsync();
         var schedule = await CreateAsync(client, ScanOf("svc"), "1h", "hourly");
         var id = schedule.GetProperty("id").GetString()!;
-        var first = schedule.GetProperty("nextRunAt").GetDateTime().ToUniversalTime();
+        var first = await NextRunAsync(client, id);
 
         Assert.False((await Json(await client.PutAsJsonAsync($"/schedules/{id}", new { enabled = false }))).GetProperty("enabled").GetBoolean());
         await Runner.RunDueAsync(first.AddHours(3), default);
@@ -295,6 +300,7 @@ public class ScheduleApiTests(ApiHost host)
         var (client, _) = await host.NewUserAsync();
         var schedule = await CreateAsync(client, ScanOf("svc"), "1d");
         var id = schedule.GetProperty("id").GetString()!;
+        var next = await NextRunAsync(client, id);
 
         var response = await client.PostAsync($"/schedules/{id}/run", null);
 
@@ -302,6 +308,6 @@ public class ScheduleApiTests(ApiHost host)
         var fired = await Json(response);
         Assert.Equal(("started", "Started."), (fired.GetProperty("outcome").GetString(), fired.GetProperty("detail").GetString()));
         Assert.Equal("Succeeded", await FinishedAsync(client, fired.GetProperty("jobId").GetString()!));
-        Assert.Equal(schedule.GetProperty("nextRunAt").GetDateTime(), (await GetAsync(client, id)).GetProperty("nextRunAt").GetDateTime());
+        Assert.Equal(next, await NextRunAsync(client, id));
     }
 }

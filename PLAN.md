@@ -520,6 +520,12 @@ A real first-start test caught Prisma 7.7 losing its missing-database error unde
 
 **Verified sequentially on the 8 GB laptop:** .NET build with 0 warnings/errors; **1,213 backend tests passed, 26 infrastructure-dependent tests skipped**; **441 CLI tests passed**, including the real TypeScript/SQLite startup; CLI and TypeScript backend type checks; **12 TypeScript context tests** and **6 launcher tests**; frozen lockfile install and CLI bundle. Live scratch-API checks cover one-time API-token issuance, independent revocation, API-token logout and a real CLI passive scan through HTTP event replay. No Docker stack, local model or external model call was used. PostgreSQL/Redis coverage runs in CI; RabbitMQ, container rebuilds and real models remain outside this local check.
 
+### PostgreSQL audit round-trip correction — 2026-11-16
+
+The PR's PostgreSQL CI leg exposed loss of sub-microsecond timestamp ticks after audit hashing. New audit timestamps are now normalized before hashing and storage; PostgreSQL's existing NUL-character replacement is also applied before the hash is calculated. The hash format, strict verification and immutable historical rows are unchanged. Five deterministic/integration regressions cover precision, legacy SQLite compatibility, single-tick tampering and normalized text. Four scheduler tests now compare persisted timestamps before and after an action, keeping exact equality rather than adding tolerances.
+
+The first integrated revision passed the local checks above. The follow-up local rebuild was killed; its remaining test processes were stopped to preserve laptop resources. The final PostgreSQL correction is checked in GitHub CI, including both database configurations, instead of repeating local compilation. Previously affected PostgreSQL audit rows are not silently rewritten and may still fail verification.
+
 ### Pending verification — needs a machine that can run a model
 
 **Choosing the model.** Any model of four providers can be used: Claude, GPT and DeepSeek by API key (`cerberus key set <provider>`), or a local model from Ollama; a listed id or `provider:model` (`ollama:qwen2.5-coder:7b`). `cerberus models` shows what is ready. None of the provider paths has been exercised against the real service: no key was used and no chat model was run while building them. The first run with each provider should record whether the request is accepted as built — in particular DeepSeek's `deepseek-reasoner` with tools, and Claude 5.x with adaptive thinking — before anything else is judged.
