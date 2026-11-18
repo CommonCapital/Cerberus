@@ -76,18 +76,20 @@ public sealed class SharedRateLimitTests(RedisServer redis) : IClassFixture<Redi
     [RedisFact]
     public async Task The_window_slides_and_the_liveness_probe_is_never_counted()
     {
-        // Short segments, so that a whole window passes during the test: six of 150 ms.
-        var instance = Instance(Limits(perAddress: 2, perUser: 0), segment: TimeSpan.FromMilliseconds(150));
+        // Segments short enough that a whole window passes during the test, and long enough that three
+        // requests in a row fall in the same one on a busy CI machine (with 150 ms they sometimes did not).
+        var segment = TimeSpan.FromSeconds(1);
+        var instance = Instance(Limits(perAddress: 2, perUser: 0), segment: segment);
         var from = Address();
 
         Assert.True((await instance.DecideAsync(Request(from))).Allowed);
         Assert.True((await instance.DecideAsync(Request(from))).Allowed);
         var refused = await instance.DecideAsync(Request(from));
         Assert.False(refused.Allowed);
-        Assert.InRange(refused.RetryAfter, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(150));
+        Assert.InRange(refused.RetryAfter, TimeSpan.FromMilliseconds(1), segment);
         for (var i = 0; i < 20; i++) Assert.True((await instance.DecideAsync(Request(from, path: "/health"))).Allowed);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(150 * (SharedRateLimit.Segments + 1)));
+        await Task.Delay(segment * (SharedRateLimit.Segments + 1));
         Assert.True((await instance.DecideAsync(Request(from))).Allowed);
     }
 

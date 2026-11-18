@@ -82,6 +82,10 @@ public class JobTimeLimitTests
 {
     private static readonly TimeSpan Grace = TimeSpan.FromMilliseconds(200);
 
+    // The clock starts with the job, before the work runs: the limit must be longer than a busy machine
+    // takes to start the work (150 ms was not, and the limit fired before the work could pause it).
+    private static readonly TimeSpan Limit = TimeSpan.FromSeconds(1);
+
     private static Task<JobOutcome> Run(Func<CancellationToken, JobTimeLimit, Task<string?>> work, TimeSpan timeout) =>
         JobExecutor.RunAsync("job-1", work, new JobCancellationRegistry(), timeout, Grace, CancellationToken.None);
 
@@ -92,10 +96,10 @@ public class JobTimeLimitTests
         {
             using (limit.Suspend())
             {
-                await Task.Delay(600, ct);    // four times the limit, but the clock is stopped
+                await Task.Delay(Limit * 1.5, ct);    // longer than the limit, but the clock is stopped
             }
             return "done";
-        }, TimeSpan.FromMilliseconds(150));
+        }, Limit);
 
         Assert.Equal(new JobOutcome(JobState.Succeeded, "done", null), outcome);
     }
@@ -107,11 +111,11 @@ public class JobTimeLimitTests
         {
             using (limit.Suspend())
             {
-                await Task.Delay(300, ct);
+                await Task.Delay(Limit / 3, ct);
             }
             await Task.Delay(Timeout.Infinite, ct);   // back on the clock: must now time out
             return null;
-        }, TimeSpan.FromMilliseconds(150));
+        }, Limit);
 
         Assert.Equal(JobState.TimedOut, outcome.State);
     }
@@ -125,10 +129,10 @@ public class JobTimeLimitTests
             var inner = limit.Suspend();
             inner.Dispose();
             inner.Dispose();                  // disposing twice must not resume early
-            await Task.Delay(400, ct);        // still paused by the outer one
+            await Task.Delay(Limit * 1.5, ct);   // still paused by the outer one
             outer.Dispose();
             return "done";
-        }, TimeSpan.FromMilliseconds(150));
+        }, Limit);
 
         Assert.Equal(JobState.Succeeded, outcome.State);
     }
@@ -146,9 +150,9 @@ public class JobTimeLimitTests
                 await Task.Delay(Timeout.Infinite, ct);
             }
             return null;
-        }, registry, TimeSpan.FromMilliseconds(150), Grace, CancellationToken.None);
+        }, registry, Limit, Grace, CancellationToken.None);
         await paused.Task;
-        await Task.Delay(300);
+        await Task.Delay(Limit * 1.2);   // past the limit: only the pause keeps it from having fired
 
         registry.Cancel("job-1");
 
