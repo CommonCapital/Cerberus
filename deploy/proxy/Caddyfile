@@ -1,0 +1,39 @@
+# The one address in front of the copies of the Cerberus API (compose.cluster.yml).
+{
+	admin off
+	# Its own certificate authority is not installed into the container: nothing there uses it.
+	skip_install_trust
+	# Plain HTTP is served on 8080 on purpose; there is no port 80 to redirect from.
+	auto_https disable_redirects
+}
+
+(cerberus) {
+	reverse_proxy api:3000 api2:3000 {
+		# The same client goes to the same copy: a SignalR connection is set up in two requests.
+		lb_policy ip_hash
+		# A request that cannot reach its copy is tried on the other for a few seconds: a copy that
+		# stopped is not noticed by the health check below until its next round.
+		lb_try_duration 5s
+		# A copy that stops answering is left out until it answers again.
+		health_uri /health
+		health_interval 5s
+		fail_duration 10s
+		transport http {
+			# A copy that is gone does not refuse a connection, its address just stops answering: give up
+			# on it quickly, so the retry above reaches the other copy before the client gives up.
+			dial_timeout 1s
+		}
+	}
+}
+
+http://:8080 {
+	import cerberus
+}
+
+# TLS with a certificate the proxy issues itself. For a real host name, put the name here instead of
+# "https://localhost:8443", publish ports 80 and 443 to the proxy, and drop "tls internal": the proxy
+# then obtains a public certificate for it.
+https://localhost:8443 {
+	tls internal
+	import cerberus
+}

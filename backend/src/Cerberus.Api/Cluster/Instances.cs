@@ -73,10 +73,23 @@ public sealed class OrphanSweeper(
             var db = scope.ServiceProvider.GetRequiredService<CerberusDbContext>();
             await db.WorkerInstances.Where(i => i.Id == me.Id).ExecuteDeleteAsync();
         }
+        catch (ObjectDisposedException)
+        {
+            // The service's own parts are already taken down (the host is being disposed): there is
+            // nothing left to say goodbye with, and nothing wrong. The others notice by its silence.
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Leaving is a courtesy; an instance that could not say goodbye is noticed by its silence.
-            logger.LogWarning("Could not take this instance off the list ({Problem}).", ex.GetType().Name);
+            // This runs while the service stops, when a log destination may be gone too (the Windows
+            // event log throws once disposed): a failed warning must not turn a clean stop into an error.
+            try
+            {
+                logger.LogWarning("Could not take this instance off the list ({Problem}).", ex.GetType().Name);
+            }
+            catch (Exception logging) when (logging is ObjectDisposedException or AggregateException)
+            {
+            }
         }
     }
 

@@ -126,6 +126,8 @@ public static class ServiceConfig
             errors.Add($"{ServiceLimits.MaxRequestBytesVariable} must be a whole number of bytes, at least 1024.");
         }
 
+        if (TrustedProxies.Problem(Value(TrustedProxies.Variable)) is { } proxies) errors.Add(proxies);
+
         foreach (var origin in SplitOrigins(env(ServiceLimits.CorsOriginsVariable)))
         {
             if (!IsOrigin(origin))
@@ -157,8 +159,9 @@ public static class ServiceConfig
 /// per sign-in token, and a list of the origins a browser may call from.
 ///
 /// What the rate limits are not: a defence against a distributed flood (that is
-/// the job of what sits in front of the service), and — behind a reverse proxy
-/// — a per-client limit, because the address seen is then the proxy's. One
+/// the job of what sits in front of the service). Behind a reverse proxy the
+/// address seen is the proxy's, unless the proxy is named in
+/// <see cref="TrustedProxies"/> — then the address it reports is used. One
 /// person signed in twice has two tokens and so twice the per-user allowance.
 /// Counted in this process — or, where Redis is configured, in Redis over every
 /// instance of the service (<see cref="Cluster.SharedRateLimit"/>).
@@ -168,9 +171,10 @@ public static class ServiceHardening
     /// <summary>Paths that are never limited: a container's liveness probe must not be refused.</summary>
     private static bool IsExempt(HttpContext http) => http.Request.Path.StartsWithSegments("/health");
 
-    public static void AddServiceHardening(this IServiceCollection services, ServiceLimits limits)
+    public static void AddServiceHardening(this IServiceCollection services, ServiceLimits limits, TrustedProxies? proxies = null)
     {
         services.AddSingleton(limits);
+        services.AddSingleton(proxies ?? TrustedProxies.None);
         if (limits.CorsOrigins.Count > 0) services.AddCors();
 
         services.AddRateLimiter(options =>
@@ -251,10 +255,22 @@ public static class ServiceHardening
         });
     }
 
-    /// <summary>Cross-origin rules, the rate limits and the request-size cap, in that order.</summary>
+    /// <summary>The client's own address behind a trusted proxy, then cross-origin rules, the rate limits and the request-size cap.</summary>
     public static void UseServiceHardening(this WebApplication app)
     {
         var limits = app.Services.GetRequiredService<ServiceLimits>();
+
+        // First: everything after this that looks at the address (the rate limit, logs) sees the client's.
+        var proxies = app.Services.GetRequiredService<TrustedProxies>();
+        if (proxies.Any)
+        {
+            app.Use((context, next) =>
+            {
+                if (proxies.ClientBehind(context.Connection.RemoteIpAddress, context.Request.Headers["X-Forwarded-For"]) is { } client)
+                    context.Connection.RemoteIpAddress = client;
+                return next(context);
+            });
+        }
 
         if (limits.CorsOrigins.Count > 0)
         {
@@ -288,5 +304,62 @@ public static class ServiceHardening
             if (context.Response.StatusCode == StatusCodes.Status413PayloadTooLarge && !context.Response.HasStarted)
                 await context.Response.WriteAsJsonAsync(tooLarge);
         });
+    }
+}
+
+/// <summary>
+/// The reverse proxies whose word about a client's address is taken
+/// (<c>CERBERUS_TRUSTED_PROXIES</c>: addresses or networks, comma-separated).
+/// A request that arrives from one of them is counted under the address the
+/// proxy saw — the last entry of <c>X-Forwarded-For</c>, which is the one the
+/// proxy itself added. From anywhere else the header is ignored: anyone can
+/// write anything in it. One proxy deep; a chain of proxies is not unwound.
+/// </summary>
+public sealed class TrustedProxies
+{
+    public const string Variable = "CERBERUS_TRUSTED_PROXIES";
+
+    public static TrustedProxies None { get; } = new([]);
+
+    private readonly IReadOnlyList<System.Net.IPNetwork> _networks;
+
+    private TrustedProxies(IReadOnlyList<System.Net.IPNetwork> networks) => _networks = networks;
+
+    public bool Any => _networks.Count > 0;
+
+    /// <summary>Call after <see cref="ServiceConfig.Validate"/>: entries that cannot be read are left out here.</summary>
+    public static TrustedProxies FromEnvironment(Func<string, string?> env) =>
+        new(Entries(env(Variable)).Select(Parse).OfType<System.Net.IPNetwork>().ToList());
+
+    /// <summary>Null when the setting can be used; otherwise what is wrong with it, naming the setting only.</summary>
+    public static string? Problem(string? value) =>
+        Entries(value).Any(entry => Parse(entry) is null)
+            ? $"{Variable} must be a comma-separated list of addresses or networks such as 10.0.0.5 or 172.20.0.0/16 — and not every address (a /0)."
+            : null;
+
+    /// <summary>
+    /// The client's address when the request came through a trusted proxy that named one; null when it did not
+    /// (the address the connection has is then the one to use).
+    /// </summary>
+    public System.Net.IPAddress? ClientBehind(System.Net.IPAddress? remote, string? forwardedFor)
+    {
+        if (remote is null || string.IsNullOrWhiteSpace(forwardedFor)) return null;
+        if (remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
+        if (!_networks.Any(network => network.Contains(remote))) return null;
+
+        var last = forwardedFor.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        return System.Net.IPAddress.TryParse(last, out var client) ? client : null;
+    }
+
+    private static IEnumerable<string> Entries(string? value) =>
+        (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static System.Net.IPNetwork? Parse(string entry)
+    {
+        if (System.Net.IPNetwork.TryParse(entry, out var network)) return network.PrefixLength == 0 ? null : network;
+        // A single address, written without a prefix length.
+        return System.Net.IPAddress.TryParse(entry, out var address)
+            ? new System.Net.IPNetwork(address, address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128)
+            : null;
     }
 }
