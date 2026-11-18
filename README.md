@@ -157,6 +157,7 @@ docker compose -f docker-compose.yml -f compose.infra.yml up -d
 - `compose.infra.yml` — PostgreSQL, RabbitMQ and Redis for the .NET backend. Needs `POSTGRES_PASSWORD` and `RABBITMQ_PASSWORD` in `.env`: there are no default passwords.
 - `compose.models.yml` — Ollama, for local models. Several GB.
 - `compose.web.yml` — SearXNG, a search service of your own for the agents' research. Needs `SEARXNG_SECRET`.
+- `compose.cluster.yml`, on top of `compose.infra.yml` — two copies of the API behind one proxy, on the same address plus HTTPS on port 3443 (a certificate the proxy issues itself). A client keeps to one copy; when a copy stops, the proxy sends its requests to the other, and the work it was running is failed as interrupted, not run twice. For a real host name, see `deploy/proxy/Caddyfile`.
 
 ### Choosing a model
 

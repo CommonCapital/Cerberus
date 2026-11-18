@@ -1,0 +1,102 @@
+# Two copies of the API behind one address, on top of compose.infra.yml:
+#
+#   docker compose -f docker-compose.yml -f compose.infra.yml -f compose.cluster.yml up -d
+#
+# The copies share the database (PostgreSQL), the queue (RabbitMQ) and what must hold over both
+# (Redis), all from compose.infra.yml, and the key ring on the volume. In front of them a proxy
+# gives the one address, sends a client to the same copy each time (SignalR sets a connection up in
+# two requests), and leaves out a copy that stops answering:
+#
+#   http://localhost:${CERBERUS_PORT:-3000}          as with one copy
+#   https://localhost:${CERBERUS_TLS_PORT:-3443}     TLS, with a certificate the proxy issues itself;
+#                                                    a client has to be told to trust it
+#
+# The copies are not published themselves. They take a client's address from the proxy and from
+# nothing else (CERBERUS_TRUSTED_PROXIES is the proxy's fixed address), so the request-rate limit
+# still counts each client. The network gets a fixed range for that fixed address: if this compose
+# project is already up without this file, take it down first, or pick another range with
+# CERBERUS_CLUSTER_SUBNET, CERBERUS_CLUSTER_IP_RANGE and CERBERUS_PROXY_ADDRESS.
+#
+# For a real host name with a public certificate, see deploy/proxy/Caddyfile.
+
+services:
+  api:
+    ports: !reset []
+    environment:
+      CERBERUS_TRUSTED_PROXIES: ${CERBERUS_PROXY_ADDRESS:-172.31.250.2}
+
+  # The second copy: the image, settings and volume of the first. The four service settings repeat
+  # compose.infra.yml's, because a service can extend only one other; keep them the same.
+  api2:
+    extends:
+      file: docker-compose.yml
+      service: api
+    ports: !reset []
+    environment:
+      CERBERUS_POSTGRES_URL: postgres://${POSTGRES_USER:-cerberus}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to use compose.infra.yml}@postgres:5432/${POSTGRES_DB:-cerberus}
+      CERBERUS_RABBITMQ_URL: amqp://${RABBITMQ_USER:-cerberus}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env to use compose.infra.yml}@rabbitmq:5672/
+      CERBERUS_REDIS_URL: redis://redis:6379
+      CERBERUS_REQUIRE_SERVICES: "true"
+      CERBERUS_TRUSTED_PROXIES: ${CERBERUS_PROXY_ADDRESS:-172.31.250.2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      # Published on this machine only, where the single API was.
+      - "127.0.0.1:${CERBERUS_PORT:-3000}:8080"
+      - "127.0.0.1:${CERBERUS_TLS_PORT:-3443}:8443"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      # The proxy's own certificate authority and the certificates it issued.
+      - proxy-data:/data
+      - proxy-config:/config
+    networks:
+      default:
+        ipv4_address: ${CERBERUS_PROXY_ADDRESS:-172.31.250.2}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # The proxy's program is built to ask for this one capability (binding low ports). Without it in
+    # the container's set the program is refused at start, although it listens on 8080 and 8443 only.
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+
+  cli:
+    environment:
+      API_URL: http://proxy:8080
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${CERBERUS_CLUSTER_SUBNET:-172.31.250.0/24}
+          # The other containers get their addresses from the upper half, so the proxy's fixed one is never taken.
+          ip_range: ${CERBERUS_CLUSTER_IP_RANGE:-172.31.250.128/25}
+
+configs:
+  caddyfile:
+    # A file, not text written here: a container with a read-only file system takes a config from a file only.
+    file: ./deploy/proxy/Caddyfile
+
+volumes:
+  proxy-data:
+  proxy-config:

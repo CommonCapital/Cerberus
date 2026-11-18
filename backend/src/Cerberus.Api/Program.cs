@@ -83,7 +83,8 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
 
 // --- The service's own protection: request size, request rate, browser origins (§22 item 8) ---
 Cerberus.Api.Security.ServiceHardening.AddServiceHardening(
-    builder.Services, Cerberus.Api.Security.ServiceLimits.FromEnvironment(Environment.GetEnvironmentVariable));
+    builder.Services, Cerberus.Api.Security.ServiceLimits.FromEnvironment(Environment.GetEnvironmentVariable),
+    Cerberus.Api.Security.TrustedProxies.FromEnvironment(Environment.GetEnvironmentVariable));
 
 // --- Database: PostgreSQL when it was found above, else a local SQLite file ----------
 var dbPath = Environment.GetEnvironmentVariable("CERBERUS_DB")

@@ -32,9 +32,9 @@ services:
       # Model keys are optional; without them, cloud models report "no API key".
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Only reachable when the "models" profile is running.
+      # Only reachable with compose.models.yml.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434/v1}
-      # Internet access for agents is off unless switched on. With the "web" profile running,
+      # Internet access for agents is off unless switched on. With compose.web.yml,
       # also set CERBERUS_SEARXNG_URL so the researcher can search and not only fetch.
       CERBERUS_WEB: ${CERBERUS_WEB:-off}
       CERBERUS_SEARXNG_URL: ${CERBERUS_SEARXNG_URL:-}
