@@ -257,9 +257,11 @@ public sealed partial class ScanService(ScanOptions options)
         try
         {
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
-            Span<byte> head = stackalloc byte[4];
-            if (stream.ReadAtLeast(head, 4, throwOnEndOfStream: false) < 4) return null;
-            if (!BinaryHardening.LooksLikeBinary(head)) return null;
+            // Eight bytes: a universal Mach-O is told from a Java class file by its second four.
+            Span<byte> buffer = stackalloc byte[8];
+            var read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+            if (read < 4) return null;
+            if (!BinaryHardening.LooksLikeBinary(buffer[..read])) return null;
             if (stream.Length > BinaryHardening.MaxBinaryBytes) return null;
 
             bytes = new byte[stream.Length];

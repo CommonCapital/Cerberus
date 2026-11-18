@@ -11,20 +11,21 @@ public sealed record BinaryIssue(
     string Evidence,
     string Remediation);
 
-/// <param name="Format">"ELF" or "PE".</param>
+/// <param name="Format">"ELF", "PE" or "Mach-O".</param>
 /// <param name="Issues">Protections that are missing; empty for a hardened binary.</param>
 public sealed record BinaryReport(string Format, IReadOnlyList<BinaryIssue> Issues);
 
 /// <summary>
 /// Hardening checks for built artefacts found in a target:
-/// reads ELF and PE headers in-process and reports protections the build left
+/// reads ELF, PE and Mach-O headers in-process and reports protections the build left
 /// out — what build files only promise. Static and passive (tier T0): nothing
 /// is executed and no external tool is started.
 ///
 /// What it reads: for ELF — the file type (PIE), the GNU_STACK and GNU_RELRO
 /// program headers, the dynamic section's bind-now flags and the stack-protector
 /// symbol; for PE — the DllCharacteristics flags (ASLR, DEP, CFG, high-entropy
-/// ASLR) and whether relocations were stripped. Mach-O is not read yet.
+/// ASLR) and whether relocations were stripped; for Mach-O — see
+/// <see cref="MachOHardening"/>.
 ///
 /// What it cannot say: a flag in a header is the build's statement, not a
 /// measurement of the running process; and a binary with no stack-protector
@@ -40,11 +41,15 @@ public static class BinaryHardening
     /// <summary>Larger files are not read; they are counted as skipped.</summary>
     public const int MaxBinaryBytes = 128 * 1024 * 1024;
 
-    /// <summary>True when the first bytes are an ELF or DOS/PE signature.</summary>
+    /// <summary>
+    /// True when the first bytes are an ELF, DOS/PE or Mach-O signature. A universal Mach-O needs its
+    /// first eight bytes to be told from a Java class file; with fewer it is not recognised.
+    /// </summary>
     public static bool LooksLikeBinary(ReadOnlySpan<byte> head) =>
         head.Length >= 4 &&
         ((head[0] == 0x7F && head[1] == (byte)'E' && head[2] == (byte)'L' && head[3] == (byte)'F') ||
-         (head[0] == (byte)'M' && head[1] == (byte)'Z'));
+         (head[0] == (byte)'M' && head[1] == (byte)'Z') ||
+         MachOHardening.IsThin(head) || MachOHardening.IsFat(head));
 
     /// <summary>
     /// Inspect a file's bytes. Returns null when it is not an executable or
@@ -56,7 +61,9 @@ public static class BinaryHardening
         if (!LooksLikeBinary(data)) return null;
         try
         {
-            return data[0] == 0x7F ? InspectElf(data) : InspectPe(data);
+            if (data[0] == 0x7F) return InspectElf(data);
+            if (data[0] == (byte)'M') return InspectPe(data);
+            return MachOHardening.Inspect(data);
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or IndexOutOfRangeException or OverflowException)
         {
