@@ -79,7 +79,7 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
         exclusionsHonoured = honour;
         foreach (var finding in result.Findings.Where(f => !f.Suppressed)) await reporter.FindingAsync(finding);
         await reporter.ProgressAsync(result.FilesScanned, result.FilesScanned,
-            $"{result.FilesScanned} files scanned, {result.ActiveCount} findings.");
+            $"{result.FilesScanned} files scanned, {result.ActiveCount} findings." + UncheckedNote(result));
         await reporter.StepAsync("static", "Static analysis", StepStatus.Completed);
 
         ScaResult scaResult;
@@ -118,14 +118,23 @@ public sealed class ScanRunner(ScanService scanner, ScaService sca, CerberusDbCo
             FindingCount = activeCount,   // suppressed findings are stored but not counted
             ScaCompleted = scaResult.Completed,
             Findings = JsonSerializer.Serialize(findings, JsonOptions),
+            Unchecked = JsonSerializer.Serialize(result.UncheckedLines, JsonOptions),
         };
         db.Scans.Add(scan);
         await db.SaveChangesAsync(ct);
         await audit.AppendAsync(userId, "scan.run", AuditOutcome.Ok,
-            $"Scan {scan.Id}: {result.FilesScanned} files, {activeCount} findings ({result.SuppressedCount} suppressed, {result.FilesIgnored} files ignored{(result.Truncated ? ", truncated" : "")}{(exclusionsHonoured ? "" : "; the target's own exclusions were disregarded")}), dependency check {(scaResult.Completed ? "completed" : "not completed")}.",
+            $"Scan {scan.Id}: {result.FilesScanned} files, {activeCount} findings ({result.SuppressedCount} suppressed, {result.FilesIgnored} files ignored{(result.Truncated ? ", truncated" : "")}{(exclusionsHonoured ? "" : "; the target's own exclusions were disregarded")}), dependency check {(scaResult.Completed ? "completed" : "not completed")}.{UncheckedNote(result)}",
             engagementId, targetPath, CapabilityTier.T0, CancellationToken.None);
 
         await reporter.StepAsync("store", "Store results", StepStatus.Completed);
         return new ScanRun(scan, result, scaResult, findings);
     }
+
+    /// <summary>" N lines were not fully checked …" when a rule ran out of time somewhere; otherwise nothing.</summary>
+    public static string UncheckedNote(ScanResult result) => result.UncheckedLines.Count switch
+    {
+        0 => "",
+        1 => " 1 line was not fully checked: a rule ran out of time on it, also on a second try.",
+        var n => $" {n} lines were not fully checked: a rule ran out of time on them, also on a second try.",
+    };
 }

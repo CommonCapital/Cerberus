@@ -473,6 +473,8 @@ public static class Endpoints
             findingCount = scan.FindingCount,
             suppressedCount = result.SuppressedCount,
             truncated = result.Truncated,
+            // Lines a rule could not finish checking in time, also on a second try: a finding may be missing there.
+            uncheckedLines = result.UncheckedLines,
             findings,
         }, JsonOptions);
     }
@@ -517,6 +519,7 @@ public static class Endpoints
             scan.FindingCount,
             scan.ScaCompleted,
             scan.CreatedAt,
+            uncheckedLines = ParseStoredMessages(scan.Unchecked),
             // Evidence is masked when a scan is stored; scans stored before that are masked on the way out.
             findings,
             // Advisory LLM opinions, keyed to findings by findingId. They never alter findings or compliance.
