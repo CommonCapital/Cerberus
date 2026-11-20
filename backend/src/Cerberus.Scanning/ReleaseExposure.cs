@@ -58,19 +58,20 @@ public static class ReleaseExposure
         extension.Equals(".css", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Everything this class checks in a minified bundle or a source map.</summary>
-    public static IReadOnlyList<ReleaseIssue> InspectBuiltText(string fileName, string text)
+    /// <param name="timedOut">Where to note the lines a rule could not finish searching, even on a second try.</param>
+    public static IReadOnlyList<ReleaseIssue> InspectBuiltText(string fileName, string text, ICollection<(int Line, string RuleId)>? timedOut = null)
     {
         var issues = new List<ReleaseIssue>();
         if (fileName.EndsWith(".map", StringComparison.OrdinalIgnoreCase))
         {
             // A source map's own findings include the credentials in its sources, read decoded;
             // something else called .map is searched as it is.
-            var map = SourceMap(text, inline: false);
-            issues.AddRange(map.Count > 0 ? map : Credentials(text));
+            var map = SourceMap(text, inline: false, timedOut);
+            issues.AddRange(map.Count > 0 ? map : Credentials(text, timedOut: timedOut));
             return issues;
         }
-        if (InlineSourceMap(text) is { } inline) issues.AddRange(inline);
-        issues.AddRange(Credentials(text));
+        if (InlineSourceMap(text, timedOut) is { } inline) issues.AddRange(inline);
+        issues.AddRange(Credentials(text, timedOut: timedOut));
         return issues;
     }
 
@@ -80,7 +81,7 @@ public static class ReleaseExposure
     /// Findings for a source map's JSON, including credentials in the sources it
     /// carries; empty when the text is not a source map.
     /// </summary>
-    public static IReadOnlyList<ReleaseIssue> SourceMap(string json, bool inline)
+    public static IReadOnlyList<ReleaseIssue> SourceMap(string json, bool inline, ICollection<(int Line, string RuleId)>? timedOut = null)
     {
         JsonDocument doc;
         try { doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 }); }
@@ -132,7 +133,7 @@ public static class ReleaseExposure
             if (BuildPaths(Encoding.UTF8.GetBytes(paths.ToString()), "high") is { } buildPath) issues.Add(buildPath);
 
             // The sources are searched decoded: in the JSON a token may follow an escape (\n, \u0027) and be missed.
-            issues.AddRange(Credentials(contents.ToString(), within: "in the embedded sources"));
+            issues.AddRange(Credentials(contents.ToString(), within: "in the embedded sources", timedOut: timedOut));
             return issues;
         }
     }
@@ -167,7 +168,7 @@ public static class ReleaseExposure
     /// Findings for a source map embedded as a <c>data:</c> URL in a script or
     /// stylesheet; null when there is none (or it is not base64 JSON).
     /// </summary>
-    public static IReadOnlyList<ReleaseIssue>? InlineSourceMap(string text)
+    public static IReadOnlyList<ReleaseIssue>? InlineSourceMap(string text, ICollection<(int Line, string RuleId)>? timedOut = null)
     {
         var at = text.LastIndexOf(InlineMarker, StringComparison.Ordinal);
         if (at < 0) return null;
@@ -180,7 +181,7 @@ public static class ReleaseExposure
         try
         {
             var json = Encoding.UTF8.GetString(Convert.FromBase64String(text.Substring(comma + 1, end - comma - 1)));
-            var issues = SourceMap(json, inline: true);
+            var issues = SourceMap(json, inline: true, timedOut);
             return issues.Count > 0 ? issues : null;
         }
         catch (FormatException) { return null; }
@@ -305,7 +306,8 @@ public static class ReleaseExposure
     /// its line numbers mean nothing, so there is one issue per kind of credential,
     /// on line 1, described as being <paramref name="within"/> that place.
     /// </param>
-    public static IReadOnlyList<ReleaseIssue> Credentials(string text, string? within = null)
+    /// <param name="timedOut">Where to note the lines a rule could not finish searching, even on a second try.</param>
+    public static IReadOnlyList<ReleaseIssue> Credentials(string text, string? within = null, ICollection<(int Line, string RuleId)>? timedOut = null)
     {
         var seen = new HashSet<(string Rule, int At)>();
         var found = new Dictionary<(string Rule, int Line), (Rule Rule, int Count, string Evidence)>();
@@ -323,15 +325,14 @@ public static class ReleaseExposure
                 var window = text.Substring(w, length);
                 foreach (var rule in TokenRules)
                 {
-                    MatchCollection matches;
-                    try
+                    if (PatientMatch.Matches(rule.Pattern, window) is not { } matches)
                     {
-                        matches = rule.Pattern.Matches(window);
-                        _ = matches.Count;   // the search runs here, inside the try
+                        var at = (within is null ? line : 1, rule.Id);
+                        if (timedOut is not null && !timedOut.Contains(at)) timedOut.Add(at);
+                        continue;
                     }
-                    catch (RegexMatchTimeoutException) { continue; }
 
-                    foreach (Match m in matches)
+                    foreach (var m in matches)
                     {
                         if (!seen.Add((rule.Id, w + m.Index))) continue;   // the same token, seen in the overlap
                         var key = (rule.Id, within is null ? line : 1);

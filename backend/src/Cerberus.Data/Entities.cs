@@ -55,6 +55,12 @@ public class Scan : IUserOwned
     public bool ScaCompleted { get; set; }
     public string Findings { get; set; } = "[]";
 
+    /// <summary>
+    /// Lines a rule could not finish checking in time, even on a second try (list of UncheckedLine), as JSON.
+    /// A finding may be missing there.
+    /// </summary>
+    public string Unchecked { get; set; } = "[]";
+
     /// <summary>LLM triage opinions on findings (list of TriageResult), as JSON. Advisory only.</summary>
     public string Triage { get; set; } = "[]";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

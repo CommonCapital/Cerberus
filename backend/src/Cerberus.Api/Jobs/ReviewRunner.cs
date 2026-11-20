@@ -298,6 +298,12 @@ public static class ReviewReport
         text.AppendLine("## Summary");
         text.AppendLine();
         text.AppendLine($"- **Files scanned:** {scan.Static.FilesScanned} ({scan.Static.FilesSkipped} skipped as binary or generated, {scan.Static.FilesIgnored} excluded by the target's ignore file)");
+        if (scan.Static.UncheckedLines.Count > 0)
+        {
+            var shown = scan.Static.UncheckedLines.Take(5).Select(u => $"{u.File}:{u.Line} ({u.RuleId})");
+            text.AppendLine($"- **Not fully checked:** {scan.Static.UncheckedLines.Count} line(s) — a rule ran out of time on them, also on a second try, so a finding may be missing there: " +
+                            string.Join(", ", shown) + (scan.Static.UncheckedLines.Count > 5 ? ", …" : ""));
+        }
         text.AppendLine($"- **Findings:** {active.Count} ({production.Count} in production code, {active.Count - production.Count} in tests or documentation)" +
                         (scan.Static.SuppressedCount > 0 ? $"; {scan.Static.SuppressedCount} more were suppressed by markers in the target" : ""));
         text.AppendLine($"- **By severity:** {BySeverity(active)}");

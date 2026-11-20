@@ -19,10 +19,17 @@ public sealed record ScanResult(
     int SuppressedCount = 0,
     bool Truncated = false,
     int BinariesInspected = 0,
-    int ReleaseFilesInspected = 0)
+    int ReleaseFilesInspected = 0,
+    IReadOnlyList<UncheckedLine>? Unchecked = null)
 {
     /// <summary>Findings that count: everything the target did not suppress.</summary>
     public int ActiveCount => Findings.Count - SuppressedCount;
+
+    /// <summary>
+    /// Lines a rule could not finish checking in time, even on a second try with a longer limit
+    /// (<see cref="PatientMatch"/>). A finding may be missing there: the scan says so instead of passing over them.
+    /// </summary>
+    public IReadOnlyList<UncheckedLine> UncheckedLines => Unchecked ?? [];
 }
 
 /// <summary>
@@ -88,6 +95,7 @@ public sealed partial class ScanService(ScanOptions options)
         int filesScanned = 0, filesSkipped = 0, filesIgnored = 0, suppressed = 0, binariesInspected = 0, releaseInspected = 0;
         var truncated = false;
         var debugBundles = new HashSet<string>(StringComparer.Ordinal);
+        var notChecked = new List<UncheckedLine>();
 
         // A finding about what a built file exposes (ReleaseExposure); false once the cap is reached.
         bool AddRelease(ReleaseIssue issue, string relFile)
@@ -171,10 +179,12 @@ public sealed partial class ScanService(ScanOptions options)
                 if (ReadBuiltText(file) is { } builtText)
                 {
                     releaseInspected++;
-                    foreach (var issue in ReleaseExposure.InspectBuiltText(fileName, builtText))
+                    var timedOut = new List<(int Line, string RuleId)>();
+                    foreach (var issue in ReleaseExposure.InspectBuiltText(fileName, builtText, timedOut))
                     {
                         if (!AddRelease(issue, relFile)) break;
                     }
+                    notChecked.AddRange(timedOut.Select(t => new UncheckedLine(relFile, t.Line, t.RuleId)));
                 }
                 continue;
             }
@@ -200,7 +210,7 @@ public sealed partial class ScanService(ScanOptions options)
             filesScanned++;
             var context = ContextOf(relFile);
             var extension = Path.GetExtension(file);
-            var rules = Rules.All.Where(r => r.AppliesTo(extension)).ToList();
+            var rules = (options.Rules ?? Rules.All).Where(r => r.AppliesTo(extension)).ToList();
 
             for (var i = 0; i < lines.Length && findings.Count < MaxFindings; i++)
             {
@@ -209,10 +219,13 @@ public sealed partial class ScanService(ScanOptions options)
 
                 foreach (var rule in rules)
                 {
-                    bool match;
-                    try { match = rule.Pattern.IsMatch(line); }
-                    catch (RegexMatchTimeoutException) { continue; }
-                    if (!match) continue;
+                    var match = PatientMatch.IsMatch(rule.Pattern, line);
+                    if (match is null)
+                    {
+                        notChecked.Add(new UncheckedLine(relFile, i + 1, rule.Id));
+                        continue;
+                    }
+                    if (!match.Value) continue;
 
                     var isSuppressed = honourExclusions && (IsSuppressed(rule.Id, line) || (i > 0 && IsSuppressed(rule.Id, lines[i - 1], commentOnly: true)));
                     if (isSuppressed) suppressed++;
@@ -243,7 +256,8 @@ public sealed partial class ScanService(ScanOptions options)
         findings.Sort((a, b) => a.Suppressed != b.Suppressed
             ? a.Suppressed.CompareTo(b.Suppressed)
             : b.Severity.CompareTo(a.Severity));
-        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated, binariesInspected, releaseInspected);
+        return new ScanResult(filesScanned, findings, filesSkipped, filesIgnored, suppressed, truncated, binariesInspected, releaseInspected,
+            notChecked.Distinct().OrderBy(u => u.File, StringComparer.Ordinal).ThenBy(u => u.Line).ToList());
     }
 
     /// <summary>
@@ -542,4 +556,5 @@ internal sealed class IgnoreList
     }
 }
 
-public sealed record ScanOptions(string ScanRoot);
+/// <param name="Rules">The line rules applied; null for the built-in set (<see cref="Cerberus.Scanning.Rules.All"/>).</param>
+public sealed record ScanOptions(string ScanRoot, IReadOnlyList<Rule>? Rules = null);
