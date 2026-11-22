@@ -16,7 +16,7 @@
     "link:cli": "bun run build:cli && cd frontend/cli && bun link"
   },
   "dependencies": {
-    "dotenv": "^17.4.2"
+    "dotenv": "^18.0.10"
   },
   "private": true
 }
